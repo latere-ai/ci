@@ -83,6 +83,11 @@ on:
         required: false
         type: string
         default: ""
+      smoke_scope:
+        description: "Optional OAuth scope requested when minting the smoke token. Empty requests no scope."
+        required: false
+        type: string
+        default: ""
     secrets:
       DO_TOKEN:
         description: "DigitalOcean PAT for kubeconfig access to latere-k8s. Supplied by the org secret via 'secrets: inherit'."
@@ -301,11 +306,14 @@ jobs:
             echo "token=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          scope_arg=()
+          [ -n "${{ inputs.smoke_scope }}" ] && scope_arg=(--data-urlencode "scope=${{ inputs.smoke_scope }}")
           response=$(curl -sS -X POST https://auth.latere.ai/token \
             --data-urlencode "grant_type=client_credentials" \
             --data-urlencode "client_id=$CLIENT_ID" \
             --data-urlencode "client_secret=$CLIENT_SECRET" \
-            --data-urlencode "audience=${{ inputs.service }}")
+            --data-urlencode "audience=${{ inputs.service }}" \
+            "${scope_arg[@]}")
           token=$(echo "$response" | jq -r '.access_token // empty')
           if [ -z "$token" ]; then
             echo "client_credentials mint failed: $response" >&2
