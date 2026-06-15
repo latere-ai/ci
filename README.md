@@ -1,0 +1,89 @@
+# latere-ai/ci
+
+Central, reusable release pipeline for latere.ai projects. One source of truth,
+no per-repo forks. Consumer repos keep a thin caller workflow; all the logic
+lives here and is versioned with a moving `@v1` tag.
+
+A version tag (`v*`) push in a consumer repo triggers a release: build the
+artifact, deploy to the `latere-k8s` cluster, smoke the live surface to prove
+the exact build is serving, and only then publish the GitHub release with
+auto-generated notes plus a smoke-evidence block.
+
+## What's here
+
+- `.github/workflows/service-release.yml` — reusable (`workflow_call`) pipeline
+  for a k8s **service**: verify to build to deploy to smoke to release, all in
+  one tag-triggered run.
+- `.github/workflows/cli-release.yml` — reusable pipeline for a **CLI tool**
+  (goreleaser binaries, no k8s deploy).
+- `workflow-templates/` — starter callers so a new repo gets the boilerplate.
+
+## Design principle
+
+The reusable workflow owns **orchestration and ordering**. Each consumer repo
+owns **what to build, what to apply, and what "live" means** through standard
+directories and a standard script. Variability lives in the repo by convention,
+not in a sprawl of workflow inputs.
+
+## Consumer conventions (the contract)
+
+A service repo must provide:
+
+| Convention | Purpose |
+| --- | --- |
+| `deploy/prod/` | Rollable k8s manifests. The pipeline runs `kubectl apply -f deploy/prod/`. Everything here must be safe to re-apply. |
+| `deploy/bootstrap/` | Bootstrap-only / immutable / alternate manifests (storageclass, alternate layouts, separate-cadence dashboards). The pipeline **ignores** this directory. |
+| `tools/smoke/release.sh` | Post-deploy live smoke. Honors env `BASE_URL`, `EXPECTED_ASSET`, `OUTPUT_MD`, `SERVICE_TOKEN`. Exits non-zero if the live surface is wrong. Writes a markdown evidence block to `OUTPUT_MD`. |
+| `Dockerfile.ci` | Packages the prebuilt binary `out/<service>` into a runtime image. The build job compiles the binary (and embeds the SPA); this Dockerfile only copies it in. |
+| frontend at `frontend/` | (services with a UI) Built with `bun run build`, output `frontend/dist/`. The pipeline pins the served Vite asset hash to this build. |
+
+The deployment and its main container are both named `<service>` in the
+`<namespace>` namespace, so the pipeline can `kubectl set image` blindly.
+
+## The "actually live" check
+
+"Live" means *this exact build is serving*, not merely that something returns
+200. The smoke script pins the served Vite asset hash (`EXPECTED_ASSET`,
+threaded from the frontend build evidence) to the bundle CI just built. Release
+notes publish only after that smoke passes. That ordering is the spine of the
+pipeline.
+
+## Using it (service)
+
+```yaml
+# consumer-repo/.github/workflows/release.yml
+name: Release
+on:
+  push:
+    tags: ['v*']
+jobs:
+  release:
+    uses: latere-ai/ci/.github/workflows/service-release.yml@v1
+    with:
+      service: luxd
+      image: ghcr.io/latere-ai/luxd
+      namespace: latere
+      url: https://lux.latere.ai
+      title: Lux
+      has_frontend: true
+      spa_embed_dir: internal/web/spa/dist
+      main_package: ./cmd/luxd
+    secrets: inherit
+```
+
+`secrets: inherit` passes the org `DO_TOKEN`. Service-specific smoke credentials
+(e.g. Cella's) are declared optional on the reusable workflow and only consumed
+when present.
+
+## Versioning
+
+Consumers pin `@v1` (a moving major tag). A bad central push would break every
+release at once, so this repo runs `actionlint` on every change and is canaried
+on a single pilot consumer before the `v1` tag moves. Repos that need to freeze
+can pin a patch tag (e.g. `@v1.2.0`).
+
+## Local checks
+
+Reusable workflows, `secrets: inherit`, environments, and doctl only exercise on
+GitHub runners; you cannot run this pipeline locally. The local loop is
+`actionlint` (CI runs it here) to push to canary tag on a pilot repo.

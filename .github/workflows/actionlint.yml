@@ -1,0 +1,27 @@
+name: actionlint
+
+# Lints this repo's own workflows. The reusable pipelines here cannot be run
+# locally, so a static lint on every change is the first line of defense before
+# a canary tag exercises them on a real consumer.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run actionlint
+        # Pinned release; the action downloads the matching actionlint binary
+        # and lints every workflow under .github/workflows, including the
+        # reusable workflow_call definitions.
+        uses: raven-actions/actionlint@v2
+        with:
+          flags: "-color"
