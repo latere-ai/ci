@@ -87,11 +87,11 @@ on:
       DO_TOKEN:
         description: "DigitalOcean PAT for kubeconfig access to latere-k8s. Supplied by the org secret via 'secrets: inherit'."
         required: true
-      smoke_client_id:
-        description: "Optional client_credentials id for an authenticated smoke. When unset the smoke runs without a bearer token."
+      SMOKE_CLIENT_ID:
+        description: "Optional client_credentials id for an authenticated smoke. Repos that need it define a secret named SMOKE_CLIENT_ID; with 'secrets: inherit' it maps by name. When unset the smoke runs without a bearer token."
         required: false
-      smoke_client_secret:
-        description: "Optional client_credentials secret paired with smoke_client_id."
+      SMOKE_CLIENT_SECRET:
+        description: "Optional client_credentials secret paired with SMOKE_CLIENT_ID."
         required: false
 
 permissions:
@@ -227,7 +227,7 @@ jobs:
           tags: |
             type=raw,value=${{ github.ref_name }}
             type=sha,prefix=sha-,format=short
-            type=raw,value=latest
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
 
       - name: Build and push
         uses: docker/build-push-action@v7
@@ -293,8 +293,8 @@ jobs:
         # client_credentials JWT (audience = service) so the smoke can call
         # authenticated endpoints. Without them the smoke runs token-less.
         env:
-          CLIENT_ID: ${{ secrets.smoke_client_id }}
-          CLIENT_SECRET: ${{ secrets.smoke_client_secret }}
+          CLIENT_ID: ${{ secrets.SMOKE_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.SMOKE_CLIENT_SECRET }}
         run: |
           set -euo pipefail
           if [ -z "${CLIENT_ID:-}" ] || [ -z "${CLIENT_SECRET:-}" ]; then
