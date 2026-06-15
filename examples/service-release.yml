@@ -7,6 +7,14 @@ on:
   push:
     tags: ['v*']
 
+# Required: the pipeline pushes the image and creates the release. A reusable
+# workflow cannot exceed the caller's token permissions, and the org defaults
+# to read-only, so the calling job must grant write here.
+permissions:
+  contents: write
+  packages: write
+  actions: read
+
 jobs:
   release:
     uses: latere-ai/ci/.github/workflows/service-release.yml@v1

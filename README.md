@@ -56,6 +56,13 @@ name: Release
 on:
   push:
     tags: ['v*']
+# Required: the pipeline pushes the image and creates the release. A reusable
+# workflow cannot exceed the caller's token permissions, and the org defaults
+# to read-only, so the calling job must grant write here.
+permissions:
+  contents: write
+  packages: write
+  actions: read
 jobs:
   release:
     uses: latere-ai/ci/.github/workflows/service-release.yml@v1
@@ -71,9 +78,17 @@ jobs:
     secrets: inherit
 ```
 
+The `permissions` block is mandatory: a reusable workflow's token cannot exceed
+the calling job's, and this org defaults to read-only, so omitting it makes the
+run fail at startup (no logs) when the pipeline tries to push the image or
+create the release.
+
 `secrets: inherit` passes the org `DO_TOKEN`. Service-specific smoke credentials
-(e.g. Cella's) are declared optional on the reusable workflow and only consumed
-when present.
+are declared optional on the reusable workflow. A repo whose secret names differ
+(e.g. Cella's `CELLA_SMOKE_CLIENT_*`) passes them explicitly instead of
+`inherit`, mapping them onto `SMOKE_CLIENT_ID`/`SMOKE_CLIENT_SECRET` (and then
+also passing `DO_TOKEN: ${{ secrets.DO_TOKEN }}` by hand, since you cannot mix
+`inherit` with explicit secrets).
 
 ## Versioning
 
