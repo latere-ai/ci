@@ -1,0 +1,389 @@
+name: service-release
+
+# Reusable release pipeline for a latere.ai k8s service. A consumer repo calls
+# this on a version tag push:
+#
+#   on: { push: { tags: ['v*'] } }
+#   jobs:
+#     release:
+#       uses: latere-ai/ci/.github/workflows/service-release.yml@v1
+#       with: { service: luxd, image: ghcr.io/latere-ai/luxd, namespace: latere,
+#               url: https://lux.latere.ai, title: Lux }
+#       secrets: inherit
+#
+# Flow (one run): build-frontend -> build-binary -> build-image -> deploy ->
+# smoke -> release. The release publishes only after the live smoke proves the
+# exact build is serving. See this repo's README for the consumer conventions.
+
+on:
+  workflow_call:
+    inputs:
+      service:
+        description: "Deployment + container name, and binary name (e.g. luxd)."
+        required: true
+        type: string
+      image:
+        description: "Image path without tag (e.g. ghcr.io/latere-ai/luxd)."
+        required: true
+        type: string
+      namespace:
+        description: "Kubernetes namespace (e.g. latere or sandboxd)."
+        required: true
+        type: string
+      url:
+        description: "Public production URL; also the smoke BASE_URL."
+        required: true
+        type: string
+      title:
+        description: "Release title prefix (e.g. Lux -> 'Lux v1.2.3')."
+        required: true
+        type: string
+      go_version:
+        description: "Go toolchain version."
+        required: false
+        type: string
+        default: "1.26"
+      has_frontend:
+        description: "Build the bun frontend and pin the served Vite asset hash."
+        required: false
+        type: boolean
+        default: true
+      frontend_dir:
+        description: "Frontend directory."
+        required: false
+        type: string
+        default: "frontend"
+      main_package:
+        description: "Go package to build into the service binary."
+        required: false
+        type: string
+        default: "."
+      spa_embed_dir:
+        description: "Path the built frontend/dist is copied into before the Go build embeds it. Empty skips the embed."
+        required: false
+        type: string
+        default: ""
+      dockerfile:
+        description: "Dockerfile that packages out/<service> into the runtime image."
+        required: false
+        type: string
+        default: "Dockerfile.ci"
+      rollout_timeout:
+        description: "kubectl rollout status timeout."
+        required: false
+        type: string
+        default: "180s"
+      smoke_script:
+        description: "Post-deploy live smoke script honoring BASE_URL/EXPECTED_ASSET/OUTPUT_MD/SERVICE_TOKEN."
+        required: false
+        type: string
+        default: "tools/smoke/release.sh"
+      preflight:
+        description: "Optional shell command run after kubeconfig and before apply (e.g. a manifest preflight). Empty skips it."
+        required: false
+        type: string
+        default: ""
+    secrets:
+      DO_TOKEN:
+        description: "DigitalOcean PAT for kubeconfig access to latere-k8s. Supplied by the org secret via 'secrets: inherit'."
+        required: true
+      smoke_client_id:
+        description: "Optional client_credentials id for an authenticated smoke. When unset the smoke runs without a bearer token."
+        required: false
+      smoke_client_secret:
+        description: "Optional client_credentials secret paired with smoke_client_id."
+        required: false
+
+permissions:
+  contents: write
+  packages: write
+  actions: read
+
+jobs:
+  build-frontend:
+    if: ${{ inputs.has_frontend }}
+    runs-on: ubuntu-latest
+    outputs:
+      asset: ${{ steps.evidence.outputs.asset }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install
+        run: bun install --frozen-lockfile
+        working-directory: ${{ inputs.frontend_dir }}
+
+      - name: Typecheck + build
+        run: bun run build
+        working-directory: ${{ inputs.frontend_dir }}
+
+      - name: Capture frontend build evidence
+        id: evidence
+        # Pin the served bundle to the one CI just built: the hashed Vite entry
+        # asset becomes EXPECTED_ASSET for the live smoke, so a stale rollout
+        # that serves an old bundle fails the release.
+        run: |
+          set -euo pipefail
+          asset=$(grep -Eo "assets/index-[^\"'<> ]+\.js" "${{ inputs.frontend_dir }}/dist/index.html" | head -1)
+          if [ -z "$asset" ]; then
+            echo "could not find Vite index asset in ${{ inputs.frontend_dir }}/dist/index.html" >&2
+            exit 1
+          fi
+          echo "asset=$asset" >> "$GITHUB_OUTPUT"
+
+      - name: Upload frontend dist
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-dist
+          path: ${{ inputs.frontend_dir }}/dist/
+          if-no-files-found: error
+
+  build-binary:
+    # Runs whether or not there is a frontend; the embed step is a no-op when
+    # has_frontend is false or spa_embed_dir is empty. `needs` on an unselected
+    # job is satisfied (skipped is not failure), so this always starts.
+    needs: [build-frontend]
+    if: ${{ always() && !cancelled() && !contains(needs.*.result, 'failure') }}
+    runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ inputs.go_version }}
+          check-latest: true
+
+      - name: Download frontend dist
+        if: ${{ inputs.has_frontend && inputs.spa_embed_dir != '' }}
+        uses: actions/download-artifact@v7
+        with:
+          name: frontend-dist
+          path: .ci-frontend-dist
+
+      - name: Embed frontend
+        if: ${{ inputs.has_frontend && inputs.spa_embed_dir != '' }}
+        run: |
+          set -euo pipefail
+          rm -rf "${{ inputs.spa_embed_dir }}"
+          mkdir -p "${{ inputs.spa_embed_dir }}"
+          cp -R .ci-frontend-dist/. "${{ inputs.spa_embed_dir }}/"
+          test -f "${{ inputs.spa_embed_dir }}/index.html"
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build shippable binary
+        run: |
+          set -euo pipefail
+          go build -trimpath \
+            -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" \
+            -o "out/${{ inputs.service }}" "${{ inputs.main_package }}"
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: service-binary
+          path: out/${{ inputs.service }}
+          if-no-files-found: error
+
+  build-image:
+    needs: [build-binary]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download binary
+        uses: actions/download-artifact@v7
+        with:
+          name: service-binary
+          path: out
+
+      # upload-artifact drops the executable bit; restore it so the COPY into
+      # the runtime image yields a runnable entrypoint.
+      - name: Restore binary permissions
+        run: chmod +x "out/${{ inputs.service }}"
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute tags
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ inputs.image }}
+          # raw value=ref_name tags the image with the exact v-prefixed git tag
+          # so `kubectl set image ...:${GITHUB_REF_NAME}` resolves with no
+          # v-stripping ambiguity.
+          tags: |
+            type=raw,value=${{ github.ref_name }}
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ${{ inputs.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  deploy:
+    needs: [build-image]
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ inputs.url }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ inputs.go_version }}
+          check-latest: true
+          cache: false
+
+      - uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DO_TOKEN }}
+
+      # --expiry-seconds uses doctl's ephemeral /credentials endpoint instead of
+      # minting a persistent PAT per run.
+      - run: doctl kubernetes cluster kubeconfig save latere-k8s --expiry-seconds 3600
+
+      - name: Preflight
+        if: ${{ inputs.preflight != '' }}
+        run: ${{ inputs.preflight }}
+
+      - name: Apply manifests
+        # Convention: deploy/prod/ holds only re-appliable manifests. Bootstrap
+        # and immutable manifests live in deploy/bootstrap/ and are ignored here.
+        run: kubectl apply -f deploy/prod/
+
+      - name: Roll new image
+        run: |
+          kubectl -n "${{ inputs.namespace }}" set image \
+            "deployment/${{ inputs.service }}" \
+            "${{ inputs.service }}=${{ inputs.image }}:${GITHUB_REF_NAME}"
+          kubectl -n "${{ inputs.namespace }}" rollout status \
+            "deployment/${{ inputs.service }}" --timeout=${{ inputs.rollout_timeout }}
+
+  smoke:
+    needs: [deploy, build-frontend]
+    if: ${{ always() && needs.deploy.result == 'success' }}
+    runs-on: ubuntu-latest
+    outputs:
+      evidence: ${{ steps.run.outputs.evidence }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Mint smoke token
+        id: token
+        # When smoke_client_id/secret are supplied, mint a short-lived
+        # client_credentials JWT (audience = service) so the smoke can call
+        # authenticated endpoints. Without them the smoke runs token-less.
+        env:
+          CLIENT_ID: ${{ secrets.smoke_client_id }}
+          CLIENT_SECRET: ${{ secrets.smoke_client_secret }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CLIENT_ID:-}" ] || [ -z "${CLIENT_SECRET:-}" ]; then
+            echo "token=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          response=$(curl -sS -X POST https://auth.latere.ai/token \
+            --data-urlencode "grant_type=client_credentials" \
+            --data-urlencode "client_id=$CLIENT_ID" \
+            --data-urlencode "client_secret=$CLIENT_SECRET" \
+            --data-urlencode "audience=${{ inputs.service }}")
+          token=$(echo "$response" | jq -r '.access_token // empty')
+          if [ -z "$token" ]; then
+            echo "client_credentials mint failed: $response" >&2
+            exit 1
+          fi
+          echo "::add-mask::$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke production release
+        id: run
+        env:
+          BASE_URL: ${{ inputs.url }}
+          TAG: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
+          EXPECTED_ASSET: ${{ needs.build-frontend.outputs.asset }}
+          SERVICE_TOKEN: ${{ steps.token.outputs.token }}
+          DEPLOY_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-evidence
+          OUTPUT_MD=release-evidence/smoke.md "${{ inputs.smoke_script }}"
+          cat release-evidence/smoke.md >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo 'evidence<<CI_EOF'
+            cat release-evidence/smoke.md
+            echo CI_EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload release evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-evidence
+          path: release-evidence/
+          if-no-files-found: error
+
+  release:
+    needs: [smoke]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Publish release with evidence
+        # Generate the changelog (or reuse an existing release body), drop any
+        # prior evidence block, append the fresh smoke evidence, and create or
+        # edit the release. The release is the last step: prod is already green.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+          TITLE: ${{ inputs.title }}
+          EVIDENCE: ${{ needs.smoke.outputs.evidence }}
+        run: |
+          set -euo pipefail
+          marker='<!-- release-evidence -->'
+          printf '%s\n' "$EVIDENCE" > evidence.md
+          prerelease=""
+          [[ "$TAG" == *-* ]] && prerelease="--prerelease"
+
+          if gh release view "$TAG" --json body --jq .body > prefix.md 2>/dev/null; then
+            : # existing release body becomes the prefix
+          else
+            gh api "repos/${GH_REPO}/releases/generate-notes" \
+              -f tag_name="$TAG" -f target_commitish="$SHA" --jq .body > prefix.md || true
+          fi
+
+          # Drop any existing evidence block so a re-run replaces rather than
+          # stacks. Everything from the marker onward is regenerated.
+          awk -v m="$marker" 'index($0,m){exit} {print}' prefix.md > body.md
+          { printf '\n'; cat evidence.md; } >> body.md
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --notes-file body.md
+          else
+            # No --target: the tag already exists at $SHA, and passing
+            # target_commitish makes gh attempt a ref create GITHUB_TOKEN can't
+            # perform (cli/cli#9514).
+            gh release create "$TAG" $prerelease \
+              --title "${TITLE} ${TAG}" \
+              --notes-file body.md
+          fi
