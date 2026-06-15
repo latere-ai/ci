@@ -1,0 +1,90 @@
+name: cli-release
+
+# Reusable release pipeline for a latere.ai CLI tool (no k8s deploy). A consumer
+# repo calls this on a version tag push:
+#
+#   on: { push: { tags: ['v*'] } }
+#   jobs:
+#     release:
+#       uses: latere-ai/ci/.github/workflows/cli-release.yml@v1
+#       secrets: inherit
+#
+# Flow: lint -> test -> goreleaser. goreleaser builds the cross-platform
+# binaries and publishes the GitHub release with its own changelog, driven by
+# the consumer repo's .goreleaser.yaml.
+
+on:
+  workflow_call:
+    inputs:
+      go_version:
+        description: "Go toolchain version."
+        required: false
+        type: string
+        default: "1.26"
+      golangci_version:
+        description: "golangci-lint version."
+        required: false
+        type: string
+        default: "v2.11.4"
+      run_lint:
+        description: "Run golangci-lint before release."
+        required: false
+        type: boolean
+        default: true
+      run_tests:
+        description: "Run go vet + race tests before release."
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  lint:
+    if: ${{ inputs.run_lint }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ inputs.go_version }}
+          check-latest: true
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: ${{ inputs.golangci_version }}
+          args: --timeout=3m
+
+  test:
+    if: ${{ inputs.run_tests }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ inputs.go_version }}
+          check-latest: true
+      - run: go vet ./...
+      - run: go test -race -timeout 120s ./...
+
+  goreleaser:
+    # Gate the release on lint + test. Both are optional jobs; `needs` on a
+    # skipped job is satisfied, so disabling either still lets the release run.
+    needs: [lint, test]
+    if: ${{ always() && !cancelled() && !contains(needs.*.result, 'failure') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ inputs.go_version }}
+          check-latest: true
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
