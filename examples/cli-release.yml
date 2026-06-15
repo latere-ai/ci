@@ -1,0 +1,13 @@
+# Copy to a CLI repo as .github/workflows/release.yml. Requires a .goreleaser.yaml
+# in the repo. Pushing a vX.Y.Z tag lints, tests, and publishes the release with
+# cross-platform binaries.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    uses: latere-ai/ci/.github/workflows/cli-release.yml@v1
+    secrets: inherit
