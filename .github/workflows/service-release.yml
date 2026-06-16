@@ -276,6 +276,11 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # VERSION is consumed by dockerfile-mode images that stamp the binary
+          # (e.g. wallfacer's Dockerfile.wallfacerd). Ignored by Dockerfiles that
+          # don't declare ARG VERSION.
+          build-args: |
+            VERSION=${{ github.ref_name }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
