@@ -1,0 +1,27 @@
+# Copy to a service repo as .github/workflows/release.yml. For services that
+# build everything in a single Dockerfile (no split frontend/binary jobs, no
+# Dockerfile.ci). The smoke proves liveness only (no Vite asset-hash pin).
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+  packages: write
+  actions: read
+
+jobs:
+  release:
+    uses: latere-ai/ci/.github/workflows/service-release.yml@v1
+    with:
+      service: fs
+      image: ghcr.io/latere-ai/fs
+      namespace: latere
+      url: https://fs.latere.ai
+      title: FS
+      build_mode: dockerfile
+      dockerfile: Dockerfile
+      has_frontend: false
+    secrets: inherit

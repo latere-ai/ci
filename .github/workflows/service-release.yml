@@ -43,8 +43,13 @@ on:
         required: false
         type: string
         default: "1.26"
+      build_mode:
+        description: "split = build frontend + Go binary in CI, then Dockerfile.ci packages the prebuilt binary (asset-hash pinned smoke). dockerfile = one Dockerfile builds everything (no asset pin; smoke proves liveness only)."
+        required: false
+        type: string
+        default: "split"
       has_frontend:
-        description: "Build the bun frontend and pin the served Vite asset hash."
+        description: "split mode only: build the bun frontend and pin the served Vite asset hash. Ignored in dockerfile mode (the frontend builds inside the Dockerfile)."
         required: false
         type: boolean
         default: true
@@ -106,7 +111,8 @@ permissions:
 
 jobs:
   build-frontend:
-    if: ${{ inputs.has_frontend }}
+    # split mode only: dockerfile mode builds the frontend inside the image.
+    if: ${{ inputs.build_mode == 'split' && inputs.has_frontend }}
     runs-on: ubuntu-latest
     outputs:
       asset: ${{ steps.evidence.outputs.asset }}
@@ -147,11 +153,12 @@ jobs:
           if-no-files-found: error
 
   build-binary:
-    # Runs whether or not there is a frontend; the embed step is a no-op when
-    # has_frontend is false or spa_embed_dir is empty. `needs` on an unselected
-    # job is satisfied (skipped is not failure), so this always starts.
+    # split mode only. The embed step is a no-op when spa_embed_dir is empty.
+    # `needs` on a skipped job is satisfied (skipped is not failure); the
+    # failure guard still skips this job if build-frontend actually failed, so
+    # a broken split-mode frontend aborts the release.
     needs: [build-frontend]
-    if: ${{ always() && !cancelled() && !contains(needs.*.result, 'failure') }}
+    if: ${{ always() && !cancelled() && !contains(needs.*.result, 'failure') && inputs.build_mode == 'split' }}
     runs-on: ubuntu-latest
     env:
       CGO_ENABLED: "0"
@@ -197,12 +204,18 @@ jobs:
           if-no-files-found: error
 
   build-image:
+    # Runs in both modes. In split mode build-binary succeeds and gates this
+    # job (a build-binary failure trips the failure guard and skips here, which
+    # cascades to deploy/release). In dockerfile mode build-binary is skipped
+    # (not failure) and this job builds the whole image from the Dockerfile.
     needs: [build-binary]
+    if: ${{ always() && !cancelled() && !contains(needs.*.result, 'failure') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
 
       - name: Download binary
+        if: ${{ inputs.build_mode == 'split' }}
         uses: actions/download-artifact@v7
         with:
           name: service-binary
@@ -211,6 +224,7 @@ jobs:
       # upload-artifact drops the executable bit; restore it so the COPY into
       # the runtime image yields a runnable entrypoint.
       - name: Restore binary permissions
+        if: ${{ inputs.build_mode == 'split' }}
         run: chmod +x "out/${{ inputs.service }}"
 
       - uses: docker/setup-buildx-action@v4
@@ -242,6 +256,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   deploy:
     needs: [build-image]

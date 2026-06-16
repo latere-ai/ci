@@ -40,6 +40,24 @@ A service repo must provide:
 The deployment and its main container are both named `<service>` in the
 `<namespace>` namespace, so the pipeline can `kubectl set image` blindly.
 
+## Build modes
+
+`service-release.yml` supports two build shapes via the `build_mode` input:
+
+- **`split`** (default) — CI builds the frontend and the Go binary, then
+  `Dockerfile.ci` packages the prebuilt `out/<service>` binary into the runtime
+  image. The served Vite asset hash is pinned to the build (strong "actually
+  live" check). Used by lux, sandbox, lectio.
+- **`dockerfile`** — a single `Dockerfile` builds everything. The caller sets
+  `dockerfile: Dockerfile`. Less per-repo wiring, but the frontend builds inside
+  the image, so there is **no asset-hash pin**: the smoke proves the service
+  responds and serves an SPA, not that this exact bundle is live. Used by auth,
+  latere-ai, fs (fs has no frontend, so it loses nothing).
+
+For a frontend service, prefer `split` when you want the asset-pin guarantee;
+`dockerfile` is the deliberate, lower-fidelity option for repos that already
+build everything in one Dockerfile.
+
 ## The "actually live" check
 
 "Live" means *this exact build is serving*, not merely that something returns
