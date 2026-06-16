@@ -103,6 +103,16 @@ on:
         required: false
         type: string
         default: ""
+      build_cli:
+        description: "Also build CLI release binaries and attach them to the GitHub release (dual CLI+service repos, e.g. wallfacer)."
+        required: false
+        type: boolean
+        default: false
+      cli_build_cmd:
+        description: "Command run in the repo (Go + Bun available) that produces CLI binaries under dist/. Required when build_cli is true. Keeps repo-specific ldflags/embed/matrix in the repo, not the workflow."
+        required: false
+        type: string
+        default: ""
     secrets:
       DO_TOKEN:
         description: "DigitalOcean PAT for kubeconfig access to latere-k8s. Supplied by the org secret via 'secrets: inherit'."
@@ -380,11 +390,52 @@ jobs:
           path: release-evidence/
           if-no-files-found: error
 
-  release:
-    needs: [smoke]
+  cli:
+    # Dual CLI+service repos build cross-platform binaries to attach to the
+    # release. The repo-specific logic (ssg build, SPA embed, ldflags, sandbox
+    # tag, GOOS/GOARCH matrix) lives in cli_build_cmd, not here, so the workflow
+    # stays generic. Runs in parallel with the deploy path; gates the release.
+    if: ${{ inputs.build_cli }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ inputs.go_version }}
+          check-latest: true
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Build CLI binaries
+        run: ${{ inputs.cli_build_cmd }}
+
+      - name: Upload CLI binaries
+        uses: actions/upload-artifact@v7
+        with:
+          name: cli-binaries
+          path: dist/
+          if-no-files-found: error
+
+  release:
+    # cli is skipped (satisfied) when build_cli is false; when it runs and
+    # fails, this job skips so a broken CLI build does not publish the release.
+    needs: [smoke, cli]
+    if: ${{ always() && needs.smoke.result == 'success' && needs.cli.result != 'failure' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download CLI binaries
+        if: ${{ inputs.build_cli }}
+        uses: actions/download-artifact@v7
+        with:
+          name: cli-binaries
+          path: dist
 
       - name: Publish release with evidence
         # Generate the changelog (or reuse an existing release body), drop any
@@ -397,12 +448,22 @@ jobs:
           SHA: ${{ github.sha }}
           TITLE: ${{ inputs.title }}
           EVIDENCE: ${{ needs.smoke.outputs.evidence }}
+          BUILD_CLI: ${{ inputs.build_cli }}
         run: |
           set -euo pipefail
           marker='<!-- release-evidence -->'
           printf '%s\n' "$EVIDENCE" > evidence.md
           prerelease=""
           [[ "$TAG" == *-* ]] && prerelease="--prerelease"
+
+          # CLI binaries (build_cli) are attached to the release.
+          assets=()
+          if [ "$BUILD_CLI" = "true" ]; then
+            shopt -s nullglob
+            assets=(dist/*)
+            shopt -u nullglob
+            [ ${#assets[@]} -gt 0 ] || { echo "build_cli set but dist/ is empty" >&2; exit 1; }
+          fi
 
           if gh release view "$TAG" --json body --jq .body > prefix.md 2>/dev/null; then
             : # existing release body becomes the prefix
@@ -418,11 +479,12 @@ jobs:
 
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release edit "$TAG" --notes-file body.md
+            [ ${#assets[@]} -gt 0 ] && gh release upload "$TAG" "${assets[@]}" --clobber
           else
             # No --target: the tag already exists at $SHA, and passing
             # target_commitish makes gh attempt a ref create GITHUB_TOKEN can't
             # perform (cli/cli#9514).
             gh release create "$TAG" $prerelease \
               --title "${TITLE} ${TAG}" \
-              --notes-file body.md
+              --notes-file body.md "${assets[@]}"
           fi
