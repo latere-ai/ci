@@ -285,7 +285,11 @@ jobs:
           cache-to: type=gha,mode=max
 
   deploy:
+    # Explicit success gate: in dockerfile mode the upstream frontend/binary
+    # jobs are skipped, and a default `if` would transitively propagate that
+    # skip and skip deploy too. Gate only on build-image's own result.
     needs: [build-image]
+    if: ${{ always() && needs.build-image.result == 'success' }}
     runs-on: ubuntu-latest
     environment:
       name: production
