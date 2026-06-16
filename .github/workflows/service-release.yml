@@ -58,6 +58,16 @@ on:
         required: false
         type: string
         default: "frontend"
+      deployment:
+        description: "Kubernetes Deployment name. Defaults to `service` when empty."
+        required: false
+        type: string
+        default: ""
+      container:
+        description: "Container name within the Deployment to set the image on. Defaults to `service` when empty."
+        required: false
+        type: string
+        default: ""
       main_package:
         description: "Go package to build into the service binary."
         required: false
@@ -292,12 +302,17 @@ jobs:
         run: kubectl apply -f deploy/prod/
 
       - name: Roll new image
+        # Deployment and container names default to `service` but can differ
+        # (e.g. latere-ai: deployment latere-web, container latere).
+        env:
+          DEPLOYMENT: ${{ inputs.deployment != '' && inputs.deployment || inputs.service }}
+          CONTAINER: ${{ inputs.container != '' && inputs.container || inputs.service }}
         run: |
           kubectl -n "${{ inputs.namespace }}" set image \
-            "deployment/${{ inputs.service }}" \
-            "${{ inputs.service }}=${{ inputs.image }}:${GITHUB_REF_NAME}"
+            "deployment/${DEPLOYMENT}" \
+            "${CONTAINER}=${{ inputs.image }}:${GITHUB_REF_NAME}"
           kubectl -n "${{ inputs.namespace }}" rollout status \
-            "deployment/${{ inputs.service }}" --timeout=${{ inputs.rollout_timeout }}
+            "deployment/${DEPLOYMENT}" --timeout=${{ inputs.rollout_timeout }}
 
   smoke:
     needs: [deploy, build-frontend]
