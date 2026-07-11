@@ -27,5 +27,5 @@ jobs:
       has_frontend: true
       spa_embed_dir: internal/web/spa/dist
       main_package: ./cmd/luxd
-      # preflight: go run ./tools/deploy -manifest deploy/prod/deployment.yaml -namespace sandboxd
+      # preflight: go run ./tools/deploy -manifest deploy/base/deployment.yaml -namespace sandboxd
     secrets: inherit
