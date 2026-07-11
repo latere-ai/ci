@@ -318,7 +318,17 @@ jobs:
       - name: Apply manifests
         # Convention: deploy/prod/ holds only re-appliable manifests. Bootstrap
         # and immutable manifests live in deploy/bootstrap/ and are ignored here.
-        run: kubectl apply -f deploy/prod/
+        #
+        # If deploy/prod/ is a kustomize overlay (has a kustomization.yaml),
+        # apply it with -k so the base + patches render; otherwise apply the
+        # raw manifest files. Backward-compatible: services with no
+        # kustomization.yaml take the -f branch unchanged.
+        run: |
+          if [ -f deploy/prod/kustomization.yaml ]; then
+            kubectl apply -k deploy/prod/
+          else
+            kubectl apply -f deploy/prod/
+          fi
 
       - name: Roll new image
         # Deployment and container names default to `service` but can differ
