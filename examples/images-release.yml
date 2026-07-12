@@ -1,0 +1,24 @@
+# Copy to a container-images repo as .github/workflows/release.yml. Requires
+# catalog.yaml + catalog.sh + catalog_test.sh + test.sh (see the ci README's
+# image-repo conventions). Pushing a vX.Y.Z tag builds and pushes every
+# cataloged image in dependency order, publishes the digest-pinned
+# catalog.json to object storage, smokes the published images with test.sh,
+# and publishes the GitHub release with notes + smoke evidence.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+# Required: the pipeline pushes images and creates the release. The org
+# defaults to a read-only token, so the calling job must grant write.
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    uses: latere-ai/ci/.github/workflows/images-release.yml@v1
+    with:
+      title: Sandbox Images
+    secrets: inherit

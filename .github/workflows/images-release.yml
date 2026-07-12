@@ -1,0 +1,337 @@
+name: images-release
+
+# Reusable release pipeline for a latere.ai container-images repo (an
+# image catalog, not a k8s service: nothing deploys). A consumer repo
+# calls this on a version tag push:
+#
+#   on: { push: { tags: ['v*'] } }
+#   jobs:
+#     release:
+#       uses: latere-ai/ci/.github/workflows/images-release.yml@v1
+#       with: { title: Sandbox Images }
+#       secrets: inherit
+#
+# Flow (one run): verify -> build+push roots -> build+push dependents ->
+# publish-catalog (S3) -> smoke (test.sh against the published images) ->
+# release with evidence. The GitHub release publishes only after the
+# smoke proves the images that were actually pushed are runnable and
+# correct.
+#
+# Consumer conventions (see this repo's README):
+#   catalog.yaml     image inventory, the single source of truth
+#   catalog.sh       lint | matrix | compose, all driven by catalog.yaml
+#   catalog_test.sh  tests for the catalog tooling; runs in verify
+#   test.sh <tag>    runtime assertions against published images; honors
+#                    RUNTIME (container runtime binary). Exits non-zero
+#                    on any failed check.
+
+on:
+  workflow_call:
+    inputs:
+      title:
+        description: "Release title prefix (e.g. Sandbox Images -> 'Sandbox Images v1.2.3')."
+        required: true
+        type: string
+    secrets:
+      CATALOG_S3_ENDPOINT:
+        description: "S3-compatible endpoint URL the catalog publishes to (e.g. https://fra1.digitaloceanspaces.com)."
+        required: true
+      CATALOG_S3_REGION:
+        description: "Region string for SigV4 signing (DO Spaces accepts us-east-1)."
+        required: true
+      CATALOG_S3_BUCKET:
+        description: "Bucket receiving catalog.json."
+        required: true
+      CATALOG_S3_PREFIX:
+        description: "Key prefix under the bucket (no trailing slash)."
+        required: true
+      CATALOG_S3_ACCESS_KEY:
+        description: "Scoped access key: per-bucket grant only, it lives in a public repo's Actions."
+        required: true
+      CATALOG_S3_SECRET_KEY:
+        description: "Secret paired with CATALOG_S3_ACCESS_KEY."
+        required: true
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  # Lint the catalog, run the tooling tests, and derive the two-stage
+  # build matrices. A release builds everything: change detection is a
+  # branch-CI concern, not a release concern.
+  verify:
+    runs-on: ubuntu-latest
+    outputs:
+      registry: ${{ steps.compute.outputs.registry }}
+      roots: ${{ steps.compute.outputs.roots }}
+      deps: ${{ steps.compute.outputs.deps }}
+      any_dep: ${{ steps.compute.outputs.any_dep }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Lint catalog + tooling tests
+        run: |
+          ./catalog.sh lint
+          bash catalog_test.sh
+      - name: Compute build matrices
+        id: compute
+        run: |
+          set -euo pipefail
+          matrix=$(./catalog.sh matrix --all)
+          {
+            echo "registry=$(jq -r '.registry' <<<"$matrix")"
+            echo "roots=$(jq -c '.roots' <<<"$matrix")"
+            echo "deps=$(jq -c '.deps' <<<"$matrix")"
+            echo "any_dep=$(jq -r '.any_dep' <<<"$matrix")"
+          } >> "$GITHUB_OUTPUT"
+
+  build-roots:
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.verify.outputs.roots) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute tags
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ needs.verify.outputs.registry }}/${{ matrix.image.name }}
+          # raw ref_name matches the digest-pinned ref catalog.json records;
+          # latest is skipped on prereleases (v1.2.3-rc1).
+          tags: |
+            type=raw,value=${{ github.ref_name }}
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.image.context }}
+          platforms: ${{ matrix.image.platforms }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.image.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}
+
+      - name: Record digest
+        run: |
+          mkdir -p /tmp/digest
+          jq -n --arg name '${{ matrix.image.name }}' --arg digest '${{ steps.build.outputs.digest }}' \
+            '{name: $name, digest: $digest}' > "/tmp/digest/${{ matrix.image.name }}.json"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: digest-${{ matrix.image.name }}
+          path: /tmp/digest/*.json
+          if-no-files-found: error
+
+  build-deps:
+    needs: [verify, build-roots]
+    if: ${{ needs.verify.outputs.any_dep == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.verify.outputs.deps) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute tags
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ needs.verify.outputs.registry }}/${{ matrix.image.name }}
+          tags: |
+            type=raw,value=${{ github.ref_name }}
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.image.context }}
+          platforms: ${{ matrix.image.platforms }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # FROM the base image this same run just pushed, not :latest,
+          # so a release is internally consistent even when an older
+          # release ran since the last base change.
+          build-args: |
+            BASE_IMAGE=${{ needs.verify.outputs.registry }}/${{ matrix.image.from }}:${{ github.ref_name }}
+          cache-from: type=gha,scope=${{ matrix.image.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}
+
+      - name: Record digest
+        run: |
+          mkdir -p /tmp/digest
+          jq -n --arg name '${{ matrix.image.name }}' --arg digest '${{ steps.build.outputs.digest }}' \
+            '{name: $name, digest: $digest}' > "/tmp/digest/${{ matrix.image.name }}.json"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: digest-${{ matrix.image.name }}
+          path: /tmp/digest/*.json
+          if-no-files-found: error
+
+  # Compose catalog.json (digest-pinned refs) and publish it to object
+  # storage: the current key is overwritten, the history key is immutable.
+  publish-catalog:
+    needs: [verify, build-roots, build-deps]
+    if: ${{ always() && needs.build-roots.result == 'success' && (needs.build-deps.result == 'success' || needs.build-deps.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: digest-*
+          path: digests
+          merge-multiple: true
+      - name: Compose catalog.json
+        run: |
+          ./catalog.sh compose "${GITHUB_REF_NAME}" "$GITHUB_SHA" digests > catalog.json
+          jq . catalog.json
+      - name: Upload to object storage
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.CATALOG_S3_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CATALOG_S3_SECRET_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.CATALOG_S3_REGION }}
+          ENDPOINT: ${{ secrets.CATALOG_S3_ENDPOINT }}
+          BUCKET: ${{ secrets.CATALOG_S3_BUCKET }}
+          PREFIX: ${{ secrets.CATALOG_S3_PREFIX }}
+        run: |
+          set -euo pipefail
+          aws s3 cp catalog.json "s3://${BUCKET}/${PREFIX}/catalog.json" --endpoint-url "$ENDPOINT"
+          aws s3 cp catalog.json "s3://${BUCKET}/${PREFIX}/history/${GITHUB_REF_NAME}.json" --endpoint-url "$ENDPOINT"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: catalog-json
+          path: catalog.json
+          if-no-files-found: error
+
+  # Pull the images that were actually published and run the repo's
+  # runtime assertions against them. The evidence block carries the
+  # digest table plus the full check output.
+  smoke:
+    needs: publish-catalog
+    runs-on: ubuntu-latest
+    outputs:
+      evidence: ${{ steps.run.outputs.evidence }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v7
+        with:
+          name: catalog-json
+      - name: Smoke published images
+        id: run
+        env:
+          TAG: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
+          BUILD_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          RUNTIME=docker bash test.sh "$TAG" | tee raw.txt
+          mkdir -p release-evidence
+          {
+            echo '<!-- release-evidence -->'
+            echo
+            echo '## Release Evidence'
+            echo
+            echo "**Tag:** ${TAG} → commit \`${COMMIT}\`"
+            echo "**Build:** ${BUILD_URL}"
+            echo
+            echo '### Published images'
+            echo
+            echo '| Image | Ref | Digest |'
+            echo '|---|---|---|'
+            jq -r '.images[] | "| \(.name) | `\(.ref)` | `\(.digest)` |"' catalog.json
+            echo
+            echo '### Smoke (published images)'
+            echo
+            echo "<details><summary>test.sh ${TAG}: all checks passed</summary>"
+            echo
+            echo '```text'
+            sed -e 's/\x1b\[[0-9;]*m//g' raw.txt
+            echo '```'
+            echo
+            echo '</details>'
+          } > release-evidence/smoke.md
+          cat release-evidence/smoke.md >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo 'evidence<<CI_EOF'
+            cat release-evidence/smoke.md
+            echo CI_EOF
+          } >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-evidence
+          path: release-evidence/
+          if-no-files-found: error
+
+  release:
+    needs: smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v7
+        with:
+          name: catalog-json
+
+      - name: Publish release with evidence
+        # Generate the changelog (or reuse an existing release body), drop any
+        # prior evidence block, append the fresh smoke evidence, and create or
+        # edit the release with catalog.json attached. The release is the last
+        # step: the registry and the published catalog are already green.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+          TITLE: ${{ inputs.title }}
+          EVIDENCE: ${{ needs.smoke.outputs.evidence }}
+        run: |
+          set -euo pipefail
+          marker='<!-- release-evidence -->'
+          printf '%s\n' "$EVIDENCE" > evidence.md
+          prerelease=""
+          [[ "$TAG" == *-* ]] && prerelease="--prerelease"
+
+          if gh release view "$TAG" --json body --jq .body > prefix.md 2>/dev/null; then
+            : # existing release body becomes the prefix
+          else
+            gh api "repos/${GH_REPO}/releases/generate-notes" \
+              -f tag_name="$TAG" -f target_commitish="$SHA" --jq .body > prefix.md || true
+          fi
+
+          # Drop any existing evidence block so a re-run replaces rather than
+          # stacks. Everything from the marker onward is regenerated.
+          awk -v m="$marker" 'index($0,m){exit} {print}' prefix.md > body.md
+          { printf '\n'; cat evidence.md; } >> body.md
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --notes-file body.md
+            gh release upload "$TAG" catalog.json --clobber
+          else
+            gh release create "$TAG" $prerelease \
+              --title "${TITLE} ${TAG}" \
+              --notes-file body.md catalog.json
+          fi

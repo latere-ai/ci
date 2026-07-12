@@ -16,7 +16,11 @@ auto-generated notes plus a smoke-evidence block.
   one tag-triggered run.
 - `.github/workflows/cli-release.yml` — reusable pipeline for a **CLI tool**
   (goreleaser binaries, no k8s deploy).
-- `workflow-templates/` — starter callers so a new repo gets the boilerplate.
+- `.github/workflows/images-release.yml` — reusable pipeline for a
+  **container-images repo** (an image catalog, no deploy): verify to build+push
+  (dependency-ordered) to publish-catalog (S3) to smoke against the published
+  images to release with evidence.
+- `examples/` — starter callers so a new repo gets the boilerplate.
 
 ## Design principle
 
@@ -39,6 +43,19 @@ A service repo must provide:
 
 The deployment and its main container are both named `<service>` in the
 `<namespace>` namespace, so the pipeline can `kubectl set image` blindly.
+
+An images repo (consumer of `images-release.yml`) must provide:
+
+| Convention | Purpose |
+| --- | --- |
+| `catalog.yaml` | Image inventory, the single source of truth: name, context dir, platforms, `from` (in-repo base), labels, consumer resource hints. |
+| `catalog.sh` | `lint \| matrix \| compose` subcommands, all driven by `catalog.yaml`: schema lint, two-stage build matrices (roots, then images that FROM them), and the digest-pinned `catalog.json` consumers read from object storage. |
+| `catalog_test.sh` | Tests for the catalog tooling; the verify job runs them on every release. |
+| `test.sh <tag>` | Runtime assertions run against the **published** images at that tag (honors `RUNTIME` for the container runtime). Exits non-zero on any failed check; its output becomes the release-evidence smoke block. |
+
+The pipeline needs the `CATALOG_S3_*` secrets (endpoint, region, bucket,
+prefix, scoped access key + secret) to publish `catalog.json`; the key should
+carry a per-bucket grant only, since it lives in a public repo's Actions.
 
 ## Build modes
 
@@ -107,6 +124,31 @@ are declared optional on the reusable workflow. A repo whose secret names differ
 `inherit`, mapping them onto `SMOKE_CLIENT_ID`/`SMOKE_CLIENT_SECRET` (and then
 also passing `DO_TOKEN: ${{ secrets.DO_TOKEN }}` by hand, since you cannot mix
 `inherit` with explicit secrets).
+
+## Using it (images)
+
+```yaml
+# consumer-repo/.github/workflows/release.yml
+name: Release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+  packages: write
+jobs:
+  release:
+    uses: latere-ai/ci/.github/workflows/images-release.yml@v1
+    with:
+      title: Sandbox Images
+    secrets: inherit
+```
+
+The images analog of the "actually live" check: the smoke pulls the images
+that were **actually pushed** at the release tag and runs the repo's `test.sh`
+against them, and the digest table in the evidence comes from the same
+`catalog.json` that was published to object storage. The GitHub release exists
+only if all of that held.
 
 ## Versioning
 
