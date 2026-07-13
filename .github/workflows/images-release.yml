@@ -11,7 +11,7 @@ name: images-release
 #       with: { title: Sandbox Images }
 #       secrets: inherit
 #
-# Flow (one run): verify -> build+push roots -> build+push dependents ->
+# Flow (one run): verify -> build+push in FROM-depth stages (0..2) ->
 # publish-catalog (S3) -> smoke (test.sh against the published images) ->
 # release with evidence. The GitHub release publishes only after the
 # smoke proves the images that were actually pushed are runnable and
@@ -57,16 +57,19 @@ permissions:
   packages: write
 
 jobs:
-  # Lint the catalog, run the tooling tests, and derive the two-stage
-  # build matrices. A release builds everything: change detection is a
-  # branch-CI concern, not a release concern.
+  # Lint the catalog, run the tooling tests, and derive the per-stage
+  # build matrices (stage N = FROM-depth N; lint caps chains at depth 2).
+  # A release builds everything: change detection is a branch-CI concern,
+  # not a release concern.
   verify:
     runs-on: ubuntu-latest
     outputs:
       registry: ${{ steps.compute.outputs.registry }}
-      roots: ${{ steps.compute.outputs.roots }}
-      deps: ${{ steps.compute.outputs.deps }}
-      any_dep: ${{ steps.compute.outputs.any_dep }}
+      stage0: ${{ steps.compute.outputs.stage0 }}
+      stage1: ${{ steps.compute.outputs.stage1 }}
+      stage2: ${{ steps.compute.outputs.stage2 }}
+      any1: ${{ steps.compute.outputs.any1 }}
+      any2: ${{ steps.compute.outputs.any2 }}
     steps:
       - uses: actions/checkout@v6
       - name: Lint catalog + tooling tests
@@ -80,16 +83,17 @@ jobs:
           matrix=$(./catalog.sh matrix --all)
           {
             echo "registry=$(jq -r '.registry' <<<"$matrix")"
-            echo "roots=$(jq -c '.roots' <<<"$matrix")"
-            echo "deps=$(jq -c '.deps' <<<"$matrix")"
-            echo "any_dep=$(jq -r '.any_dep' <<<"$matrix")"
+            for s in 0 1 2; do
+              echo "stage${s}=$(jq -c ".stages[$s]" <<<"$matrix")"
+              echo "any${s}=$(jq -r ".any_stage[$s]" <<<"$matrix")"
+            done
           } >> "$GITHUB_OUTPUT"
 
-  build-roots:
+  build-stage0:
     needs: verify
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.verify.outputs.roots) }}
+      matrix: ${{ fromJSON(needs.verify.outputs.stage0) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -137,12 +141,16 @@ jobs:
           path: /tmp/digest/*.json
           if-no-files-found: error
 
-  build-deps:
-    needs: [verify, build-roots]
-    if: ${{ needs.verify.outputs.any_dep == 'true' }}
+  # Stages 1 and 2 build images that FROM an image the previous stage
+  # just pushed at the release ref, not :latest, so a release is
+  # internally consistent even when an older release ran since the last
+  # parent change.
+  build-stage1:
+    needs: [verify, build-stage0]
+    if: ${{ needs.verify.outputs.any1 == 'true' }}
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.verify.outputs.deps) }}
+      matrix: ${{ fromJSON(needs.verify.outputs.stage1) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -174,9 +182,59 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # FROM the base image this same run just pushed, not :latest,
-          # so a release is internally consistent even when an older
-          # release ran since the last base change.
+          build-args: |
+            BASE_IMAGE=${{ needs.verify.outputs.registry }}/${{ matrix.image.from }}:${{ github.ref_name }}
+          cache-from: type=gha,scope=${{ matrix.image.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}
+
+      - name: Record digest
+        run: |
+          mkdir -p /tmp/digest
+          jq -n --arg name '${{ matrix.image.name }}' --arg digest '${{ steps.build.outputs.digest }}' \
+            '{name: $name, digest: $digest}' > "/tmp/digest/${{ matrix.image.name }}.json"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: digest-${{ matrix.image.name }}
+          path: /tmp/digest/*.json
+          if-no-files-found: error
+
+  build-stage2:
+    needs: [verify, build-stage1]
+    if: ${{ always() && needs.verify.outputs.any2 == 'true' && needs.build-stage1.result == 'success' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.verify.outputs.stage2) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute tags
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ needs.verify.outputs.registry }}/${{ matrix.image.name }}
+          tags: |
+            type=raw,value=${{ github.ref_name }}
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.image.context }}
+          platforms: ${{ matrix.image.platforms }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             BASE_IMAGE=${{ needs.verify.outputs.registry }}/${{ matrix.image.from }}:${{ github.ref_name }}
           cache-from: type=gha,scope=${{ matrix.image.name }}
@@ -196,8 +254,12 @@ jobs:
   # Compose catalog.json (digest-pinned refs) and publish it to object
   # storage: the current key is overwritten, the history key is immutable.
   publish-catalog:
-    needs: [verify, build-roots, build-deps]
-    if: ${{ always() && needs.build-roots.result == 'success' && (needs.build-deps.result == 'success' || needs.build-deps.result == 'skipped') }}
+    needs: [verify, build-stage0, build-stage1, build-stage2]
+    if: >-
+      ${{ always()
+      && needs.build-stage0.result == 'success'
+      && (needs.build-stage1.result == 'success' || needs.build-stage1.result == 'skipped')
+      && (needs.build-stage2.result == 'success' || needs.build-stage2.result == 'skipped') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6

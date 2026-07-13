@@ -49,7 +49,7 @@ An images repo (consumer of `images-release.yml`) must provide:
 | Convention | Purpose |
 | --- | --- |
 | `catalog.yaml` | Image inventory, the single source of truth: name, context dir, platforms, `from` (in-repo base), labels, consumer resource hints. |
-| `catalog.sh` | `lint \| matrix \| compose` subcommands, all driven by `catalog.yaml`: schema lint, two-stage build matrices (roots, then images that FROM them), and the digest-pinned `catalog.json` consumers read from object storage. |
+| `catalog.sh` | `lint \| matrix \| compose` subcommands, all driven by `catalog.yaml`: schema lint, per-stage build matrices (stage N = FROM-depth N, up to three stages; lint caps chains at depth 2), and the digest-pinned `catalog.json` consumers read from object storage. |
 | `catalog_test.sh` | Tests for the catalog tooling; the verify job runs them on every release. |
 | `test.sh <tag>` | Runtime assertions run against the **published** images at that tag (honors `RUNTIME` for the container runtime). Exits non-zero on any failed check; its output becomes the release-evidence smoke block. |
 
