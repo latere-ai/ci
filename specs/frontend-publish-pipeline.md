@@ -19,6 +19,14 @@ dispatched_task_id: null
 
 # Reusable Frontend Publish Pipeline
 
+> **Status: planned, unbuilt.** This is a frontend CDN publish pipeline (build,
+> sync to a Spaces bucket, invalidate HTML). It is distinct from the shipped
+> `images-release.yml` (dependency-ordered container-image builds). Both of its
+> upstream deps ([[frontend-cdn-pilot]], [[frontend-cdn-decoupling]]) are still
+> `planned`, so no frontend is CDN-served yet: every service still go:embeds its
+> SPA. For the pipelines that ship today (`service-release.yml`,
+> `cli-release.yml`, `images-release.yml`), `ci/README.md` is authoritative.
+
 ## Overview
 
 Third child of [[frontend-cdn-decoupling]]. Once [[frontend-cdn-pilot]] proves
@@ -32,11 +40,14 @@ there is one working concrete instance to abstract from.
 
 ## Current State
 
-- `ci/` holds reusable CI building blocks (`ci/examples`, `ci/README.md`); the
-  release pipeline ([[release-unification]]) is the existing precedent for a
-  central reusable workflow consumed by services.
-- Each service currently builds its frontend inside its own `docker.yml`
-  (frontend build stage → `go:embed` → image). The pilot replaces that with a
+- `ci/` ships three reusable, `@v1`-tagged pipelines consumed by thin per-repo
+  callers (`service-release.yml`, `cli-release.yml`, `images-release.yml`; see
+  `ci/README.md`). They are the established precedent for a central reusable
+  workflow, the same philosophy as [[release-unification]].
+- Each frontend service currently builds its SPA in CI (`bun run build`) and
+  `go:embed`s it into the service binary (`service-release.yml` `split` /
+  `dockerfile` build modes, `spa_embed_dir`), so the frontend ships inside the
+  image rather than from a CDN bucket. The pilot replaces the embed with a
   publish-to-bucket step; this spec generalizes it.
 
 ## Acceptance criteria
