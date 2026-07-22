@@ -375,7 +375,9 @@ jobs:
           marker='<!-- release-evidence -->'
           printf '%s\n' "$EVIDENCE" > evidence.md
           prerelease=""
-          [[ "$TAG" == *-* ]] && prerelease="--prerelease"
+          if [[ "$TAG" == *-* ]]; then
+            prerelease="--prerelease"
+          fi
 
           if gh release view "$TAG" --json body --jq .body > prefix.md 2>/dev/null; then
             : # existing release body becomes the prefix
