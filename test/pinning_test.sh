@@ -52,7 +52,9 @@ assert_all_actions_sha_pinned() {
 assert_no_latest_tool_versions() {
     local name="no action fetches a tool build at 'latest'"
     local hits
-    hits=$(grep -rnE '^ *(bun-|go|goreleaser-)?version: +.?latest' "$WORKFLOWS" || true)
+    # Any `*version:` key, not a whitelist of the ones in use today, so a
+    # future `node-version: latest` cannot slip past this.
+    hits=$(grep -rnE '^ *[a-z_-]*version: +.?latest' "$WORKFLOWS" || true)
     if [ -z "$hits" ]; then
         pass "$name"
     else

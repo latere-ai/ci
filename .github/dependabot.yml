@@ -20,3 +20,9 @@ updates:
         patterns:
           - "actions/*"
           - "docker/*"
+
+# Major bumps are deliberately NOT ignored: a pipeline sitting three majors
+# behind is its own risk, and a PR is the only thing that surfaces it. They
+# are not merge-on-green, though. Consumers pin @v1, so a major action bump
+# reaches every repo the moment that tag moves -- take it through the canary
+# in README "Versioning" first, same as any other central change.
