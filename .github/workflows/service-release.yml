@@ -117,8 +117,11 @@ on:
       DO_TOKEN:
         description: "DigitalOcean PAT for kubeconfig access to latere-k8s. Supplied by the org secret via 'secrets: inherit'."
         required: true
+      SMOKE_BEARER:
+        description: "Optional pre-minted bearer for an authenticated smoke, used verbatim. Takes precedence over SMOKE_CLIENT_ID/SECRET. Use this when the service issues its own credentials and auth holds no scope for the smoke to request."
+        required: false
       SMOKE_CLIENT_ID:
-        description: "Optional client_credentials id for an authenticated smoke. Repos that need it define a secret named SMOKE_CLIENT_ID; with 'secrets: inherit' it maps by name. When unset the smoke runs without a bearer token."
+        description: "Optional client_credentials id for an authenticated smoke. Repos that need it define a secret named SMOKE_CLIENT_ID; with 'secrets: inherit' it maps by name. When neither this nor SMOKE_BEARER is set the smoke runs without a bearer token."
         required: false
       SMOKE_CLIENT_SECRET:
         description: "Optional client_credentials secret paired with SMOKE_CLIENT_ID."
@@ -357,11 +360,21 @@ jobs:
         # When smoke_client_id/secret are supplied, mint a short-lived
         # client_credentials JWT (audience = service) so the smoke can call
         # authenticated endpoints. Without them the smoke runs token-less.
+        #
+        # Returns early when SMOKE_BEARER holds a pre-minted token: a repo that
+        # has moved to its own credential must not be held hostage by a client
+        # whose grant was since revoked. HAS_BEARER carries only whether the
+        # secret is set, never its value.
         env:
+          HAS_BEARER: ${{ secrets.SMOKE_BEARER != '' }}
           CLIENT_ID: ${{ secrets.SMOKE_CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.SMOKE_CLIENT_SECRET }}
         run: |
           set -euo pipefail
+          if [ "${HAS_BEARER:-false}" = "true" ]; then
+            echo "token=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ -z "${CLIENT_ID:-}" ] || [ -z "${CLIENT_SECRET:-}" ]; then
             echo "token=" >> "$GITHUB_OUTPUT"
             exit 0
@@ -391,7 +404,9 @@ jobs:
           TAG: ${{ github.ref_name }}
           COMMIT: ${{ github.sha }}
           EXPECTED_ASSET: ${{ needs.build-frontend.outputs.asset }}
-          SERVICE_TOKEN: ${{ steps.token.outputs.token }}
+          # A pre-minted bearer wins over a client_credentials mint; the mint
+          # step does not run when one is set.
+          SERVICE_TOKEN: ${{ secrets.SMOKE_BEARER || steps.token.outputs.token }}
           DEPLOY_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
