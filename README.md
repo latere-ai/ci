@@ -150,6 +150,22 @@ against them, and the digest table in the evidence comes from the same
 `catalog.json` that was published to object storage. The GitHub release exists
 only if all of that held.
 
+## Tag rules
+
+The image tag is the git tag, byte for byte. `kubectl set image`, the stage
+1/2 `BASE_IMAGE` build-arg, and `catalog.json`'s refs all reference the tag you
+pushed, with no v-stripping or normalization in between.
+
+That costs one restriction: **a release tag cannot contain `+`.** Docker tags
+are limited to `[a-zA-Z0-9._-]`, so a SemVer build-metadata tag (§10) such as
+`v1.0.0+exp-sha.5114f85` would push as `v1.0.0-exp-sha.5114f85` while
+everything downstream still asked for the `+` form. Both pipelines refuse such a
+tag in their first job, before anything is built, pushed, or deployed.
+
+Prereleases work normally: `v1.2.3-rc1` publishes as a GitHub prerelease and is
+denied the docker `latest` tag. The hyphen is read in the SemVer version core
+(§9) only.
+
 ## Versioning
 
 Consumers pin `@v1` (a moving major tag). A bad central push would break every

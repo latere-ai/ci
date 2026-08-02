@@ -38,6 +38,55 @@ classify_tag() {
     fi
 }
 
+# reject_tag is the verbatim guard both release workflows apply before any
+# registry work. docker/metadata-action sanitizes an image tag to
+# [a-zA-Z0-9._-], so a build-metadata tag would push as
+# v1.0.0-exp-sha.5114f85 while `kubectl set image` and BASE_IMAGE still
+# reference the raw ref. The pipeline keeps "image tag == git tag" and
+# refuses the tag instead of letting the two diverge.
+reject_tag() {
+    local tag="$1"
+    case "$tag" in
+        *+*) printf 'reject\n' ;;
+        *)   printf 'accept\n' ;;
+    esac
+}
+
+expect_rejection() {
+    local tag="$1" want="$2"
+    local got
+    got="$(reject_tag "$tag")"
+    if [ "$got" = "$want" ]; then
+        pass "$tag -> $want"
+    else
+        fail "$tag -> want $want, got $got"
+    fi
+}
+
+test_rejection() {
+    expect_rejection "v1.2.3" accept
+    expect_rejection "v1.2.3-rc1" accept
+    expect_rejection "v1.0.0+build.7" reject
+    expect_rejection "v1.0.0+exp-sha.5114f85" reject
+    expect_rejection "v1.2.3-rc.1+exp-sha.5114f85" reject
+}
+
+# The guard must run in the first job that touches a registry, so no image
+# is pushed and nothing is deployed under a tag the rest of the pipeline
+# cannot reference.
+assert_workflows_reject_build_metadata() {
+    local wf
+    for wf in service-release.yml images-release.yml; do
+        local name="$wf refuses a tag carrying build metadata"
+        if grep -q 'Reject build-metadata tags' "$WORKFLOWS/$wf" \
+            && grep -q '\*+\*)' "$WORKFLOWS/$wf"; then
+            pass "$name"
+        else
+            fail "$name (no 'Reject build-metadata tags' guard found)"
+        fi
+    done
+}
+
 expect_classification() {
     local tag="$1" want="$2"
     local got
@@ -123,6 +172,8 @@ assert_latest_gates_use_computed_flag() {
     fi
 }
 
+test_rejection
+assert_workflows_reject_build_metadata
 test_classification
 assert_bash_strips_build_metadata
 assert_no_whole_tag_hyphen_test

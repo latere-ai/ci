@@ -263,6 +263,25 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Reject build-metadata tags
+        # docker/metadata-action sanitizes an image tag to [a-zA-Z0-9._-], so a
+        # SemVer build-metadata tag (§10) would push as v1.0.0-exp-sha.5114f85
+        # while `kubectl set image` below still references the raw ref with its
+        # '+'. The deploy depends on image tag == git tag, so refuse the tag
+        # rather than let the two diverge silently.
+        #
+        # This is the first step in the first job that touches a registry:
+        # nothing is pushed or deployed before it fires.
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          case "$TAG" in
+            *+*)
+              echo "::error::${TAG} carries SemVer build metadata; an image tag cannot contain '+'. Cut a tag without it."
+              exit 1
+              ;;
+          esac
+
       - name: Classify tag
         id: tag
         # A hyphen marks a prerelease only in the SemVer version core (§9).
