@@ -1,0 +1,22 @@
+name: test
+
+# Runs this repo's own regression suite. The reusable pipelines here cannot
+# be executed locally, so the suite unit-tests copies of their inline shell
+# and greps the workflows so those copies cannot silently drift.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run test suite
+        run: bash test/run.sh
