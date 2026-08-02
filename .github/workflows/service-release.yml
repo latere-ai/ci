@@ -258,6 +258,23 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Classify tag
+        id: tag
+        # A hyphen marks a prerelease only in the SemVer version core (§9).
+        # Build metadata (§10, everything after '+') belongs to a stable
+        # release and may itself contain hyphens, so strip it first. The
+        # `enable=` expression below cannot strip '+...' inline, hence a step.
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          core="${TAG%%+*}"
+          if [[ "$core" == *-* ]]; then
+            echo "stable=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "stable=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Compute tags
         id: meta
         uses: docker/metadata-action@v6
@@ -265,11 +282,12 @@ jobs:
           images: ${{ inputs.image }}
           # raw value=ref_name tags the image with the exact v-prefixed git tag
           # so `kubectl set image ...:${GITHUB_REF_NAME}` resolves with no
-          # v-stripping ambiguity.
+          # v-stripping ambiguity. latest is skipped on prereleases
+          # (v1.2.3-rc1) but not on stable build-metadata tags.
           tags: |
             type=raw,value=${{ github.ref_name }}
             type=sha,prefix=sha-,format=short
-            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+            type=raw,value=latest,enable=${{ steps.tag.outputs.stable }}
 
       - name: Build and push
         uses: docker/build-push-action@v7
@@ -489,8 +507,12 @@ jobs:
           set -euo pipefail
           marker='<!-- release-evidence -->'
           printf '%s\n' "$EVIDENCE" > evidence.md
+          # A hyphen marks a prerelease only in the SemVer version core (§9);
+          # build metadata (§10, after '+') is part of a stable release and
+          # may itself contain hyphens, so strip it before the test.
           prerelease=""
-          if [[ "$TAG" == *-* ]]; then
+          core="${TAG%%+*}"
+          if [[ "$core" == *-* ]]; then
             prerelease="--prerelease"
           fi
 

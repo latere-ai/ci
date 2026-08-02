@@ -70,6 +70,7 @@ jobs:
       stage2: ${{ steps.compute.outputs.stage2 }}
       any1: ${{ steps.compute.outputs.any1 }}
       any2: ${{ steps.compute.outputs.any2 }}
+      stable: ${{ steps.tag.outputs.stable }}
     steps:
       - uses: actions/checkout@v6
       - name: Lint catalog + tooling tests
@@ -88,6 +89,24 @@ jobs:
               echo "any${s}=$(jq -r ".any_stage[$s]" <<<"$matrix")"
             done
           } >> "$GITHUB_OUTPUT"
+
+      - name: Classify tag
+        id: tag
+        # A hyphen marks a prerelease only in the SemVer version core (§9).
+        # Build metadata (§10, everything after '+') belongs to a stable
+        # release and may itself contain hyphens, so strip it first. Computed
+        # once here because the per-stage `enable=` expressions cannot strip
+        # '+...' inline.
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          core="${TAG%%+*}"
+          if [[ "$core" == *-* ]]; then
+            echo "stable=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "stable=true" >> "$GITHUB_OUTPUT"
+          fi
 
   build-stage0:
     needs: verify
@@ -112,11 +131,12 @@ jobs:
         with:
           images: ${{ needs.verify.outputs.registry }}/${{ matrix.image.name }}
           # raw ref_name matches the digest-pinned ref catalog.json records;
-          # latest is skipped on prereleases (v1.2.3-rc1).
+          # latest is skipped on prereleases (v1.2.3-rc1) but not on stable
+          # build-metadata tags (verify computes the flag).
           tags: |
             type=raw,value=${{ github.ref_name }}
             type=sha,prefix=sha-,format=short
-            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+            type=raw,value=latest,enable=${{ needs.verify.outputs.stable }}
 
       - name: Build and push
         id: build
@@ -171,7 +191,7 @@ jobs:
           tags: |
             type=raw,value=${{ github.ref_name }}
             type=sha,prefix=sha-,format=short
-            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+            type=raw,value=latest,enable=${{ needs.verify.outputs.stable }}
 
       - name: Build and push
         id: build
@@ -224,7 +244,7 @@ jobs:
           tags: |
             type=raw,value=${{ github.ref_name }}
             type=sha,prefix=sha-,format=short
-            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+            type=raw,value=latest,enable=${{ needs.verify.outputs.stable }}
 
       - name: Build and push
         id: build
@@ -374,8 +394,12 @@ jobs:
           set -euo pipefail
           marker='<!-- release-evidence -->'
           printf '%s\n' "$EVIDENCE" > evidence.md
+          # A hyphen marks a prerelease only in the SemVer version core (§9);
+          # build metadata (§10, after '+') is part of a stable release and
+          # may itself contain hyphens, so strip it before the test.
           prerelease=""
-          if [[ "$TAG" == *-* ]]; then
+          core="${TAG%%+*}"
+          if [[ "$core" == *-* ]]; then
             prerelease="--prerelease"
           fi
 
