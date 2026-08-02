@@ -43,6 +43,11 @@ on:
         required: false
         type: string
         default: "1.26"
+      bun_version:
+        description: "Bun version for the frontend and CLI builds. Explicit rather than `latest` so a run cannot pick up a bun build published after this workflow was reviewed."
+        required: false
+        type: string
+        default: "1.3.14"
       build_mode:
         description: "split = build frontend + Go binary in CI, then Dockerfile.ci packages the prebuilt binary (asset-hash pinned smoke). dockerfile = one Dockerfile builds everything (no asset pin; smoke proves liveness only)."
         required: false
@@ -140,11 +145,11 @@ jobs:
     outputs:
       asset: ${{ steps.evidence.outputs.asset }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version: ${{ inputs.bun_version }}
 
       - name: Install
         run: bun install --frozen-lockfile
@@ -169,7 +174,7 @@ jobs:
           echo "asset=$asset" >> "$GITHUB_OUTPUT"
 
       - name: Upload frontend dist
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: frontend-dist
           path: ${{ inputs.frontend_dir }}/dist/
@@ -186,16 +191,16 @@ jobs:
     env:
       CGO_ENABLED: "0"
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: ${{ inputs.go_version }}
           check-latest: true
 
       - name: Download frontend dist
         if: ${{ inputs.has_frontend && inputs.spa_embed_dir != '' }}
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: frontend-dist
           path: .ci-frontend-dist
@@ -220,7 +225,7 @@ jobs:
             -o "out/${{ inputs.service }}" "${{ inputs.main_package }}"
 
       - name: Upload binary
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: service-binary
           path: out/${{ inputs.service }}
@@ -235,11 +240,11 @@ jobs:
     if: ${{ always() && !cancelled() && !contains(needs.*.result, 'failure') }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
       - name: Download binary
         if: ${{ inputs.build_mode == 'split' }}
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: service-binary
           path: out
@@ -250,9 +255,9 @@ jobs:
         if: ${{ inputs.build_mode == 'split' }}
         run: chmod +x "out/${{ inputs.service }}"
 
-      - uses: docker/setup-buildx-action@v4
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
-      - uses: docker/login-action@v4
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -277,7 +282,7 @@ jobs:
 
       - name: Compute tags
         id: meta
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ inputs.image }}
           # raw value=ref_name tags the image with the exact v-prefixed git tag
@@ -290,7 +295,7 @@ jobs:
             type=raw,value=latest,enable=${{ steps.tag.outputs.stable }}
 
       - name: Build and push
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: ${{ inputs.dockerfile }}
@@ -316,15 +321,15 @@ jobs:
       name: production
       url: ${{ inputs.url }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: ${{ inputs.go_version }}
           check-latest: true
           cache: false
 
-      - uses: digitalocean/action-doctl@v2
+      - uses: digitalocean/action-doctl@3cb3953159719656269e044e0e24ca16dd2a690f # v2.5.2
         with:
           token: ${{ secrets.DO_TOKEN }}
 
@@ -371,7 +376,7 @@ jobs:
     outputs:
       evidence: ${{ steps.run.outputs.evidence }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
       - name: Mint smoke token
         id: token
@@ -438,7 +443,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Upload release evidence
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-evidence
           path: release-evidence/
@@ -452,24 +457,24 @@ jobs:
     if: ${{ inputs.build_cli }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: ${{ inputs.go_version }}
           check-latest: true
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version: ${{ inputs.bun_version }}
 
       - name: Build CLI binaries
         run: ${{ inputs.cli_build_cmd }}
 
       - name: Upload CLI binaries
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: cli-binaries
           path: dist/
@@ -482,11 +487,11 @@ jobs:
     if: ${{ always() && needs.smoke.result == 'success' && needs.cli.result != 'failure' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
       - name: Download CLI binaries
         if: ${{ inputs.build_cli }}
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: cli-binaries
           path: dist

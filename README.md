@@ -157,8 +157,38 @@ release at once, so this repo runs `actionlint` on every change and is canaried
 on a single pilot consumer before the `v1` tag moves. Repos that need to freeze
 can pin a patch tag (e.g. `@v1.2.0`).
 
+## Supply chain
+
+Every `uses:` in these workflows is pinned to a full commit SHA, with the
+version it corresponds to in a trailing comment:
+
+```yaml
+- uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+```
+
+These workflows run on *your* runners with `contents: write`, `packages: write`
+and whatever secrets you inherit. A `@v2`-style tag is mutable, so whoever
+controls the upstream repository can repoint it and have new code execute with
+that access in every consumer at once. A SHA cannot be repointed.
+
+For the same reason no step fetches a tool build at `latest`. The bun and
+goreleaser versions are explicit inputs (`bun_version`, `goreleaser_version`)
+that you can override per repo.
+
+Dependabot opens a weekly PR per action so the pins do not rot: first-party
+`actions/*` and `docker/*` updates are grouped, third-party actions land
+individually so each gets its own review.
+
 ## Local checks
 
 Reusable workflows, `secrets: inherit`, environments, and doctl only exercise on
-GitHub runners; you cannot run this pipeline locally. The local loop is
-`actionlint` (CI runs it here) to push to canary tag on a pilot repo.
+GitHub runners; you cannot run this pipeline locally. The local loop is:
+
+```bash
+bash test/run.sh   # regression suite; also runs on every push and PR
+actionlint         # static workflow lint; CI runs it here
+```
+
+The suite unit-tests copies of the inline workflow shell and greps the workflows
+so those copies cannot silently drift. Beyond that, canary a tag on a pilot repo
+before moving `v1`.

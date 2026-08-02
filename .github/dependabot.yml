@@ -1,0 +1,22 @@
+version: 2
+
+# Every `uses:` in .github/workflows is pinned to a commit SHA so a
+# repointed upstream tag cannot execute new code with this repo's
+# contents:write + packages:write across every consumer. A SHA pin does not
+# move on its own, so dependabot is what keeps it from going stale: it opens
+# a PR per action update and rewrites the SHA plus the trailing `# vX.Y.Z`
+# comment.
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci"
+    groups:
+      # One PR per week for the low-risk first-party set; third-party
+      # actions stay separate so each gets its own review.
+      trusted-actions:
+        patterns:
+          - "actions/*"
+          - "docker/*"
