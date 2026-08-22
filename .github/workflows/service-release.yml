@@ -42,7 +42,7 @@ on:
         description: "Go toolchain version."
         required: false
         type: string
-        default: "1.26"
+        default: "1.27"
       bun_version:
         description: "Bun version for the frontend and CLI builds. Explicit rather than `latest` so a run cannot pick up a bun build published after this workflow was reviewed."
         required: false

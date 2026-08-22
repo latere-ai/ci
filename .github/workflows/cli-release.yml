@@ -20,12 +20,12 @@ on:
         description: "Go toolchain version."
         required: false
         type: string
-        default: "1.26"
+        default: "1.27"
       golangci_version:
         description: "golangci-lint version."
         required: false
         type: string
-        default: "v2.11.4"
+        default: "v2.13.1"
       goreleaser_version:
         description: "goreleaser version. Explicit rather than `latest` so a run cannot pick up a goreleaser build published after this workflow was reviewed."
         required: false
