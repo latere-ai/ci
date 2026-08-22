@@ -1,0 +1,45 @@
+name: major-tag
+
+# Consumers pin the moving `@v1` tag, so a release only reaches them once `v1`
+# points at it. Moving that tag by hand is easy to forget: `v1` sat seven
+# commits behind main while consumers silently kept building against the older
+# pipeline. This moves it as part of cutting a version instead.
+#
+# The trigger is a `v1.*` tag push, not a push to main, on purpose. These
+# workflows run in consumer repos with `contents: write`, `packages: write` and
+# inherited secrets, so main stays un-canaried and cutting a version tag stays
+# the deliberate human gate described in README.md under "Versioning".
+
+on:
+  push:
+    tags: ["v1.*"]
+
+permissions:
+  contents: read
+
+jobs:
+  move:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      # A prerelease (v1.2.3-rc1) is not something consumers should pick up by
+      # pinning @v1, so only a plain vMAJOR.MINOR.PATCH tag moves it.
+      - name: Move v1 to ${{ github.ref_name }}
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$TAG" | grep -Eq '^v1\.[0-9]+\.[0-9]+$'; then
+            echo "$TAG is a prerelease or non-standard tag; leaving v1 alone."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f v1 "$TAG"^{}
+          git push -f origin refs/tags/v1
+          echo "v1 -> $TAG ($(git rev-parse v1^{}))"

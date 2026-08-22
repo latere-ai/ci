@@ -173,6 +173,14 @@ release at once, so this repo runs `actionlint` on every change and is canaried
 on a single pilot consumer before the `v1` tag moves. Repos that need to freeze
 can pin a patch tag (e.g. `@v1.2.0`).
 
+Pushing a `v1.MAJOR.MINOR.PATCH` tag moves `v1` to it automatically
+(`.github/workflows/major-tag.yml`), so a change reaches consumers as part of
+cutting a version rather than as a separate step that can be forgotten. Landing
+on main deliberately does *not* move `v1`: main stays un-canaried, and these
+workflows run in consumer repos with `contents: write`, `packages: write` and
+inherited secrets. Prerelease tags (`v1.2.3-rc1`) do not move `v1` either, so a
+release candidate can be canaried on a pilot consumer by pinning it explicitly.
+
 ## Supply chain
 
 Every `uses:` in these workflows is pinned to a full commit SHA, with the
