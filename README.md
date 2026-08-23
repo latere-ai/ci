@@ -20,6 +20,9 @@ auto-generated notes plus a smoke-evidence block.
   **container-images repo** (an image catalog, no deploy): verify to build+push
   (dependency-ordered) to publish-catalog (S3) to smoke against the published
   images to release with evidence.
+- `tools/repo-settings.sh` — applies and audits the org-wide repository
+  settings policy (`tools/repo-settings.json`) so a new repo does not sit on
+  GitHub's defaults.
 - `examples/` — starter callers so a new repo gets the boilerplate.
 
 ## Design principle
@@ -202,6 +205,56 @@ that you can override per repo.
 Dependabot opens a weekly PR per action so the pins do not rot: first-party
 `actions/*` and `docker/*` updates are grouped, third-party actions land
 individually so each gets its own review.
+
+## Repository settings policy
+
+Repository settings are per-repo state that no release pipeline touches, so a
+new repo arrives on GitHub's defaults: merge commits and rebase merges enabled,
+wiki and projects on, no auto-merge. That breaks the org's linear, one commit
+per pull request history before anyone notices.
+
+`tools/repo-settings.json` holds the desired state, and every repo in the org is
+driven to it:
+
+| Setting | Value | Why |
+| --- | --- | --- |
+| `allow_squash_merge` | `true` | The only merge method. One commit per pull request. |
+| `allow_merge_commit` | `false` | No merge bubbles in main's history. |
+| `allow_rebase_merge` | `false` | Keeps a pull request from landing as N separate commits. |
+| `allow_auto_merge` | `true` | A pull request can be queued to merge as soon as required checks pass. |
+| `squash_merge_commit_title` | `PR_TITLE` | The squash commit subject is the pull request title, not the first commit's. |
+| `squash_merge_commit_message` | `PR_BODY` | The body is the pull request description, not a list of squashed commit messages. |
+| `delete_branch_on_merge` | `true` | Head branches are removed once merged. |
+| `has_wiki` | `false` | Documentation lives in the repo. |
+| `has_projects` | `false` | Planning lives in specs and issues. |
+
+Set a new repo, or a list of them:
+
+```bash
+tools/repo-settings.sh apply my-new-repo
+tools/repo-settings.sh apply lux auth latere-ai/topos
+```
+
+Audit, or re-flatten the whole org:
+
+```bash
+tools/repo-settings.sh check --all   # exits 1 and names each drifted field
+tools/repo-settings.sh apply --all
+```
+
+A bare argument resolves against the `latere-ai` org; an `owner/repo` slug is
+used as given. Override the org with `REPO_SETTINGS_ORG`, the policy file with
+`REPO_SETTINGS_POLICY`. Archived repos are read-only on the GitHub API, so they
+are reported and skipped rather than failed. GitHub also refuses to disable
+projects on a repo that still owns classic projects: that repo is retried
+without `has_projects`, reported as `PARTIAL`, and every other setting still
+lands. Nothing is deleted to force the write through.
+
+`.github/workflows/repo-settings.yml` runs `check --all` nightly, and on demand
+through `workflow_dispatch`, so drift surfaces as a failed run instead of as a
+stray merge commit. After editing the policy, dispatch the workflow or run
+`apply --all` locally; a policy edit alone does not trigger an audit. `GITHUB_TOKEN` is scoped to this repository, so the
+audit reads `REPO_ADMIN_TOKEN`, a PAT carrying `repo` and `read:org`.
 
 ## Local checks
 
