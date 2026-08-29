@@ -141,6 +141,16 @@ go get -tool latere.ai/x/ci-gate/cmd/lateregate
 go tool lateregate cover
 ```
 
+**What the tool directive costs a consumer.** It adds
+`latere.ai/x/ci-gate` and its one dependency to that repo's `go.mod`. This
+was checked against the strictest case: `tgo/internal/depcheck` gates
+`go list -deps` on named packages rather than `go.mod`, on the stated
+grounds that *a module graph says what could be reached* — and a tool is
+never imported by the packages it checks. So the directive does not enter
+`llmdialect`'s import graph and does not trip tgo's own dependency gate.
+Any future consumer gating its footprint should gate the import graph for
+the same reason.
+
 **What the binary owns.** Any check whose logic is more than one command.
 Everything else stays a plain `go` invocation in the consumer's Makefile,
 because wrapping `go test ./...` in a subcommand buys nothing.
@@ -315,7 +325,10 @@ and moving it buys nothing this spec needs.
 - **AC6** `make test-hermetic` and `make cover` are runnable locally in
   any consumer and need nothing checked out beyond that repo. This is the
   criterion the whole design exists to satisfy — if either ends up
-  CI-only, the approach is wrong.
+  CI-only, the approach is wrong. Verified, not assumed: both run to
+  completion in a fresh clone with the proxy off (`GOPROXY=off`), from the
+  module cache alone. Without that check, "runnable locally" degrades
+  silently the first time an invocation reaches the network.
 - **AC7** Adopting the three required targets in a repo that has them
   today is a caller workflow plus three one-line Makefile edits, with no
   `.lateregate.yaml`. Demonstrated on one repo beyond llmops.
