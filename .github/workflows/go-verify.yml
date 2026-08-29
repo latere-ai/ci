@@ -1,0 +1,220 @@
+name: go-verify
+
+# Reusable per-push verify pipeline for a latere.ai Go repo. A consumer repo
+# calls this on every push and pull request:
+#
+#   on: { push: { branches: [main] }, pull_request: {} }
+#   jobs:
+#     verify:
+#       uses: latere-ai/ci/.github/workflows/go-verify.yml@v1
+#
+# The contract is make targets, not workflow inputs. This workflow probes the
+# consumer's Makefile and runs what it finds:
+#
+#   required   fmt-check, test, lint-modernize
+#   optional   test-hermetic, test-race, cover, spec-lint, dist, validate
+#
+# A missing optional target skips its job. A missing required target fails the
+# probe by name, rather than letting make report it four jobs later.
+#
+# The checks themselves live in latere-ai/ci-gate, pinned by the consumer's
+# go.mod, so every one of these runs identically on a laptop. That split is
+# deliberate: a gate that only runs in CI tells you too late.
+
+on:
+  workflow_call:
+    inputs:
+      go_version:
+        description: "Go toolchain version."
+        required: false
+        type: string
+        default: "1.27"
+      golangci_version:
+        description: "golangci-lint version. Explicit rather than `latest` so a run cannot pick up a build published after this workflow was reviewed."
+        required: false
+        type: string
+        default: "v2.13.1"
+      test_os:
+        description: "JSON array of runners for the test matrix. Development happens on macOS and deployment on Linux, and that asymmetry is structural, so both are the default."
+        required: false
+        type: string
+        default: '["ubuntu-latest", "macos-latest"]'
+      run_lint:
+        description: "Run golangci-lint. The modernize gate runs regardless, through make lint-modernize."
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Probe decides which jobs have anything to run, so a repository adopts the
+  # pipeline by adding targets rather than by editing inputs.
+  probe:
+    name: which gates does this repo have
+    runs-on: ubuntu-latest
+    outputs:
+      hermetic: ${{ steps.probe.outputs.hermetic }}
+      race: ${{ steps.probe.outputs.race }}
+      cover: ${{ steps.probe.outputs.cover }}
+      spec_lint: ${{ steps.probe.outputs.spec_lint }}
+      dist: ${{ steps.probe.outputs.dist }}
+      validate: ${{ steps.probe.outputs.validate }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # `make -n` resolves a target without running it, so this costs nothing
+      # and cannot have side effects. Keep in step with test/go_verify_test.sh,
+      # which unit-tests a copy of this shell.
+      - name: Probe the Makefile
+        id: probe
+        run: |
+          set -uo pipefail
+          if [ ! -f Makefile ]; then
+            echo "::error::go-verify needs a Makefile: it runs the repo's own targets rather than guessing commands."
+            exit 1
+          fi
+          has() { make -n "$1" >/dev/null 2>&1; }
+
+          missing=""
+          for t in fmt-check test lint-modernize; do
+            has "$t" || missing="$missing $t"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Makefile has no required target(s):$missing. See ci/README.md for the go-verify contract."
+            exit 1
+          fi
+
+          emit() {
+            if has "$2"; then
+              echo "$1=true"  >> "$GITHUB_OUTPUT"; echo "found $2"
+            else
+              echo "$1=false" >> "$GITHUB_OUTPUT"; echo "skipping $2 (no such target)"
+            fi
+          }
+          emit hermetic  test-hermetic
+          emit race      test-race
+          emit cover     cover
+          emit spec_lint spec-lint
+          emit dist      dist
+          emit validate  validate
+
+  test:
+    name: test on ${{ matrix.os }}
+    needs: probe
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(inputs.test_os) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ inputs.go_version }}
+      - run: make fmt-check
+      - run: make test
+
+  # The suite with only the toolchain on PATH. Three CI failures in one day
+  # came from tests that depended on what happened to be installed on the
+  # machine running them, and each passed locally first.
+  hermetic:
+    name: test without a developer PATH
+    needs: probe
+    if: ${{ needs.probe.outputs.hermetic == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ inputs.go_version }}
+      - run: make test-hermetic
+
+  race:
+    name: race detector
+    needs: probe
+    if: ${{ needs.probe.outputs.race == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ inputs.go_version }}
+      - run: make test-race
+
+  # Per package rather than as a repository average: an average lets a
+  # well-tested package carry an untested one and reports a number nobody can
+  # act on.
+  coverage:
+    name: coverage per package
+    needs: probe
+    if: ${{ needs.probe.outputs.cover == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ inputs.go_version }}
+      - run: make cover
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: coverage
+          path: coverage.out
+          if-no-files-found: warn
+
+  # A spec tree nobody checks drifts from the code within one milestone.
+  specs:
+    name: specs are consistent
+    needs: probe
+    if: ${{ needs.probe.outputs.spec_lint == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ inputs.go_version }}
+      - run: make spec-lint
+
+  # A claim in a document with no gate behind it goes stale silently.
+  cross:
+    name: cross-compile the shipped platforms
+    needs: probe
+    if: ${{ needs.probe.outputs.dist == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ inputs.go_version }}
+      - run: make dist
+
+  validate:
+    name: repo-specific consistency
+    needs: probe
+    if: ${{ needs.probe.outputs.validate == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ inputs.go_version }}
+      - run: make validate
+
+  lint:
+    name: lint
+    needs: probe
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ inputs.go_version }}
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        if: ${{ inputs.run_lint }}
+        with:
+          version: ${{ inputs.golangci_version }}
+      # Runs whether or not golangci-lint did: it carries fixers golangci-lint
+      # does not, and a repo that turns the linter off still gets this.
+      - run: make lint-modernize

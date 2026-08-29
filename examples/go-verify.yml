@@ -1,0 +1,33 @@
+# Starter caller for the reusable per-push verify pipeline.
+#
+# Copy to your repo as .github/workflows/ci.yml. Nothing else is needed: the
+# pipeline probes your Makefile and runs the targets it finds.
+#
+# Required targets:  fmt-check, test, lint-modernize
+# Optional targets:  test-hermetic, test-race, cover, spec-lint, dist, validate
+#
+# The checks behind those targets live in latere-ai/ci-gate, pinned by your
+# go.mod, so each one also runs on your laptop:
+#
+#   go get -tool latere.ai/x/ci-gate/cmd/lateregate
+#
+# See ci/README.md for the full contract and ci-gate/README.md for the gates.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    uses: latere-ai/ci/.github/workflows/go-verify.yml@v1
+    # Every input is optional. Override only what your repo needs:
+    # with:
+    #   go_version: "1.27"
+    #   test_os: '["ubuntu-latest", "macos-latest"]'
+    #   run_lint: true

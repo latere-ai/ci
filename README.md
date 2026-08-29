@@ -1,8 +1,11 @@
 # latere-ai/ci
 
-Central, reusable release pipeline for latere.ai projects. One source of truth,
-no per-repo forks. Consumer repos keep a thin caller workflow; all the logic
-lives here and is versioned with a moving `@v1` tag.
+Central, reusable CI pipelines for latere.ai projects. One source of truth, no
+per-repo forks. Consumer repos keep a thin caller workflow; all the logic lives
+here and is versioned with a moving `@v1` tag.
+
+Two kinds of pipeline: **release**, triggered by a version tag, and
+**per-push verify** (`go-verify.yml`), triggered by every push.
 
 A version tag (`v*`) push in a consumer repo triggers a release: build the
 artifact, deploy to the `latere-k8s` cluster, smoke the live surface to prove
@@ -11,6 +14,10 @@ auto-generated notes plus a smoke-evidence block.
 
 ## What's here
 
+- `.github/workflows/go-verify.yml` — reusable **per-push** pipeline for a Go
+  repo: test on an OS matrix, plus whichever of the hermetic, race, coverage,
+  spec-lint, cross-compile and validate gates the repo has. Runs on every push
+  and pull request, not on a tag.
 - `.github/workflows/service-release.yml` — reusable (`workflow_call`) pipeline
   for a k8s **service**: verify to build to deploy to smoke to release, all in
   one tag-triggered run.
@@ -59,6 +66,63 @@ An images repo (consumer of `images-release.yml`) must provide:
 The pipeline needs the `CATALOG_S3_*` secrets (endpoint, region, bucket,
 prefix, scoped access key + secret) to publish `catalog.json`; the key should
 carry a per-bucket grant only, since it lives in a public repo's Actions.
+
+## Using it (Go verify)
+
+Copy `examples/go-verify.yml` to `.github/workflows/ci.yml`. That is the whole
+caller:
+
+```yaml
+jobs:
+  verify:
+    uses: latere-ai/ci/.github/workflows/go-verify.yml@v1
+```
+
+There are no per-gate inputs. The pipeline probes your `Makefile` with
+`make -n` and runs the targets it finds, so a repo turns a gate on by adding a
+target rather than by editing a workflow.
+
+| Target | Required | Job | What it gates |
+| --- | --- | --- | --- |
+| `fmt-check` | yes | test | no Go source is unformatted |
+| `test` | yes | test (ubuntu + macos) | `go vet` and the suite |
+| `lint-modernize` | yes | lint | no code the standard library already covers |
+| `test-hermetic` | no | hermetic | the suite with only the toolchain on `PATH` |
+| `test-race` | no | race | the race detector |
+| `cover` | no | coverage | **every package** clears the floor |
+| `spec-lint` | no | specs | the spec tree agrees with its index |
+| `dist` | no | cross | the shipped platforms still cross-compile |
+| `validate` | no | validate | repo-specific consistency |
+
+A missing optional target skips its job. A missing required target fails the
+probe by name, rather than letting `make` report it four jobs later.
+
+Only three targets are required because fifteen of the twenty-one Go repos have
+exactly those three today, and a contract nobody can meet is a contract nobody
+adopts. Add the rest as a repo earns them.
+
+### The checks live in `ci-gate`, not here
+
+This repo owns **orchestration and ordering**. What each gate asserts lives in
+[`latere-ai/ci-gate`](https://github.com/latere-ai/ci-gate), pinned by the
+consumer's `go.mod`:
+
+```sh
+go get -tool latere.ai/x/ci-gate/cmd/lateregate
+```
+
+```make
+cover:
+	go test ./... -coverprofile=coverage.out -coverpkg=./...
+	@go tool lateregate cover
+```
+
+The split is deliberate. A gate reachable only from a checkout of this repo
+could only run in CI, and every gate in the set exists because something passed
+on a laptop and failed on a runner. Pinned through `go.mod`, each one runs the
+same in both places. Repo-specific data — the coverage floor, exemptions and
+their reasons, spec conventions — lives in a `.lateregate.yaml` in the consumer
+repo; see `ci-gate/README.md`.
 
 ## Build modes
 
