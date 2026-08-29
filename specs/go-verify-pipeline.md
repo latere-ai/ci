@@ -1,6 +1,6 @@
 ---
 title: One per-push quality bar for every Go repo — ci owns the workflow, ci-gate owns the checks
-status: planned
+status: partial
 depends_on: []
 affects:
   - ci-gate/ (new repo: latere-ai/ci-gate, module latere.ai/x/ci-gate)
@@ -305,8 +305,12 @@ and moving it buys nothing this spec needs.
 
 - **AC1** `latere-ai/ci-gate` exists as module `latere.ai/x/ci-gate` with
   `cmd/lateregate` and the five subcommands, each with tests. Its own
-  dependency graph is gated. `llmops` and `tgo` copies of `covercheck` and
-  `speclint` are deleted, not left as duplicates.
+  dependency graph is gated. The `llmops` copies of `covercheck` and
+  `speclint` are deleted, not left as duplicates. **tgo keeps both**, for the
+  reason under "leave alone": its `speclint` also enforces layers, decision
+  records, an outcome rule, a blocked-reason rule and a sequencing file, none
+  of which are hygiene that generalizes. `ci-gate` implements the seven checks
+  every spec tree needs; tgo's conventions stay in tgo.
 - **AC2** `.lateregate.yaml` carries threshold, exemptions and spec
   conventions per repo. `lateregate cover` **fails** on an exemption with
   an empty reason, and on a profile that covers no packages. With
@@ -343,3 +347,40 @@ and moving it buys nothing this spec needs.
 - Rolling the ramp out past llmops and the one AC7 repo.
 - Any change to what a consumer actually tests or what its specs say.
   This is about where the gates live, not what they assert.
+
+## Outcome
+
+Shipped 2026-08-29. `latere-ai/ci-gate` at `v0.1.0`, `latere-ai/ci` at
+`v1.3.0` with `v1` moved, llmops migrated.
+
+| Criterion | Verdict |
+| --- | --- |
+| AC1 `ci-gate` with five subcommands and tests | satisfied for llmops; tgo deferred as above |
+| AC2 config carries threshold, exemptions, conventions | satisfied |
+| AC3 `go-verify.yml`, example, README, `ci/test/run.sh` case | satisfied |
+| AC4 optional target skips, required target fails by name | satisfied |
+| AC5 llmops calls it, full gate set passes | satisfied |
+| AC6 gates run locally, `GOPROXY=off`, fresh clone | satisfied |
+| AC7 a second repo adopts with three one-line edits | **not done** — no repo beyond llmops was converted |
+| AC8 reasoning comments survive | satisfied |
+
+What the build changed about the design:
+
+- **The coverage exemption llmops needed no longer exists.** Its `exempt` map
+  held one entry, for `internal/covercheck` itself, and that package is gone.
+  All eight packages clear 90% with an empty exemption map — 91.2% in
+  `internal/harness` and 91.5% in `internal/install`, the two the average had
+  been hiding when this spec was written.
+- **The index check is anchored on the table header, not on links.** Matching
+  any table row that holds a Markdown link reported drift that was not there:
+  a spec document cites other specs from prose tables. `spec-lint` now finds
+  the index by its `Status` column and reads that column's position.
+- **`spec-lint` found a real drift on its first run against llmops**, where
+  the index said `draft` and the spec said `partial`. That is the bug class
+  the check exists for, found without anyone looking for it.
+- **`modernize` found real modernizations in `ci-gate`'s own source** the
+  first time it ran, which is the dogfooding working as intended.
+
+Deferred: the adoption ramp past llmops, including AC7. Fifteen repos have the
+three required targets and need only a caller and three one-line edits; eight
+have `cover`; seventeen spec-driven repos still lint nothing.
