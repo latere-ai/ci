@@ -359,10 +359,19 @@ Shipped 2026-08-29. `latere-ai/ci-gate` at `v0.1.0`, `latere-ai/ci` at
 | AC2 config carries threshold, exemptions, conventions | satisfied |
 | AC3 `go-verify.yml`, example, README, `ci/test/run.sh` case | satisfied |
 | AC4 optional target skips, required target fails by name | satisfied |
-| AC5 llmops calls it, full gate set passes | satisfied |
+| AC5 llmops calls it, full gate set passes | satisfied — all ten jobs green, including macOS, `cross` and `validate` |
 | AC6 gates run locally, `GOPROXY=off`, fresh clone | satisfied |
 | AC7 a second repo adopts with three one-line edits | **not done** — no repo beyond llmops was converted |
 | AC8 reasoning comments survive | satisfied |
+
+**A public repo cannot call a private repo's reusable workflow.** This was not
+in the design and it blocked the whole thing: `ci` was private while `llmops`,
+`tgo`, `pkg` and `ci-gate` are public, so a caller failed at startup with zero
+jobs and no log to read. It was not introduced here — `ai-as-an-infrastructure`
+is public, calls `ci` for its release, and had been failing the same way and
+just as silently before this work began. `latere-ai/ci` is now public, which is
+what unblocked both. Any repo added to the org that calls these pipelines
+inherits the same constraint.
 
 What the build changed about the design:
 
