@@ -336,6 +336,9 @@ and moving it buys nothing this spec needs.
 - **AC7** Adopting the three required targets in a repo that has them
   today is a caller workflow plus three one-line Makefile edits, with no
   `.lateregate.yaml`. Demonstrated on one repo beyond llmops.
+- **AC9** No consumer keeps a gate program of its own. What a gate asserts
+  lives in `ci-gate`; what a repository asserts about itself lives in its
+  `.lateregate.yaml`.
 - **AC8** The reasoning comments survive the move. A gate whose rationale
   is deleted gets deleted next.
 
@@ -361,7 +364,8 @@ Shipped 2026-08-29. `latere-ai/ci-gate` at `v0.1.0`, `latere-ai/ci` at
 | AC4 optional target skips, required target fails by name | satisfied |
 | AC5 llmops calls it, full gate set passes | satisfied — all ten jobs green, including macOS, `cross` and `validate` |
 | AC6 gates run locally, `GOPROXY=off`, fresh clone | satisfied |
-| AC7 a second repo adopts with three one-line edits | **not done** — no repo beyond llmops was converted |
+| AC7 a second repo adopts with three one-line edits | **not done** — tgo was converted, but it needed a full config, not three edits |
+| AC9 no consumer keeps gate code | satisfied for llmops and tgo |
 | AC8 reasoning comments survive | satisfied |
 
 **A public repo cannot call a private repo's reusable workflow.** This was not
@@ -390,6 +394,36 @@ What the build changed about the design:
 - **`modernize` found real modernizations in `ci-gate`'s own source** the
   first time it ran, which is the dogfooding working as intended.
 
-Deferred: the adoption ramp past llmops, including AC7. Fifteen repos have the
-three required targets and need only a caller and three one-line edits; eight
-have `cover`; seventeen spec-driven repos still lint nothing.
+### tgo, converted after all
+
+The spec put tgo out of scope and narrowed AC1 to llmops. That was reversed
+deliberately: tgo now keeps no gate code either, and the rules that made its
+linter tgo-specific moved into `ci-gate` instead of staying behind.
+
+Six rules generalized once their vocabulary became config: a second closed
+vocabulary (`layer`), a frontmatter key tied to a status and checked against a
+pattern (`blocked_on`), required sections globally and per status, ids that
+must carry their own spec's number, and table rows that must match their
+header. `depcheck` became a subcommand. llmops took the same rules the same
+day, which is the point — a repository does not get fewer checks because
+nobody wrote them there.
+
+Three things did not fit the contract, and say so rather than bending it:
+
+- **Windows left the make contract.** The runner image ships GNU make on
+  ubuntu and not on windows, so tgo tests Windows in a small local workflow
+  running the three commands its `test` target runs. Checked against
+  `actions/runner-images` rather than assumed.
+- **`deps`, `cgo-free` and `fuzz` keep their own make targets** under one
+  `validate` job. Each defends a promise tgo makes and most repos do not, and
+  a failure still names which one broke.
+- **tgo's `ci-metal.yml` is untouched.** A job that promises a Metal device
+  and finds none is a failure rather than a skip, so it cannot share this
+  pipeline.
+
+tgo also gained `test-hermetic`, which it never had, and passes it with
+nothing on `PATH` but the toolchain.
+
+Deferred: the adoption ramp past llmops and tgo. Fifteen repos have the three
+required targets and need only a caller and three one-line edits; eight have
+`cover`; fifteen spec-driven repos still lint nothing.
