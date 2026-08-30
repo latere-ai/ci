@@ -12,7 +12,8 @@ name: go-verify
 # consumer's Makefile and runs what it finds:
 #
 #   required   fmt-check, test, lint-modernize
-#   optional   test-hermetic, test-race, cover, spec-lint, dist, validate
+#   optional   test-hermetic, test-race, cover, spec-lint, dist, validate,
+#              lint-config
 #
 # A missing optional target skips its job. A missing required target fails the
 # probe by name, rather than letting make report it four jobs later.
@@ -61,6 +62,7 @@ jobs:
       spec_lint: ${{ steps.probe.outputs.spec_lint }}
       dist: ${{ steps.probe.outputs.dist }}
       validate: ${{ steps.probe.outputs.validate }}
+      lint_config: ${{ steps.probe.outputs.lint_config }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -99,6 +101,7 @@ jobs:
           emit spec_lint spec-lint
           emit dist      dist
           emit validate  validate
+          emit lint_config lint-config
 
   test:
     name: test on ${{ matrix.os }}
@@ -215,6 +218,12 @@ jobs:
         if: ${{ inputs.run_lint }}
         with:
           version: ${{ inputs.golangci_version }}
+      # .golangci.yml is generated from latere.ai/x/ci-gate, because
+      # golangci-lint cannot inherit a shared config. This fails when a repo's
+      # committed copy has drifted from the shared one.
+      - run: make lint-config
+        if: ${{ needs.probe.outputs.lint_config == 'true' }}
+
       # Runs whether or not golangci-lint did: it carries fixers golangci-lint
       # does not, and a repo that turns the linter off still gets this.
       - run: make lint-modernize

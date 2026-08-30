@@ -93,6 +93,7 @@ target rather than by editing a workflow.
 | `spec-lint` | no | specs | the spec tree agrees with its index |
 | `dist` | no | cross | the shipped platforms still cross-compile |
 | `validate` | no | validate | repo-specific consistency |
+| `lint-config` | no | lint | the generated `.golangci.yml` still matches the shared one |
 
 A missing optional target skips its job. A missing required target fails the
 probe by name, rather than letting `make` report it four jobs later.
@@ -116,6 +117,13 @@ cover:
 	go test ./... -coverprofile=coverage.out -coverpkg=./...
 	@go tool lateregate cover
 ```
+
+`.golangci.yml` is generated rather than hand-written in each repo, because
+golangci-lint cannot inherit a shared config — its v2 schema rejects an
+`extends` key. `lateregate golangci -write` renders it from the module path and
+the disabled fixers in `.lateregate.yaml`; `make lint-config` fails when the
+committed copy drifts. It is generated *into* the repo, not kept out of it, so
+`golangci-lint run` and your editor still find it with no flags.
 
 The split is deliberate. A gate reachable only from a checkout of this repo
 could only run in CI, and every gate in the set exists because something passed

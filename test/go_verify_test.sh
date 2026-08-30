@@ -54,6 +54,7 @@ probe() {
     emit spec_lint spec-lint
     emit dist      dist
     emit validate  validate
+    emit lint_config lint-config
 }
 
 # run_probe <makefile-body> -- runs the probe in a scratch repo and leaves its
@@ -88,7 +89,7 @@ test_optional_targets_are_skipped_not_failed() {
     local name="every optional target absent skips rather than fails"
     run_probe "$required_only"
     local missing="" k
-    for k in hermetic=false race=false cover=false spec_lint=false dist=false validate=false; do
+    for k in hermetic=false race=false cover=false spec_lint=false dist=false validate=false lint_config=false; do
         case "$OUTPUTS" in *"$k"*) ;; *) missing="$missing $k" ;; esac
     done
     if [ -n "$missing" ]; then fail "$name (never emitted:$missing)"; else pass "$name"; fi
@@ -169,7 +170,7 @@ EOF
 test_every_optional_job_is_gated_on_the_probe() {
     local name="every optional job is gated on its probe output"
     local k missing=""
-    for k in hermetic race cover spec_lint dist validate; do
+    for k in hermetic race cover spec_lint dist validate lint_config; do
         grep -qF "needs.probe.outputs.$k == 'true'" "$WORKFLOW" || missing="$missing $k"
     done
     if [ -n "$missing" ]; then fail "$name (ungated:$missing)"; else pass "$name"; fi
