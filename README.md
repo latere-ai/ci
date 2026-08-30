@@ -27,9 +27,9 @@ auto-generated notes plus a smoke-evidence block.
   **container-images repo** (an image catalog, no deploy): verify to build+push
   (dependency-ordered) to publish-catalog (S3) to smoke against the published
   images to release with evidence.
-- `tools/repo-settings.sh` — applies and audits the org-wide repository
-  settings policy (`tools/repo-settings.json`) so a new repo does not sit on
-  GitHub's defaults.
+- `tools/repo-settings.sh` — applies the org-wide repository settings policy
+  (`tools/repo-settings.json`) so a new repo does not sit on GitHub's defaults.
+  Run it when you create a repo.
 - `examples/` — starter callers so a new repo gets the boilerplate.
 
 ## Design principle
@@ -328,11 +328,23 @@ projects on a repo that still owns classic projects: that repo is retried
 without `has_projects`, reported as `PARTIAL`, and every other setting still
 lands. Nothing is deleted to force the write through.
 
-`.github/workflows/repo-settings.yml` runs `check --all` nightly, and on demand
-through `workflow_dispatch`, so drift surfaces as a failed run instead of as a
-stray merge commit. After editing the policy, dispatch the workflow or run
-`apply --all` locally; a policy edit alone does not trigger an audit. `GITHUB_TOKEN` is scoped to this repository, so the
-audit reads `REPO_ADMIN_TOKEN`, a PAT carrying `repo` and `read:org`.
+**There is no nightly audit.** There was one, and it never ran: it needed a
+PAT in `REPO_ADMIN_TOKEN` that was never set, so it failed every night from the
+day it was written and reported nothing about drift. A scheduled workflow
+failing produces no pull request status and no notification, so six nights of
+red went unseen.
+
+The audit was also the wrong shape for the problem. Settings do not drift on
+their own — they are wrong from the moment a repo is created, because GitHub's
+defaults are wrong. Detecting that the morning after is worse than setting it
+at creation:
+
+```bash
+tools/repo-settings.sh apply my-new-repo   # do this when the repo is created
+tools/repo-settings.sh check --all         # and by hand whenever you want to know
+```
+
+Both run on your own `gh` credentials, so neither needs a stored token.
 
 ## Local checks
 
