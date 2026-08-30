@@ -178,6 +178,22 @@ test_every_optional_job_is_gated_on_the_probe() {
 
 # The OS matrix is the point of the test job: development happens on macOS and
 # deployment on Linux, and a repo that only tests one finds out late.
+# The config is generated and gitignored, so it must exist before the linter
+# runs: with no config golangci-lint falls back to its own default linters.
+test_lint_config_runs_before_the_linter() {
+    local name="lint-config runs before golangci-lint"
+    local gen act
+    gen=$(grep -n "run: make lint-config" "$WORKFLOW" | head -1 | cut -d: -f1)
+    act=$(grep -n "uses: golangci/golangci-lint-action" "$WORKFLOW" | head -1 | cut -d: -f1)
+    if [ -z "$gen" ] || [ -z "$act" ]; then
+        fail "$name (step not found: gen=$gen act=$act)"
+    elif [ "$gen" -lt "$act" ]; then
+        pass "$name"
+    else
+        fail "$name (generated at line $gen, linter at $act)"
+    fi
+}
+
 test_the_matrix_covers_both_operating_systems() {
     local name="the default test matrix is ubuntu and macos"
     if grep -qF '["ubuntu-latest", "macos-latest"]' "$WORKFLOW"; then
@@ -197,6 +213,7 @@ test_no_makefile_fails_clearly
 test_the_probe_does_not_run_the_targets
 test_the_workflow_matches_this_copy
 test_every_optional_job_is_gated_on_the_probe
+test_lint_config_runs_before_the_linter
 test_the_matrix_covers_both_operating_systems
 
 if [ "$FAILURES" -gt 0 ]; then

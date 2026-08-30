@@ -214,15 +214,17 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ inputs.go_version }}
+      # .golangci.yml is generated from latere.ai/x/ci-gate and gitignored,
+      # because golangci-lint cannot inherit a shared config. It has to exist
+      # before the linter runs: with no config golangci-lint falls back to its
+      # own defaults and lints something nobody asked for.
+      - run: make lint-config
+        if: ${{ needs.probe.outputs.lint_config == 'true' }}
+
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         if: ${{ inputs.run_lint }}
         with:
           version: ${{ inputs.golangci_version }}
-      # .golangci.yml is generated from latere.ai/x/ci-gate, because
-      # golangci-lint cannot inherit a shared config. This fails when a repo's
-      # committed copy has drifted from the shared one.
-      - run: make lint-config
-        if: ${{ needs.probe.outputs.lint_config == 'true' }}
 
       # Runs whether or not golangci-lint did: it carries fixers golangci-lint
       # does not, and a repo that turns the linter off still gets this.

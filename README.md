@@ -93,7 +93,7 @@ target rather than by editing a workflow.
 | `spec-lint` | no | specs | the spec tree agrees with its index |
 | `dist` | no | cross | the shipped platforms still cross-compile |
 | `validate` | no | validate | repo-specific consistency |
-| `lint-config` | no | lint | the generated `.golangci.yml` still matches the shared one |
+| `lint-config` | no | lint | renders the shared `.golangci.yml`, which is generated and gitignored |
 
 A missing optional target skips its job. A missing required target fails the
 probe by name, rather than letting `make` report it four jobs later.
@@ -120,10 +120,16 @@ cover:
 
 `.golangci.yml` is generated rather than hand-written in each repo, because
 golangci-lint cannot inherit a shared config — its v2 schema rejects an
-`extends` key. `lateregate golangci -write` renders it from the module path and
-the disabled fixers in `.lateregate.yaml`; `make lint-config` fails when the
-committed copy drifts. It is generated *into* the repo, not kept out of it, so
-`golangci-lint run` and your editor still find it with no flags.
+`extends` key. `make lint-config` renders it from the module path and the
+disabled fixers in `.lateregate.yaml`.
+
+It is **generated and gitignored, not committed**. Regenerating on every run
+makes divergence impossible; committing it would only make divergence
+detectable. It is still written to the repo root rather than a temp path, so
+`golangci-lint run` and your editor find it with no flags, and `lateregate`
+refuses to write over a tracked file. In CI the pipeline generates it before
+the linter runs, because golangci-lint with no config falls back to its own
+default linters.
 
 The split is deliberate. A gate reachable only from a checkout of this repo
 could only run in CI, and every gate in the set exists because something passed
