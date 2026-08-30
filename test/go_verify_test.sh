@@ -55,6 +55,7 @@ probe() {
     emit dist      dist
     emit validate  validate
     emit lint_config lint-config
+    emit license   license
 }
 
 # run_probe <makefile-body> -- runs the probe in a scratch repo and leaves its
@@ -89,7 +90,7 @@ test_optional_targets_are_skipped_not_failed() {
     local name="every optional target absent skips rather than fails"
     run_probe "$required_only"
     local missing="" k
-    for k in hermetic=false race=false cover=false spec_lint=false dist=false validate=false lint_config=false; do
+    for k in hermetic=false race=false cover=false spec_lint=false dist=false validate=false lint_config=false license=false; do
         case "$OUTPUTS" in *"$k"*) ;; *) missing="$missing $k" ;; esac
     done
     if [ -n "$missing" ]; then fail "$name (never emitted:$missing)"; else pass "$name"; fi
@@ -97,9 +98,9 @@ test_optional_targets_are_skipped_not_failed() {
 
 test_optional_targets_are_found() {
     local name="an optional target that exists is reported true"
-    run_probe "$required_only"$'\ntest-hermetic:\n\t@true\ncover:\n\t@true\nspec-lint:\n\t@true'
+    run_probe "$required_only"$'\ntest-hermetic:\n\t@true\ncover:\n\t@true\nspec-lint:\n\t@true\nlicense:\n\t@true'
     local wrong="" k
-    for k in hermetic=true cover=true spec_lint=true race=false dist=false; do
+    for k in hermetic=true cover=true spec_lint=true license=true race=false dist=false; do
         case "$OUTPUTS" in *"$k"*) ;; *) wrong="$wrong $k" ;; esac
     done
     if [ -n "$wrong" ]; then fail "$name (expected:$wrong; got: $OUTPUTS)"; else pass "$name"; fi
@@ -162,6 +163,7 @@ for t in fmt-check test lint-modernize; do
 emit hermetic  test-hermetic
 emit spec_lint spec-lint
 emit validate  validate
+emit license   license
 has() { make -n "$1" >/dev/null 2>&1; }
 EOF
     if [ -n "$missing" ]; then fail "$name (workflow lacks:$missing)"; else pass "$name"; fi
@@ -170,7 +172,7 @@ EOF
 test_every_optional_job_is_gated_on_the_probe() {
     local name="every optional job is gated on its probe output"
     local k missing=""
-    for k in hermetic race cover spec_lint dist validate lint_config; do
+    for k in hermetic race cover spec_lint dist validate lint_config license; do
         grep -qF "needs.probe.outputs.$k == 'true'" "$WORKFLOW" || missing="$missing $k"
     done
     if [ -n "$missing" ]; then fail "$name (ungated:$missing)"; else pass "$name"; fi

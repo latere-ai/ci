@@ -13,7 +13,7 @@ name: go-verify
 #
 #   required   fmt-check, test, lint-modernize
 #   optional   test-hermetic, test-race, cover, spec-lint, dist, validate,
-#              lint-config
+#              lint-config, license
 #
 # A missing optional target skips its job. A missing required target fails the
 # probe by name, rather than letting make report it four jobs later.
@@ -63,6 +63,7 @@ jobs:
       dist: ${{ steps.probe.outputs.dist }}
       validate: ${{ steps.probe.outputs.validate }}
       lint_config: ${{ steps.probe.outputs.lint_config }}
+      license: ${{ steps.probe.outputs.license }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -102,6 +103,7 @@ jobs:
           emit dist      dist
           emit validate  validate
           emit lint_config lint-config
+          emit license   license
 
   test:
     name: test on ${{ matrix.os }}
@@ -179,6 +181,20 @@ jobs:
         with:
           go-version: ${{ inputs.go_version }}
       - run: make spec-lint
+
+  # A licence only binds the people it reaches, and a file that leaves the
+  # repository without its notice reaches them as if it had no terms.
+  license:
+    name: every source file declares its licence
+    needs: probe
+    if: ${{ needs.probe.outputs.license == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ inputs.go_version }}
+      - run: make license
 
   # A claim in a document with no gate behind it goes stale silently.
   cross:

@@ -16,8 +16,8 @@ auto-generated notes plus a smoke-evidence block.
 
 - `.github/workflows/go-verify.yml` — reusable **per-push** pipeline for a Go
   repo: test on an OS matrix, plus whichever of the hermetic, race, coverage,
-  spec-lint, cross-compile and validate gates the repo has. Runs on every push
-  and pull request, not on a tag.
+  spec-lint, licence, cross-compile and validate gates the repo has. Runs on
+  every push and pull request, not on a tag.
 - `.github/workflows/service-release.yml` — reusable (`workflow_call`) pipeline
   for a k8s **service**: verify to build to deploy to smoke to release, all in
   one tag-triggered run.
@@ -94,6 +94,7 @@ target rather than by editing a workflow.
 | `dist` | no | cross | the shipped platforms still cross-compile |
 | `validate` | no | validate | repo-specific consistency |
 | `lint-config` | no | lint | renders the shared `.golangci.yml`, which is generated and gitignored |
+| `license` | no | license | every source file carries the SPDX notice the repo declared |
 
 A missing optional target skips its job. A missing required target fails the
 probe by name, rather than letting `make` report it four jobs later.
