@@ -78,7 +78,17 @@ jobs:
             echo "::error::go-verify needs a Makefile: it runs the repo's own targets rather than guessing commands."
             exit 1
           fi
-          has() { make -n "$1" >/dev/null 2>&1; }
+          # `make -n <target>` succeeds when a FILE of that name exists, even
+          # with no such rule -- on a case-insensitive filesystem a LICENSE
+          # satisfies `license`, and a dist/ directory satisfies `dist`. Ask
+          # make for its rule database instead, so the probe answers about
+          # targets rather than about the directory.
+          #
+          # The database is read once, and matched without grep -q: under
+          # `set -o pipefail` an early-exiting grep kills make with SIGPIPE and
+          # the pipeline reports 141, which reads as "no such target".
+          db=$(make -np 2>/dev/null || true)
+          has() { printf '%s\n' "$db" | grep -E "^$1:" >/dev/null; }
 
           missing=""
           for t in fmt-check test lint-modernize; do

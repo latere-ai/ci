@@ -30,7 +30,8 @@ probe() {
         echo "::error::go-verify needs a Makefile: it runs the repo's own targets rather than guessing commands."
         return 1
     fi
-    has() { make -n "$1" >/dev/null 2>&1; }
+    db=$(make -np 2>/dev/null || true)
+    has() { printf '%s\n' "$db" | grep -E "^$1:" >/dev/null; }
 
     missing=""
     for t in fmt-check test lint-modernize; do
@@ -153,6 +154,28 @@ test_the_probe_does_not_run_the_targets() {
 # ---------------------------------------------------------------------------
 # The copy above must still be the shell the workflow ships.
 # ---------------------------------------------------------------------------
+# `make -n license` succeeds on a case-insensitive filesystem because the
+# repository's LICENSE file satisfies it, and `make -n dist` succeeds wherever
+# a dist/ directory exists. The probe has to answer about rules, not files.
+test_a_file_is_not_a_target() {
+    local name="a file whose name matches a target is not a target"
+    local dir; dir="$(mktemp -d)"
+    printf 'fmt-check:\n\t@true\ntest:\n\t@true\nlint-modernize:\n\t@true\n' > "$dir/Makefile"
+    printf 'MIT\n' > "$dir/LICENSE"
+    mkdir -p "$dir/dist"
+    OUTPUTS="$dir/out"; : > "$OUTPUTS"
+    ( cd "$dir" && GITHUB_OUTPUT="$OUTPUTS" probe >/dev/null 2>&1 )
+    local got; got="$(cat "$OUTPUTS")"
+    rm -rf "$dir"
+    case "$got" in
+        *"license=true"*) fail "$name (LICENSE was read as a license target)" ; return ;;
+    esac
+    case "$got" in
+        *"dist=true"*) fail "$name (dist/ was read as a dist target)" ; return ;;
+    esac
+    pass "$name"
+}
+
 test_the_workflow_matches_this_copy() {
     local name="go-verify.yml still ships the shell tested here"
     local line missing=""
@@ -164,7 +187,7 @@ emit hermetic  test-hermetic
 emit spec_lint spec-lint
 emit validate  validate
 emit license   license
-has() { make -n "$1" >/dev/null 2>&1; }
+has() { printf '%s\n' "$db" | grep -E "^$1:" >/dev/null; }
 EOF
     if [ -n "$missing" ]; then fail "$name (workflow lacks:$missing)"; else pass "$name"; fi
 }
@@ -213,6 +236,7 @@ test_a_missing_required_target_fails_by_name
 test_several_missing_required_targets_are_all_named
 test_no_makefile_fails_clearly
 test_the_probe_does_not_run_the_targets
+test_a_file_is_not_a_target
 test_the_workflow_matches_this_copy
 test_every_optional_job_is_gated_on_the_probe
 test_lint_config_runs_before_the_linter
