@@ -1,0 +1,119 @@
+name: lateregate
+
+# Reusable per-push pipeline for a latere.ai Go repo, with nothing in it but
+# the shared bar. A consumer repo calls this on every push and pull request:
+#
+#   on: { push: { branches: [main] }, pull_request: {} }
+#   jobs:
+#     gate:
+#       uses: latere-ai/ci/.github/workflows/lateregate.yml@v1
+#
+# Every gate lives in latere-ai/ci-gate, pinned by the consumer's go.mod as a
+# tool dependency, so it runs identically on a laptop. This workflow asks the
+# binary which gates apply (`lateregate list -json`) and runs one job per
+# gate, so a repository adopts a gate by pinning a version that has it, not by
+# editing YAML here or a Makefile there. A waived or inapplicable gate is a
+# skipped job with its reason in the probe log rather than a green step over
+# nothing.
+#
+# There is no golangci-lint version input: the binary pins it. There is no
+# run_lint input: a repository that cannot lint waives `lint` in its
+# .lateregate.yaml with a reason and a date, and the plan reads that.
+
+on:
+  workflow_call:
+    inputs:
+      go_version:
+        description: "Go toolchain version."
+        required: false
+        type: string
+        default: "1.27"
+      test_os:
+        description: "JSON array of runners for the test job. Development happens on macOS and deployment on Linux, and that asymmetry is structural, so both are the default."
+        required: false
+        type: string
+        default: '["ubuntu-latest", "macos-latest"]'
+
+permissions:
+  contents: read
+
+jobs:
+  # The plan. Its output is the matrix, so the set of jobs is exactly the set
+  # of gates the binary will run.
+  probe:
+    name: which gates apply
+    runs-on: ubuntu-latest
+    outputs:
+      gates: ${{ steps.plan.outputs.gates }}
+      test: ${{ steps.plan.outputs.test }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ inputs.go_version }}
+      # Keep in step with test/lateregate_test.sh, which unit-tests a copy of
+      # this shell against a canned plan.
+      - name: Read the plan
+        id: plan
+        run: |
+          set -euo pipefail
+          plan=$(go tool lateregate list -json)
+          printf '%s\n' "$plan" | jq -r '.[] | "\(.status)\t\(.name)\t\(.reason // "")\(.until // "" | if . == "" then "" else " until " + . end)"'
+          # test has its own OS matrix; every other running gate is one job.
+          gates=$(printf '%s\n' "$plan" | jq -c '[.[] | select(.status == "run" and .name != "test") | .name]')
+          test=$(printf '%s\n' "$plan" | jq -r '[.[] | select(.status == "run" and .name == "test")] | length > 0')
+          echo "gates=$gates" >> "$GITHUB_OUTPUT"
+          echo "test=$test" >> "$GITHUB_OUTPUT"
+
+  test:
+    name: test on ${{ matrix.os }}
+    needs: probe
+    if: ${{ needs.probe.outputs.test == 'true' }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(inputs.test_os) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ inputs.go_version }}
+      - run: go tool lateregate test
+
+  # One job per gate, named for it, so a failure names itself in the checks
+  # list and the slow gates run beside each other.
+  gate:
+    name: ${{ matrix.gate }}
+    needs: probe
+    if: ${{ needs.probe.outputs.gates != '[]' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        gate: ${{ fromJSON(needs.probe.outputs.gates) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ inputs.go_version }}
+      - run: go tool lateregate ${{ matrix.gate }}
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ always() && matrix.gate == 'cover' }}
+        with:
+          name: coverage
+          path: coverage.out
+          if-no-files-found: warn
+
+  # The wiring check: caller, hook, gitignore, pin, no hand-rolled gate
+  # target. It runs whether or not a gate fails, because the two call for
+  # different work.
+  contract:
+    name: wiring is in shape
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ inputs.go_version }}
+      - run: go tool lateregate contract

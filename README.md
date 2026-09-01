@@ -14,10 +14,12 @@ auto-generated notes plus a smoke-evidence block.
 
 ## What's here
 
-- `.github/workflows/go-verify.yml` — reusable **per-push** pipeline for a Go
-  repo: test on an OS matrix, plus whichever of the hermetic, race, coverage,
-  spec-lint, licence, cross-compile and validate gates the repo has. Runs on
-  every push and pull request, not on a tag.
+- `.github/workflows/lateregate.yml` — reusable **per-push** pipeline for a
+  Go repo: asks `lateregate` which gates apply and runs one job per gate,
+  plus `test` on an OS matrix. Runs on every push and pull request, not on
+  a tag.
+- `.github/workflows/go-verify.yml` — the previous per-push pipeline, which
+  probes a Makefile for targets. Kept until every consumer has moved.
 - `.github/workflows/service-release.yml` — reusable (`workflow_call`) pipeline
   for a k8s **service**: verify to build to deploy to smoke to release, all in
   one tag-triggered run.
@@ -67,77 +69,70 @@ The pipeline needs the `CATALOG_S3_*` secrets (endpoint, region, bucket,
 prefix, scoped access key + secret) to publish `catalog.json`; the key should
 carry a per-bucket grant only, since it lives in a public repo's Actions.
 
-## Using it (Go verify)
+## Using it (Go)
 
-Copy `examples/go-verify.yml` to `.github/workflows/ci.yml`. That is the whole
-caller:
+Two per-push pipelines exist. `lateregate.yml` is the current one;
+`go-verify.yml` is kept for the consumers that have not moved yet and is
+deleted when the last one has.
+
+### `lateregate.yml`
+
+Copy `examples/lateregate.yml` to `.github/workflows/ci.yml`, or let the
+binary write it with `go tool lateregate init`. That is the whole caller:
 
 ```yaml
 jobs:
-  verify:
-    uses: latere-ai/ci/.github/workflows/go-verify.yml@v1
+  gate:
+    uses: latere-ai/ci/.github/workflows/lateregate.yml@v1
 ```
 
-There are no per-gate inputs. The pipeline probes your `Makefile` with
-`make -n` and runs the targets it finds, so a repo turns a gate on by adding a
-target rather than by editing a workflow.
+There are no per-gate inputs and no Makefile contract. The pipeline runs
+`go tool lateregate list -json` and builds one job per gate the binary says
+applies to the repository. Which gates apply is decided by the binary
+asking the tree (a repository with no `specs/` is not spec-linted), and the
+only way a gate that applies does not run is a dated waiver in the
+repository's `.lateregate.yaml`, which the plan reads and the probe log
+prints.
 
-| Target | Required | Job | What it gates |
-| --- | --- | --- | --- |
-| `fmt-check` | yes | test | no Go source is unformatted |
-| `test` | yes | test (ubuntu + macos) | `go vet` and the suite |
-| `lint-modernize` | yes | lint | no code the standard library already covers |
-| `test-hermetic` | no | hermetic | the suite with only the toolchain on `PATH` |
-| `test-race` | no | race | the race detector |
-| `cover` | no | coverage | **every package** clears the floor |
-| `spec-lint` | no | specs | the spec tree agrees with its index |
-| `dist` | no | cross | the shipped platforms still cross-compile |
-| `validate` | no | validate | repo-specific consistency |
-| `lint-config` | no | lint | renders the shared `.golangci.yml`, which is generated and gitignored |
-| `license` | no | license | every source file carries the SPDX notice the repo declared |
+| Job | Runs |
+| --- | --- |
+| `probe` | `lateregate list -json`; its output is the matrix |
+| `test on <os>` | `lateregate test` on each runner in `test_os` |
+| `<gate>` | `lateregate <gate>`, one job per running gate; `cover` uploads `coverage.out` |
+| `wiring is in shape` | `lateregate contract`: the caller, hook, gitignore and pin are the shared ones |
 
-A missing optional target skips its job. A missing required target fails the
-probe by name, rather than letting `make` report it four jobs later.
+`go tool lateregate` on a laptop runs the same set. That split is the
+point: a gate that only runs in CI tells you too late.
 
-Only three targets are required because fifteen of the twenty-one Go repos have
-exactly those three today, and a contract nobody can meet is a contract nobody
-adopts. Add the rest as a repo earns them.
+Inputs are `go_version` and `test_os`. golangci-lint's version is pinned in
+the binary, so there is no input for it, and a repository that cannot lint
+waives `lint` with a reason and a date rather than turning the job off.
+
+### `go-verify.yml`
+
+The previous pipeline. It probes the consumer's `Makefile` with `make -np`
+and runs the targets it finds: `fmt-check`, `test` and `lint-modernize`
+are required, and `test-hermetic`, `test-race`, `cover`, `spec-lint`,
+`dist`, `validate`, `lint-config` and `license` run when present. A missing
+optional target skips its job, which is the gap `lateregate.yml` closes.
+See `examples/go-verify.yml` for the caller.
 
 ### The checks live in `ci-gate`, not here
 
-This repo owns **orchestration and ordering**. What each gate asserts lives in
-[`latere-ai/ci-gate`](https://github.com/latere-ai/ci-gate), pinned by the
-consumer's `go.mod`:
+This repo owns **orchestration and ordering**. What each gate asserts lives
+in [`latere-ai/ci-gate`](https://github.com/latere-ai/ci-gate), pinned by
+the consumer's `go.mod`:
 
 ```sh
 go get -tool latere.ai/x/ci-gate/cmd/lateregate
-```
-
-```make
-cover:
-	go test ./... -coverprofile=coverage.out -coverpkg=./...
-	@go tool lateregate cover
+go tool lateregate
 ```
 
 `.golangci.yml` is generated rather than hand-written in each repo, because
-golangci-lint cannot inherit a shared config — its v2 schema rejects an
-`extends` key. `make lint-config` renders it from the module path and the
-disabled fixers in `.lateregate.yaml`.
-
-It is **generated and gitignored, not committed**. Regenerating on every run
-makes divergence impossible; committing it would only make divergence
-detectable. It is still written to the repo root rather than a temp path, so
-`golangci-lint run` and your editor find it with no flags, and `lateregate`
-refuses to write over a tracked file. In CI the pipeline generates it before
-the linter runs, because golangci-lint with no config falls back to its own
-default linters.
-
-The split is deliberate. A gate reachable only from a checkout of this repo
-could only run in CI, and every gate in the set exists because something passed
-on a laptop and failed on a runner. Pinned through `go.mod`, each one runs the
-same in both places. Repo-specific data — the coverage floor, exemptions and
-their reasons, spec conventions — lives in a `.lateregate.yaml` in the consumer
-repo; see `ci-gate/README.md`.
+golangci-lint cannot inherit a shared config: its v2 schema rejects an
+`extends` key. `lateregate lint` renders it from the module path and the
+repository's `.lateregate.yaml` before every run, and it is gitignored, so
+divergence is impossible rather than merely detectable.
 
 ## Build modes
 
