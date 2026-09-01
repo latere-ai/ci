@@ -5,7 +5,7 @@ per-repo forks. Consumer repos keep a thin caller workflow; all the logic lives
 here and is versioned with a moving `@v1` tag.
 
 Two kinds of pipeline: **release**, triggered by a version tag, and
-**per-push verify** (`go-verify.yml`), triggered by every push.
+**per-push verify** (`lateregate.yml`), triggered by every push.
 
 A version tag (`v*`) push in a consumer repo triggers a release: build the
 artifact, deploy to the `latere-k8s` cluster, smoke the live surface to prove
