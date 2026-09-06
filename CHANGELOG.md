@@ -10,6 +10,13 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- README: the consumer conventions name the probe contract every service
+  carries through `latere.ai/x/pkg/health`: `/livez`, `/readyz`, `/version`,
+  `/metrics` where present, and `/healthz` as an alias of `/livez` for one
+  release.
+
 ## v1.8.0 - 2026-09-06
 
 Every release pipeline publishes the tag's `CHANGELOG.md` section as the

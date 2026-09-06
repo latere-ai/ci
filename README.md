@@ -61,6 +61,7 @@ A service repo must provide:
 | `deploy/prod/` | Rollable k8s manifests. If `deploy/prod/` contains a `kustomization.yaml` (a kustomize overlay), the pipeline runs `kubectl apply -k deploy/prod/`; otherwise `kubectl apply -f deploy/prod/`. Everything here must be safe to re-apply. |
 | `deploy/bootstrap/` | Bootstrap-only / immutable / alternate manifests (storageclass, alternate layouts, separate-cadence dashboards). The pipeline **ignores** this directory. |
 | `tools/smoke/release.sh` | Post-deploy live smoke. Honors env `BASE_URL`, `EXPECTED_ASSET`, `OUTPUT_MD`, `SERVICE_TOKEN`. Exits non-zero if the live surface is wrong. Writes a markdown evidence block to `OUTPUT_MD`. |
+| Probes | The four paths of `latere.ai/x/pkg/health`, served by its handler: `/livez` (liveness, restart on failure, never depends on a dependency), `/readyz` (readiness, out of rotation on failure, body names the failing check), `/version` (build identity: `version`, `commit`, `build_time`), and `/metrics` where the service has any. Manifests probe `/livez` and `/readyz`; the smoke reads `/livez`, `/readyz`, and `/version`. `/healthz` answers as `/livez` through the package's `LegacyHealthz` option for one release while a manifest moves, and is removed in the release after. |
 | `Dockerfile.ci` | Packages the prebuilt binary `out/<service>` into a runtime image. The build job compiles the binary (and embeds the SPA); this Dockerfile only copies it in. |
 | frontend at `frontend/` | (services with a UI) Built with `bun run build`, output `frontend/dist/`. The pipeline pins the served Vite asset hash to this build. |
 
@@ -218,8 +219,9 @@ existing release.
 
 "Live" means *this exact build is serving*, not merely that something returns
 200. The smoke script pins the served Vite asset hash (`EXPECTED_ASSET`,
-threaded from the frontend build evidence) to the bundle CI just built. Release
-notes publish only after that smoke passes. That ordering is the spine of the
+threaded from the frontend build evidence) to the bundle CI just built, and
+reads `/version` to compare the served `version` with the tag. Release notes
+publish only after that smoke passes. That ordering is the spine of the
 pipeline.
 
 ## Using it (service)
