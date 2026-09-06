@@ -10,8 +10,9 @@ name: cli-release
 #       secrets: inherit
 #
 # Flow: lint -> test -> goreleaser. goreleaser builds the cross-platform
-# binaries and publishes the GitHub release with its own changelog, driven by
-# the consumer repo's .goreleaser.yaml.
+# binaries, driven by the consumer repo's .goreleaser.yaml, and publishes the
+# GitHub release whose body is the tag's CHANGELOG.md section; a tag without
+# one fails before goreleaser runs.
 
 on:
   workflow_call:
@@ -41,6 +42,11 @@ on:
         required: false
         type: boolean
         default: true
+      lateregate_version:
+        description: "latere-ai/ci-gate version whose `release-notes` reads the CHANGELOG.md section for the tag. Explicit rather than the consumer's tool pin so the reader is the same in every repository, including ones that pin no Go tool."
+        required: false
+        type: string
+        default: "v0.29.0"
 
 permissions:
   contents: write
@@ -86,10 +92,21 @@ jobs:
         with:
           go-version: ${{ inputs.go_version }}
           check-latest: true
+
+      - name: Read the release note for this tag
+        # A tag is a release, and a release has notes. The section for this
+        # tag in CHANGELOG.md is the body, and no section fails the job before
+        # goreleaser builds anything. The reader is lateregate's at a version
+        # pinned here, the same reader the pre-push hook refuses the tag with.
+        env:
+          TAG: ${{ github.ref_name }}
+        run: go run latere.ai/x/ci-gate/cmd/lateregate@${{ inputs.lateregate_version }} release-notes "$TAG" > notes.md
+
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           distribution: goreleaser
           version: ${{ inputs.goreleaser_version }}
-          args: release --clean
+          # --release-notes replaces goreleaser's commit list with the section.
+          args: release --clean --release-notes notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

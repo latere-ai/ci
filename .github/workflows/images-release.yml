@@ -32,6 +32,16 @@ on:
         description: "Release title prefix (e.g. Sandbox Images -> 'Sandbox Images v1.2.3')."
         required: true
         type: string
+      go_version:
+        description: "Go toolchain version, used to run the release-note reader."
+        required: false
+        type: string
+        default: "1.27"
+      lateregate_version:
+        description: "latere-ai/ci-gate version whose `release-notes` reads the CHANGELOG.md section for the tag. Explicit rather than the consumer's tool pin so the reader is the same in every repository, including ones that pin no Go tool."
+        required: false
+        type: string
+        default: "v0.29.0"
     secrets:
       CATALOG_S3_ENDPOINT:
         description: "S3-compatible endpoint URL the catalog publishes to (e.g. https://fra1.digitaloceanspaces.com)."
@@ -394,25 +404,41 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ inputs.go_version }}
+          cache: false
+
+      - name: Read the release note for this tag
+        # A tag is a release, and a release has notes. The section for this
+        # tag in CHANGELOG.md is the body, and no section fails the job before
+        # anything is created or edited. The reader is lateregate's, run at a
+        # version pinned here rather than the consumer's tool pin, so it also
+        # serves repositories that pin no Go tool; the pre-push hook in a Go
+        # repository refuses the tag with the same reader, so this branch is
+        # rarely taken.
+        env:
+          TAG: ${{ github.ref_name }}
+        run: go run latere.ai/x/ci-gate/cmd/lateregate@${{ inputs.lateregate_version }} release-notes "$TAG" > notes.md
+
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: catalog-json
 
       - name: Publish release with evidence
-        # Generate the changelog (or reuse an existing release body), drop any
-        # prior evidence block, append the fresh smoke evidence, and create or
-        # edit the release with catalog.json attached. The release is the last
-        # step: the registry and the published catalog are already green.
+        # The body is the changelog section, then the smoke evidence, and
+        # it is rebuilt from both on every run, so an edit re-run replaces
+        # rather than stacks. catalog.json is attached. The release is the
+        # last step: the registry and the published catalog are already
+        # green.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
-          SHA: ${{ github.sha }}
           TITLE: ${{ inputs.title }}
           EVIDENCE: ${{ needs.smoke.outputs.evidence }}
         run: |
           set -euo pipefail
-          marker='<!-- release-evidence -->'
           printf '%s\n' "$EVIDENCE" > evidence.md
           # A hyphen marks a prerelease only in the SemVer version core (§9);
           # build metadata (§10, after '+') is part of a stable release and
@@ -423,17 +449,9 @@ jobs:
             prerelease="--prerelease"
           fi
 
-          if gh release view "$TAG" --json body --jq .body > prefix.md 2>/dev/null; then
-            : # existing release body becomes the prefix
-          else
-            gh api "repos/${GH_REPO}/releases/generate-notes" \
-              -f tag_name="$TAG" -f target_commitish="$SHA" --jq .body > prefix.md || true
-          fi
-
-          # Drop any existing evidence block so a re-run replaces rather than
-          # stacks. Everything from the marker onward is regenerated.
-          awk -v m="$marker" 'index($0,m){exit} {print}' prefix.md > body.md
-          { printf '\n'; cat evidence.md; } >> body.md
+          # Keep in step with test/publish_release_test.sh, which unit-tests
+          # a copy of this line.
+          { cat notes.md; printf '\n'; cat evidence.md; } > body.md
 
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release edit "$TAG" --notes-file body.md
