@@ -1,0 +1,18 @@
+# Copy to a module or library repo as .github/workflows/release.yml. Pushing a
+# vX.Y.Z tag publishes the GitHub release whose body is the tag's section in
+# CHANGELOG.md; a tag without one fails. Nothing is built or deployed.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+# Required: the pipeline creates the release. The org defaults to a read-only
+# token, so the calling job must grant contents: write.
+permissions:
+  contents: write
+
+jobs:
+  release:
+    uses: latere-ai/ci/.github/workflows/notes-release.yml@v1
+    secrets: inherit

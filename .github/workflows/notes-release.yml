@@ -1,0 +1,90 @@
+name: notes-release
+
+# Reusable release pipeline for a latere.ai repository that builds nothing on
+# a tag: a Go module, a library, a tool consumed through go.mod. A consumer
+# repo calls this on a version tag push:
+#
+#   on: { push: { tags: ['v*'] } }
+#   jobs:
+#     release:
+#       uses: latere-ai/ci/.github/workflows/notes-release.yml@v1
+#       secrets: inherit
+#
+# Flow (one run): read the tag's CHANGELOG.md section -> publish the GitHub
+# release with that section as the body. A tag without a section fails
+# before anything is created. See this repo's README for the changelog
+# convention.
+
+on:
+  workflow_call:
+    inputs:
+      title:
+        description: "Optional release title prefix (e.g. Lux -> 'Lux v1.2.3'). Empty titles the release with the tag alone."
+        required: false
+        type: string
+        default: ""
+      go_version:
+        description: "Go toolchain version, used to run the release-note reader."
+        required: false
+        type: string
+        default: "1.27"
+      lateregate_version:
+        description: "latere-ai/ci-gate version whose `release-notes` reads the CHANGELOG.md section for the tag. Explicit rather than the consumer's tool pin so the reader is the same in every repository, including ones that pin no Go tool."
+        required: false
+        type: string
+        default: "v0.29.0"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ inputs.go_version }}
+          cache: false
+
+      - name: Read the release note for this tag
+        # A tag is a release, and a release has notes. The section for this
+        # tag in CHANGELOG.md is the body, and no section fails the job before
+        # anything is created or edited. The reader is lateregate's, run at a
+        # version pinned here rather than the consumer's tool pin, so it also
+        # serves repositories that pin no Go tool; the pre-push hook in a Go
+        # repository refuses the tag with the same reader, so this branch is
+        # rarely taken.
+        env:
+          TAG: ${{ github.ref_name }}
+        run: go run latere.ai/x/ci-gate/cmd/lateregate@${{ inputs.lateregate_version }} release-notes "$TAG" > notes.md
+
+      - name: Publish the release
+        # Create, or on a re-run edit, so the body is always the section as
+        # it stands at the tag.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          TITLE: ${{ inputs.title }}
+        run: |
+          set -euo pipefail
+          # A hyphen marks a prerelease only in the SemVer version core (§9);
+          # build metadata (§10, after '+') is part of a stable release and
+          # may itself contain hyphens, so strip it before the test.
+          prerelease=""
+          core="${TAG%%+*}"
+          if [[ "$core" == *-* ]]; then
+            prerelease="--prerelease"
+          fi
+          title="${TITLE:+$TITLE }$TAG"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --notes-file notes.md
+          else
+            # --verify-tag: the tag exists at the pushed commit, and gh must
+            # not create one at HEAD if it somehow does not.
+            gh release create "$TAG" $prerelease \
+              --title "$title" \
+              --notes-file notes.md --verify-tag
+          fi
