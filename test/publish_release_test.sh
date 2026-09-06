@@ -33,6 +33,13 @@ FAILURES=0
 pass() { printf "  \033[32mPASS\033[0m %s\n" "$1"; }
 fail() { printf "  \033[31mFAIL\033[0m %s\n" "$1"; FAILURES=$((FAILURES + 1)); }
 
+# assemble_body is the verbatim body line of the service-release and
+# images-release "publish" steps: the changelog section, a blank line, the
+# smoke evidence. It reads notes.md and evidence.md in the working directory.
+assemble_body() {
+    { cat notes.md; printf '\n'; cat evidence.md; } > body.md
+}
+
 # publish_tail is the verbatim tail of the service-release "publish"
 # step, from the asset collection through the create/edit branch.
 publish_tail() {
@@ -77,6 +84,47 @@ test_edit_path_without_cli() {
     fi
 }
 
+# The body is the section, then the evidence, rebuilt from both on every
+# run; an edit re-run must produce the same body as the create did, so a
+# release never stacks two evidence blocks.
+test_body_is_section_then_evidence() {
+    local name="body is the changelog section, a blank line, then the evidence; a re-run is identical"
+    local dir
+    dir=$(mktemp -d)
+    (
+        cd "$dir" || exit 1
+        printf 'The note.\n\n### Added\n\n- a thing\n' > notes.md
+        printf '<!-- release-evidence -->\n\n## Release Evidence\n\n- Smoke: ok\n' > evidence.md
+        assemble_body
+        cp body.md first.md
+        assemble_body
+        expected=$'The note.\n\n### Added\n\n- a thing\n\n<!-- release-evidence -->\n\n## Release Evidence\n\n- Smoke: ok\n'
+        [ "$(cat body.md)" = "$(printf '%s' "$expected")" ] && cmp -s first.md body.md
+    )
+    local rc=$?
+    rm -rf "$dir"
+    if [ "$rc" -eq 0 ]; then
+        pass "$name"
+    else
+        fail "$name"
+    fi
+}
+
+# The copy above must match what the workflows ship.
+assert_body_line_matches_workflows() {
+    local name="service-release.yml and images-release.yml carry the tested body line"
+    local line="{ cat notes.md; printf '\\n'; cat evidence.md; } > body.md"
+    local missing=""
+    for wf in service-release.yml images-release.yml; do
+        grep -qF "$line" "$REPO_ROOT/.github/workflows/$wf" || missing="${missing} $wf"
+    done
+    if [ -z "$missing" ]; then
+        pass "$name"
+    else
+        fail "$name (missing in:${missing})"
+    fi
+}
+
 assert_no_bare_upload_conditional() {
     local name="workflows carry no bare '] && gh release upload' conditional"
     local hits
@@ -90,6 +138,8 @@ assert_no_bare_upload_conditional() {
 }
 
 test_edit_path_without_cli
+test_body_is_section_then_evidence
+assert_body_line_matches_workflows
 assert_no_bare_upload_conditional
 
 if [ "$FAILURES" -gt 0 ]; then
