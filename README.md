@@ -9,8 +9,10 @@ Two kinds of pipeline: **release**, triggered by a version tag, and
 
 A version tag (`v*`) push in a consumer repo triggers a release: build the
 artifact, deploy to the `latere-k8s` cluster, smoke the live surface to prove
-the exact build is serving, and only then publish the GitHub release with
-auto-generated notes plus a smoke-evidence block.
+the exact build is serving, and only then publish the GitHub release whose
+body is the tag's section in `CHANGELOG.md` plus a smoke-evidence block. A
+tag without a section fails; see "A tag is a release, and a release has
+notes" below.
 
 ## What's here
 
@@ -29,6 +31,9 @@ auto-generated notes plus a smoke-evidence block.
   **container-images repo** (an image catalog, no deploy): verify to build+push
   (dependency-ordered) to publish-catalog (S3) to smoke against the published
   images to release with evidence.
+- `.github/workflows/notes-release.yml` — reusable pipeline for a **module or
+  library** that builds nothing on a tag: read the changelog section, publish
+  the release.
 - `tools/repo-settings.sh` — applies the org-wide repository settings policy
   (`tools/repo-settings.json`) so a new repo does not sit on GitHub's defaults.
   Run it when you create a repo.
@@ -42,6 +47,12 @@ directories and a standard script. Variability lives in the repo by convention,
 not in a sprawl of workflow inputs.
 
 ## Consumer conventions (the contract)
+
+Every repo that releases through a pipeline here must provide:
+
+| Convention | Purpose |
+| --- | --- |
+| `CHANGELOG.md` | One level-two section per tag, and the section is the release body. See "A tag is a release, and a release has notes". |
 
 A service repo must provide:
 
@@ -151,6 +162,57 @@ divergence is impossible rather than merely detectable.
 For a frontend service, prefer `split` when you want the asset-pin guarantee;
 `dockerfile` is the deliberate, lower-fidelity option for repos that already
 build everything in one Dockerfile.
+
+## A tag is a release, and a release has notes
+
+Every release pipeline here reads the tag's section from the consumer's
+`CHANGELOG.md` and publishes it as the release body. No section fails the
+release job before anything is created or edited. The pipelines do not fall
+back to GitHub's generated notes: those are built from pull request titles,
+and a repo that commits to main directly gets a compare link and nothing
+else.
+
+The file's shape: a level-two heading whose second word is the tag opens a
+section that runs to the next level-two heading, so `## v1.2.3 - 2026-09-06`
+and `## v1.2.3` both name `v1.2.3`. `## Unreleased` holds what the next tag
+will say; write under it as work lands. The section says what changed for
+whoever uses the release, not what was committed.
+
+The reader is `lateregate release-notes`, from
+[`latere-ai/ci-gate`](https://github.com/latere-ai/ci-gate), run at the
+version each pipeline pins in its `lateregate_version` input. Pinning it
+here rather than reading the consumer's tool pin means the reader is the
+same in every repo, including ones that pin no Go tool at all. In a Go repo
+the same binary runs in the pre-push hook and refuses the tag before it
+leaves the laptop, and `go tool lateregate release vX.Y.Z` moves the notes
+under `Unreleased` into the tag's section, commits, tags and pushes. A repo
+without the tool writes the section by hand and pushes the tag.
+
+In `service-release.yml` the release job is the last one, so when it fails
+on a missing section production is already serving the tag. That is the
+intended order, a release announces what is live, and the fix is to add the
+section and re-run the job rather than re-tag.
+
+## Using it (module or library)
+
+```yaml
+# consumer-repo/.github/workflows/release.yml
+name: Release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  release:
+    uses: latere-ai/ci/.github/workflows/notes-release.yml@v1
+    secrets: inherit
+```
+
+Nothing is built. The release body is the changelog section, the title is
+the tag (or `title: Name` for `Name vX.Y.Z`), and a hyphen in the version
+core marks a prerelease. A re-run edits the body rather than failing on an
+existing release.
 
 ## The "actually live" check
 
