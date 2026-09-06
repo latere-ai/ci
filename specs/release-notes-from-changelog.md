@@ -1,6 +1,6 @@
 ---
 title: Every release pipeline publishes the changelog section, and fails without one
-status: draft
+status: complete
 depends_on:
   - ../../ci-gate/specs/012-a-tag-is-a-release.md
 affects:
@@ -132,3 +132,30 @@ Every repository that tags adopts in one commit each. In order:
 
 Each seeded changelog starts empty under `## Unreleased`; the first tag
 after adoption is the first that needs a note, and the pre-push says so.
+
+## Outcome
+
+Shipped as v1.8.0 on 2026-09-06; `v1` moved with it. Acceptance 1 to 5
+hold: `test/run.sh` carries the two new suites, `actionlint` passes, and
+this repository publishes its own releases through `notes-release.yml`
+(v1.8.0 was the first, ci-gate v0.29.1 the second). Acceptance 6, the
+service canary, was run to the pre-push only: on a platform worktree the
+hook refused `v9.9.9` at a commit with no section and accepted it once the
+section was there; the first real service tag after this date is the
+end-to-end proof, and its release job fails closed if the section is
+missing.
+
+The rollout landed the same day in every repository the list names, with
+these departures from the plan:
+
+- images publishes no GitHub release at all (its tag pushes images and its
+  `release` event republishes them), so step 8 took nothing; adopting
+  `images-release.yml` there is its own change.
+- latere-cli calls `cli-release.yml@v1` with `run_lint: false`, because
+  lint is lateregate's on every push and the pipeline's lint job would run
+  golangci-lint without the rendered config.
+- wallfacer keeps its hand-written notes under `docs/releases` as history;
+  its pipeline reads `CHANGELOG.md` from here on.
+- agents' site workflow reads the section on every run through the
+  repository's own `tools/release` evidence assembler, so its marker logic
+  stayed.
