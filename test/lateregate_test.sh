@@ -115,6 +115,17 @@ else
     fail "runs_on does not route every non-matrix job (fixed=$fixed routed=$routed)"
 fi
 
+# setup-go's cache restore is for hosted runners, which start empty. On the
+# self-hosted machine the module cache is already there and the restore
+# fails file by file, so every setup-go step gates it on a hosted label.
+setups=$(grep -c 'uses: actions/setup-go' "$WORKFLOW")
+gated=$(grep -cE "cache: \\$\\{\\{ startsWith\\((inputs.runs_on|matrix.os), 'ubuntu-'\\)" "$WORKFLOW")
+if [ "$setups" -eq "$gated" ]; then
+    pass "every setup-go caches only on a hosted runner"
+else
+    fail "setup-go steps without a hosted-only cache gate (setups=$setups gated=$gated)"
+fi
+
 if [ "$FAILURES" -gt 0 ]; then
     echo "$FAILURES failure(s)"
     exit 1

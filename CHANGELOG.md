@@ -10,6 +10,14 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v1.10.1 - 2026-09-09
+
+### Fixed
+
+- `lateregate.yml`: setup-go restores its module cache on hosted runners
+  only. A self-hosted runner keeps its own cache between jobs, and the
+  restore over it failed file by file on every step.
+
 ## v1.10.0 - 2026-09-08
 
 ### Added

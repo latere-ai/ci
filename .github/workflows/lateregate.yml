@@ -56,6 +56,10 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ inputs.go_version }}
+          # The module cache is worth restoring on a hosted runner, which
+          # starts empty. A self-hosted runner keeps its own between jobs,
+          # and restoring a tarball over it fails on every file that exists.
+          cache: ${{ startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-') }}
       # Keep in step with test/lateregate_test.sh, which unit-tests a copy of
       # this shell against a canned plan.
       - name: Read the plan
@@ -84,6 +88,10 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ inputs.go_version }}
+          # The module cache is worth restoring on a hosted runner, which
+          # starts empty. A self-hosted runner keeps its own between jobs,
+          # and restoring a tarball over it fails on every file that exists.
+          cache: ${{ startsWith(matrix.os, 'ubuntu-') || startsWith(matrix.os, 'macos-') || startsWith(matrix.os, 'windows-') }}
       - run: go tool lateregate test
 
   # One job per gate, named for it, so a failure names itself in the checks
@@ -102,6 +110,10 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ inputs.go_version }}
+          # The module cache is worth restoring on a hosted runner, which
+          # starts empty. A self-hosted runner keeps its own between jobs,
+          # and restoring a tarball over it fails on every file that exists.
+          cache: ${{ startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-') }}
       - run: go tool lateregate ${{ matrix.gate }}
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ always() && matrix.gate == 'cover' }}
@@ -121,4 +133,8 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ inputs.go_version }}
+          # The module cache is worth restoring on a hosted runner, which
+          # starts empty. A self-hosted runner keeps its own between jobs,
+          # and restoring a tarball over it fails on every file that exists.
+          cache: ${{ startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-') }}
       - run: go tool lateregate contract
