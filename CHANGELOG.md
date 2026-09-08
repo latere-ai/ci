@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v1.9.0 - 2026-09-08
+
 ### Changed
 
 - `lateregate.yml`, `go-verify.yml`: the default `test_os` is `["ubuntu-latest"]`.
