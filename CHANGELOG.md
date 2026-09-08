@@ -12,6 +12,15 @@ committed: the commit log already holds that.
 
 ### Changed
 
+- `lateregate.yml`, `go-verify.yml`: the default `test_os` is `["ubuntu-latest"]`.
+  macOS bills at ten times the Linux rate and was half of the org's Actions
+  spend while only four repositories carry darwin code or ship a darwin
+  binary. Those repositories pass `test_os` explicitly; every other caller
+  loses the macOS job on its next run without a change.
+- `cli-release.yml`: new `test_os` input (default `["ubuntu-latest"]`) so a
+  CLI that ships a darwin binary can test on macOS at release time instead
+  of on every push.
+
 - README: the consumer conventions name the probe contract every service
   carries through `latere.ai/x/pkg/health`: `/livez`, `/readyz`, `/version`,
   `/metrics` where present, and `/healthz` as an alias of `/livez` for one

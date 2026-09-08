@@ -29,10 +29,10 @@ on:
         type: string
         default: "1.27"
       test_os:
-        description: "JSON array of runners for the test job. Development happens on macOS and deployment on Linux, and that asymmetry is structural, so both are the default."
+        description: "JSON array of runners for the test job. Linux only by default: every service deploys on Linux, and macOS bills at ten times the Linux rate. A repository with darwin build tags or a macOS artifact adds macos-latest here."
         required: false
         type: string
-        default: '["ubuntu-latest", "macos-latest"]'
+        default: '["ubuntu-latest"]'
 
 permissions:
   contents: read

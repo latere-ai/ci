@@ -36,10 +36,10 @@ on:
         type: string
         default: "v2.13.1"
       test_os:
-        description: "JSON array of runners for the test matrix. Development happens on macOS and deployment on Linux, and that asymmetry is structural, so both are the default."
+        description: "JSON array of runners for the test matrix. Linux only by default: every service deploys on Linux, and macOS bills at ten times the Linux rate. A repository with darwin build tags or a macOS artifact adds macos-latest here."
         required: false
         type: string
-        default: '["ubuntu-latest", "macos-latest"]'
+        default: '["ubuntu-latest"]'
       run_lint:
         description: "Run golangci-lint. The modernize gate runs regardless, through make lint-modernize."
         required: false

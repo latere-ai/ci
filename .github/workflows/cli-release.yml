@@ -42,6 +42,11 @@ on:
         required: false
         type: boolean
         default: true
+      test_os:
+        description: "JSON array of runners for the test job. A CLI that ships a darwin binary lists macos-latest here so the release, not every push, pays for the macOS run."
+        required: false
+        type: string
+        default: '["ubuntu-latest"]'
       lateregate_version:
         description: "latere-ai/ci-gate version whose `release-notes` reads the CHANGELOG.md section for the tag. Explicit rather than the consumer's tool pin so the reader is the same in every repository, including ones that pin no Go tool."
         required: false
@@ -68,7 +73,11 @@ jobs:
 
   test:
     if: ${{ inputs.run_tests }}
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(inputs.test_os) }}
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0

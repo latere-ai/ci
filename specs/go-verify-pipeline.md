@@ -74,8 +74,10 @@ find out. Two gates prevent the whole class, and both now exist in llmops:
   system directories on PATH. Reproduces a runner's environment closely
   enough to catch this before a push, *and is runnable locally*, which is
   the point.
-- **an OS matrix** (ubuntu + macos), because development happens on macOS
-  and deployment on Linux, and that asymmetry is structural.
+- **an OS matrix**, Linux by default and macOS on request through `test_os`.
+  Development happens on macOS and deployment on Linux, but a macOS minute
+  costs ten Linux minutes, so only repositories with darwin build tags or a
+  darwin artifact pay for it.
 
 A third thing surfaced separately: llmops' repository-average coverage
 gate passed at **90.4%** while `internal/harness` sat at **85.7%** and
@@ -239,7 +241,7 @@ three today and a contract nobody can meet is a contract nobody adopts.
 The rest are opt-in per repo through workflow inputs, and a repo turns
 them on as it earns them.
 
-Jobs: `test` (matrix: ubuntu-latest, macos-latest), `hermetic`, `race`,
+Jobs: `test` (matrix from `test_os`, default ubuntu-latest), `hermetic`, `race`,
 `coverage` (uploads the profile artifact), `specs`, `cross`, `lint`
 (golangci-lint action + `make lint-modernize`).
 

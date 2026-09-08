@@ -201,8 +201,8 @@ test_every_optional_job_is_gated_on_the_probe() {
     if [ -n "$missing" ]; then fail "$name (ungated:$missing)"; else pass "$name"; fi
 }
 
-# The OS matrix is the point of the test job: development happens on macOS and
-# deployment on Linux, and a repo that only tests one finds out late.
+# The default matrix is Linux only: every service deploys on Linux and macOS
+# bills at ten times the rate, so a repository opts in through test_os.
 # The config is generated and gitignored, so it must exist before the linter
 # runs: with no config golangci-lint falls back to its own default linters.
 test_lint_config_runs_before_the_linter() {
@@ -219,9 +219,9 @@ test_lint_config_runs_before_the_linter() {
     fi
 }
 
-test_the_matrix_covers_both_operating_systems() {
-    local name="the default test matrix is ubuntu and macos"
-    if grep -qF '["ubuntu-latest", "macos-latest"]' "$WORKFLOW"; then
+test_the_default_matrix_is_linux_only() {
+    local name="the default test matrix is ubuntu only"
+    if grep -qF "default: '[\"ubuntu-latest\"]'" "$WORKFLOW" && ! grep -qF '"macos-latest"]' "$WORKFLOW"; then
         pass "$name"
     else
         fail "$name"
@@ -240,7 +240,7 @@ test_a_file_is_not_a_target
 test_the_workflow_matches_this_copy
 test_every_optional_job_is_gated_on_the_probe
 test_lint_config_runs_before_the_linter
-test_the_matrix_covers_both_operating_systems
+test_the_default_matrix_is_linux_only
 
 if [ "$FAILURES" -gt 0 ]; then
     printf "\033[31m%d check(s) failed\033[0m\n" "$FAILURES"
