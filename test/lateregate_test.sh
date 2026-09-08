@@ -104,6 +104,17 @@ else
     pass "every action is pinned to a commit SHA"
 fi
 
+# Every job except the test matrix runs where runs_on says, so a repository
+# that adopts the self-hosted runner moves the whole pipeline with one input.
+# A bare ubuntu-latest on a job would pin that job to hosted runners.
+fixed=$(grep -cE '^\s+runs-on: ubuntu-latest$' "$WORKFLOW")
+routed=$(grep -cF 'runs-on: ${{ inputs.runs_on }}' "$WORKFLOW")
+if [ "$fixed" -eq 0 ] && [ "$routed" -eq 3 ]; then
+    pass "probe, gate and contract run on inputs.runs_on"
+else
+    fail "runs_on does not route every non-matrix job (fixed=$fixed routed=$routed)"
+fi
+
 if [ "$FAILURES" -gt 0 ]; then
     echo "$FAILURES failure(s)"
     exit 1

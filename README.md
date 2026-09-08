@@ -116,7 +116,9 @@ prints.
 `go tool lateregate` on a laptop runs the same set. That split is the
 point: a gate that only runs in CI tells you too late.
 
-Inputs are `go_version` and `test_os`. golangci-lint's version is pinned in
+Inputs are `go_version`, `test_os` and `runs_on`. `runs_on` moves every job
+but the test matrix to one runner label, which is how a private repository
+adopts the self-hosted Linux runner and how it falls back. golangci-lint's version is pinned in
 the binary, so there is no input for it, and a repository that cannot lint
 waives `lint` with a reason and a date rather than turning the job off.
 

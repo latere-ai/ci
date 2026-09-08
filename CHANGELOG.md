@@ -10,6 +10,15 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v1.10.0 - 2026-09-08
+
+### Added
+
+- `lateregate.yml`: a `runs_on` input, `ubuntu-latest` by default, routes the
+  probe, every gate job and the wiring check. A private repository moves its
+  whole pipeline to the self-hosted `linux-vm` runner by passing the label
+  here and in `test_os`, and falls back to hosted runners by removing both.
+
 ## v1.9.0 - 2026-09-08
 
 ### Changed

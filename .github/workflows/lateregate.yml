@@ -33,6 +33,11 @@ on:
         required: false
         type: string
         default: '["ubuntu-latest"]'
+      runs_on:
+        description: "Runner for every job except the test matrix: the probe, the gates and the wiring check. ubuntu-latest by default. A private repository that adopts the self-hosted linux-vm runner passes its label here and in test_os, and falls back to hosted runners by removing both lines."
+        required: false
+        type: string
+        default: "ubuntu-latest"
 
 permissions:
   contents: read
@@ -42,7 +47,7 @@ jobs:
   # of gates the binary will run.
   probe:
     name: which gates apply
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     outputs:
       gates: ${{ steps.plan.outputs.gates }}
       test: ${{ steps.plan.outputs.test }}
@@ -87,7 +92,7 @@ jobs:
     name: ${{ matrix.gate }}
     needs: probe
     if: ${{ needs.probe.outputs.gates != '[]' }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     strategy:
       fail-fast: false
       matrix:
@@ -110,7 +115,7 @@ jobs:
   # different work.
   contract:
     name: wiring is in shape
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
