@@ -116,6 +116,16 @@ prints.
 `go tool lateregate` on a laptop runs the same set. That split is the
 point: a gate that only runs in CI tells you too late.
 
+The optional `enum-go` and `enum-typescript` gates run when the repository
+declares enum domains in `.lateregate.yaml`. For `enum-typescript`, the
+workflow sets up Node 24 and Bun 1.3.14, then runs
+`go tool lateregate enum-typescript-prepare` before checking. Preparation
+installs each configured project's dependencies from its committed npm or
+Bun lockfile, using `npm ci` or `bun install --frozen-lockfile`. Run the same
+preparation command locally after lockfile changes. Go gates do not install
+JavaScript tools or dependencies. Domain configuration and parser exceptions
+are documented in [ci-gate](https://github.com/latere-ai/ci-gate#readme).
+
 Inputs are `go_version`, `test_os` and `runs_on`. `runs_on` moves every job
 but the test matrix to one runner label, which is how a private repository
 adopts the self-hosted Linux runner and how it falls back. golangci-lint's
@@ -346,9 +356,10 @@ and whatever secrets you inherit. A `@v2`-style tag is mutable, so whoever
 controls the upstream repository can repoint it and have new code execute with
 that access in every consumer at once. A SHA cannot be repointed.
 
-For the same reason no step fetches a tool build at `latest`. The bun and
-goreleaser versions are explicit inputs (`bun_version`, `goreleaser_version`)
-that you can override per repo.
+For the same reason no step fetches a tool build at `latest`. Release
+workflows expose Bun and GoReleaser versions as explicit inputs
+(`bun_version`, `goreleaser_version`) that you can override per repo. The
+TypeScript enum gate pins Bun directly in `lateregate.yml`.
 
 Dependabot opens a weekly PR per action so the pins do not rot: first-party
 `actions/*` and `docker/*` updates are grouped, third-party actions land

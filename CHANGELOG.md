@@ -10,6 +10,13 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Added
+
+- `lateregate.yml`: configured TypeScript enum checks set up Node 24 and
+  Bun 1.3.14, prepare dependencies from committed lockfiles, then run the
+  shared gate. Both enum gates follow the shared plan and its dated waivers;
+  Go gates do not install JavaScript tools or dependencies.
+
 ## v1.11.0 - 2026-09-12
 
 ### Added

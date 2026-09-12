@@ -74,6 +74,14 @@ run_case "an expired waiver runs; the plan carries the note, not the skip" \
     '[{"name":"cover","status":"run","reason":"waiver expired 2026-01-01: later","until":"2026-01-01"}]' \
     '["cover"]' 'false'
 
+run_case "both enum gates survive matrix selection" \
+    '[{"name":"enum-go","status":"run"},{"name":"test","status":"run"},{"name":"enum-typescript","status":"run"}]' \
+    '["enum-go","enum-typescript"]' 'true'
+
+run_case "a waived TypeScript enum gate does not install frontend tools" \
+    '[{"name":"enum-go","status":"run"},{"name":"enum-typescript","status":"waived","reason":"migration","until":"2026-12-01"}]' \
+    '["enum-go"]' 'false'
+
 # ---------------------------------------------------------------------------
 # The copy matches the workflow.
 # ---------------------------------------------------------------------------
@@ -124,6 +132,57 @@ if [ "$setups" -eq "$gated" ]; then
     pass "every setup-go caches only on a hosted runner"
 else
     fail "setup-go steps without a hosted-only cache gate (setups=$setups gated=$gated)"
+fi
+
+# Check the actual step blocks, not independent occurrences: a condition on
+# an adjacent step would still install Node/Bun for every Go gate.
+gate_job=$(awk '
+    /^  gate:$/ { gate = 1; next }
+    gate && /^  [[:alnum:]_-]+:/ { exit }
+    gate { print }
+' "$WORKFLOW")
+
+gate_step() {
+    printf '%s\n' "$gate_job" | awk -v needle="$1" '
+        function emit() { if (index(step, needle)) printf "%s", step }
+        /^      - / { emit(); step = "" }
+        { step = step $0 "\n" }
+        END { emit() }
+    '
+}
+
+for target in 'uses: actions/setup-node@' 'uses: oven-sh/setup-bun@' 'run: go tool lateregate enum-typescript-prepare'; do
+    block=$(gate_step "$target")
+    count=$(grep -cF "$target" "$WORKFLOW")
+    if [ "$count" -eq 1 ] && printf '%s\n' "$block" | grep -qxF "        if: \${{ matrix.gate == 'enum-typescript' }}"; then
+        pass "$target runs only for the TypeScript enum gate"
+    else
+        fail "$target must appear once, in the gate job, conditional on enum-typescript"
+    fi
+done
+
+if gate_step 'uses: actions/setup-node@' | grep -qxF '          node-version: "24"'; then
+    pass "the TypeScript enum gate has Node 24"
+else
+    fail "the TypeScript enum gate must set up Node 24"
+fi
+
+if gate_step 'uses: oven-sh/setup-bun@' | grep -qxF '          bun-version: "1.3.14"'; then
+    pass "the TypeScript enum gate pins Bun"
+else
+    fail "the TypeScript enum gate must pin Bun 1.3.14"
+fi
+
+if printf '%s\n' "$gate_job" | awk '
+    /uses: actions\/setup-node@/ { node = NR }
+    /uses: oven-sh\/setup-bun@/ { bun = NR }
+    /run: go tool lateregate enum-typescript-prepare$/ { prepare = NR }
+    /run: go tool lateregate \$\{\{ matrix.gate \}\}$/ { check = NR }
+    END { exit !(node && bun && prepare && check && node < prepare && bun < prepare && prepare < check) }
+'; then
+    pass "both runtimes are set up before frozen preparation and gate checking"
+else
+    fail "enum checking must follow both runtime setups and frozen preparation"
 fi
 
 if [ "$FAILURES" -gt 0 ]; then
