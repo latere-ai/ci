@@ -48,6 +48,21 @@ on:
         required: false
         type: string
         default: "1.3.14"
+      runs_on:
+        description: "Runner for every job. ubuntu-latest by default. A private repository that adopts the self-hosted linux-vm runner passes its label here and falls back to hosted runners by removing the line. The self-hosted machine ships docker, git, jq and curl and nothing else; the steps below fetch Node, kubectl and gh at pinned versions when they are missing."
+        required: false
+        type: string
+        default: "ubuntu-latest"
+      kubectl_version:
+        description: "kubectl release fetched for the deploy job when the runner has none, verified against its published sha256. Hosted runners ship kubectl and skip the fetch. Keep within one minor of the cluster."
+        required: false
+        type: string
+        default: "1.35.1"
+      gh_version:
+        description: "GitHub CLI release fetched for the release job when the runner has none, verified against the release's checksums file. Hosted runners ship gh and skip the fetch."
+        required: false
+        type: string
+        default: "2.100.0"
       build_mode:
         description: "split = build frontend + Go binary in CI, then Dockerfile.ci packages the prebuilt binary (asset-hash pinned smoke). dockerfile = one Dockerfile builds everything (no asset pin; smoke proves liveness only)."
         required: false
@@ -146,12 +161,18 @@ jobs:
   build-frontend:
     # split mode only: dockerfile mode builds the frontend inside the image.
     if: ${{ inputs.build_mode == 'split' && inputs.has_frontend }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     outputs:
       asset: ${{ steps.evidence.outputs.asset }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # vue-tsc registers .vue files only under real Node; under bun's node
+      # shim it checks none and reports nothing. Hosted runners ship Node,
+      # the self-hosted VM does not.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: ${{ inputs.bun_version }}
@@ -192,7 +213,7 @@ jobs:
     # a broken split-mode frontend aborts the release.
     needs: [build-frontend]
     if: ${{ always() && !cancelled() && !contains(needs.*.result, 'failure') && inputs.build_mode == 'split' }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     env:
       CGO_ENABLED: "0"
     steps:
@@ -202,6 +223,10 @@ jobs:
         with:
           go-version: ${{ inputs.go_version }}
           check-latest: true
+          # The module cache is worth restoring on a hosted runner, which
+          # starts empty. A self-hosted runner keeps its own between jobs,
+          # and restoring a tarball over it fails on every file that exists.
+          cache: ${{ startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-') }}
 
       - name: Download frontend dist
         if: ${{ inputs.has_frontend && inputs.spa_embed_dir != '' }}
@@ -243,7 +268,7 @@ jobs:
     # (not failure) and this job builds the whole image from the Dockerfile.
     needs: [build-binary]
     if: ${{ always() && !cancelled() && !contains(needs.*.result, 'failure') }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -340,7 +365,7 @@ jobs:
     # skip and skip deploy too. Gate only on build-image's own result.
     needs: [build-image]
     if: ${{ always() && needs.build-image.result == 'success' }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     environment:
       name: production
       url: ${{ inputs.url }}
@@ -352,6 +377,28 @@ jobs:
           go-version: ${{ inputs.go_version }}
           check-latest: true
           cache: false
+
+      # Hosted runners ship kubectl; the self-hosted VM does not. The pinned
+      # release is fetched with its published sha256 into a directory that
+      # exists for this job alone.
+      - name: Ensure kubectl
+        env:
+          KUBECTL_VERSION: ${{ inputs.kubectl_version }}
+        run: |
+          set -euo pipefail
+          if command -v kubectl >/dev/null 2>&1; then
+            kubectl version --client
+            exit 0
+          fi
+          dir="$RUNNER_TEMP/kubectl-bin"
+          mkdir -p "$dir"
+          base="https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/amd64"
+          curl -sSfL -o "$dir/kubectl" "$base/kubectl"
+          curl -sSfL -o "$dir/kubectl.sha256" "$base/kubectl.sha256"
+          echo "$(cat "$dir/kubectl.sha256")  $dir/kubectl" | sha256sum -c
+          chmod +x "$dir/kubectl"
+          echo "$dir" >> "$GITHUB_PATH"
+          "$dir/kubectl" version --client
 
       - uses: digitalocean/action-doctl@3cb3953159719656269e044e0e24ca16dd2a690f # v2.5.2
         with:
@@ -396,7 +443,7 @@ jobs:
   smoke:
     needs: [deploy, build-frontend]
     if: ${{ always() && needs.deploy.result == 'success' }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     outputs:
       evidence: ${{ steps.run.outputs.evidence }}
     steps:
@@ -466,8 +513,13 @@ jobs:
             echo CI_EOF
           } >> "$GITHUB_OUTPUT"
 
+      # A copy for the run's artifacts. The same text already reaches the
+      # release body through the `evidence` output and the step summary, so
+      # an exhausted artifact-storage quota must not fail a release whose
+      # smoke has just passed.
       - name: Upload release evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        continue-on-error: true
         with:
           name: release-evidence
           path: release-evidence/
@@ -479,7 +531,7 @@ jobs:
     # tag, GOOS/GOARCH matrix) lives in cli_build_cmd, not here, so the workflow
     # stays generic. Runs in parallel with the deploy path; gates the release.
     if: ${{ inputs.build_cli }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -489,7 +541,17 @@ jobs:
         with:
           go-version: ${{ inputs.go_version }}
           check-latest: true
+          # The module cache is worth restoring on a hosted runner, which
+          # starts empty. A self-hosted runner keeps its own between jobs,
+          # and restoring a tarball over it fails on every file that exists.
+          cache: ${{ startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-') }}
 
+      # vue-tsc registers .vue files only under real Node; under bun's node
+      # shim it checks none and reports nothing. Hosted runners ship Node,
+      # the self-hosted VM does not.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: ${{ inputs.bun_version }}
@@ -509,7 +571,7 @@ jobs:
     # fails, this job skips so a broken CLI build does not publish the release.
     needs: [smoke, cli]
     if: ${{ always() && needs.smoke.result == 'success' && needs.cli.result != 'failure' }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -517,6 +579,28 @@ jobs:
         with:
           go-version: ${{ inputs.go_version }}
           cache: false
+
+      # Hosted runners ship gh; the self-hosted VM does not. The pinned
+      # release is fetched and verified against its checksums file.
+      - name: Ensure gh
+        env:
+          GH_VERSION: ${{ inputs.gh_version }}
+        run: |
+          set -euo pipefail
+          if command -v gh >/dev/null 2>&1; then
+            gh --version | head -n1
+            exit 0
+          fi
+          dir="$RUNNER_TEMP/gh-bin"
+          mkdir -p "$dir"
+          base="https://github.com/cli/cli/releases/download/v${GH_VERSION}"
+          archive="gh_${GH_VERSION}_linux_amd64.tar.gz"
+          curl -sSfL -o "$dir/$archive" "$base/$archive"
+          curl -sSfL -o "$dir/checksums.txt" "$base/gh_${GH_VERSION}_checksums.txt"
+          (cd "$dir" && grep " $archive\$" checksums.txt | sha256sum -c)
+          tar -xzf "$dir/$archive" -C "$dir" --strip-components=2 "gh_${GH_VERSION}_linux_amd64/bin/gh"
+          echo "$dir" >> "$GITHUB_PATH"
+          "$dir/gh" --version | head -n1
 
       - name: Read the release note for this tag
         # A tag is a release, and a release has notes. The section for this
