@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v1.11.0 - 2026-09-12
+
 ### Added
 
 - `service-release.yml`: a `runs_on` input routes every job of a release to
