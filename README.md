@@ -262,6 +262,13 @@ the calling job's, and this org defaults to read-only, so omitting it makes the
 run fail at startup (no logs) when the pipeline tries to push the image or
 create the release.
 
+`runs_on` moves every job of the release to one runner label, which is how a
+private repository adopts the self-hosted Linux runner (`runs_on: linux-vm`)
+and how it falls back (remove the line). That machine ships docker, git, jq
+and curl and nothing else, so the pipeline sets up Node beside bun and fetches
+kubectl and gh at `kubectl_version` and `gh_version`, checksum-verified, when
+the runner has none; hosted runners ship all three and skip the fetch.
+
 `secrets: inherit` passes the org `DO_TOKEN`. Service-specific smoke credentials
 are declared optional on the reusable workflow. A repo whose secret names differ
 (e.g. Cella's `CELLA_SMOKE_CLIENT_*`) passes them explicitly instead of

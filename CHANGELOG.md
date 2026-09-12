@@ -10,6 +10,19 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Added
+
+- `service-release.yml`: a `runs_on` input routes every job of a release to
+  one runner label, so a private repository can release from the
+  self-hosted Linux runner. Node is set up beside bun, and kubectl and gh
+  are fetched at the pinned `kubectl_version` and `gh_version`, verified
+  against their published checksums, when the runner has none. setup-go
+  restores its module cache on hosted runners only. Defaults keep every
+  existing consumer on hosted runners unchanged.
+- `service-release.yml`: the release-evidence artifact upload no longer
+  fails the smoke job. The evidence reaches the release body through the
+  job output either way; the artifact is a copy.
+
 ## v1.10.1 - 2026-09-09
 
 ### Fixed
