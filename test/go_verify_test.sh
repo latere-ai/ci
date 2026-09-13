@@ -245,6 +245,14 @@ else
     fail "persistent Go caches would be overwritten (setups=$setups caches=$caches)"
 fi
 
+# CLI e2e suites launch many subprocesses; the old two-minute package
+# deadline expired while healthy tests were still progressing.
+if grep -qF 'go test -race -timeout 10m ./...' "$REPO_ROOT/.github/workflows/cli-release.yml"; then
+    pass "CLI releases allow the full race/e2e suite to finish"
+else
+    fail "CLI release race tests still use the two-minute deadline"
+fi
+
 printf "\033[1mgo-verify probe\033[0m\n"
 test_required_only_passes
 test_optional_targets_are_skipped_not_failed
