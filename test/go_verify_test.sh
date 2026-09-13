@@ -228,6 +228,23 @@ test_the_default_matrix_is_linux_only() {
     fi
 }
 
+# Every non-matrix job follows runs_on; the matrix retains its own input.
+fixed=$(grep -cE '^ +runs-on: ubuntu-latest$' "$WORKFLOW")
+routed=$(grep -cF 'runs-on: ${{ inputs.runs_on }}' "$WORKFLOW")
+jobs=$(grep -cE '^    runs-on:' "$WORKFLOW")
+if [ "$fixed" -eq 0 ] && [ "$routed" -eq "$((jobs - 1))" ]; then
+    pass "all non-matrix jobs honor runs_on"
+else
+    fail "non-matrix jobs ignore runs_on (fixed=$fixed routed=$routed)"
+fi
+setups=$(grep -c 'uses: actions/setup-go' "$WORKFLOW")
+caches=$(grep -cF 'cache: ${{ startsWith(' "$WORKFLOW")
+if [ "$setups" -eq "$caches" ]; then
+    pass "Go caches restore only on hosted runners"
+else
+    fail "persistent Go caches would be overwritten (setups=$setups caches=$caches)"
+fi
+
 printf "\033[1mgo-verify probe\033[0m\n"
 test_required_only_passes
 test_optional_targets_are_skipped_not_failed
