@@ -20,6 +20,8 @@ committed: the commit log already holds that.
   storage quota no longer blocks the build, and the live smoke still checks
   the exact frontend asset produced by that build.
 - Concurrent service image builds use separate Docker credential directories.
+- Concurrent verification jobs isolate temporary files, so their linter locks
+  do not collide on a shared runner host.
 - CLI release race tests have ten minutes for their subprocess end-to-end suites.
 - Coverage checks still fail below their threshold, but an exhausted artifact
   quota no longer fails CI when uploading the report copy.

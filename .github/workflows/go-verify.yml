@@ -266,6 +266,9 @@ jobs:
 
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         if: ${{ inputs.run_lint }}
+        env:
+          # golangci-lint's lock must not collide with another runner slot.
+          TMPDIR: ${{ runner.temp }}
         with:
           version: ${{ inputs.golangci_version }}
 
