@@ -14,7 +14,7 @@ FAILURES=0
 pass() { printf "  \033[32mPASS\033[0m %s\n" "$1"; }
 fail() { printf "  \033[31mFAIL\033[0m %s\n" "$1"; FAILURES=$((FAILURES + 1)); }
 
-READER='go run latere.ai/x/ci-gate/cmd/lateregate@${{ inputs.lateregate_version }} release-notes "$TAG" > notes.md'
+READER='go run latere.ai/x/ci-gate/cmd/lateregate@${{ inputs.lateregate_version }} release-notes -C "$notes_root" "$TAG" > notes.md'
 
 release_workflows() {
     ls "$REPO_ROOT"/.github/workflows/*-release.yml
@@ -89,6 +89,25 @@ test_four_release_workflows_exist() {
         fail "$name"
     fi
 }
+
+# The pinned reader predates consumer config fields such as identity/enums.
+# It must receive only the tag's changelog, not the consumer's gate config.
+test_reader_is_independent_of_consumer_config() {
+    local wf missing=""
+    for wf in $(release_workflows); do
+        if ! grep -qF 'cp CHANGELOG.md "$notes_root/CHANGELOG.md"' "$wf" \
+            || ! grep -qF 'release-notes -C "$notes_root" "$TAG" > notes.md' "$wf"; then
+            missing="${missing} $(basename "$wf")"
+        fi
+    done
+    if [ -z "$missing" ]; then
+        pass "release notes do not parse the consumer gate configuration"
+    else
+        fail "release notes parse unrelated gate configuration:${missing}"
+    fi
+}
+
+test_reader_is_independent_of_consumer_config
 
 test_every_release_workflow_reads_the_section
 test_every_release_workflow_declares_the_version_input

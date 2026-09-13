@@ -420,7 +420,14 @@ jobs:
         # rarely taken.
         env:
           TAG: ${{ github.ref_name }}
-        run: go run latere.ai/x/ci-gate/cmd/lateregate@${{ inputs.lateregate_version }} release-notes "$TAG" > notes.md
+        run: |
+          set -euo pipefail
+          # Gate schemas evolve independently of this pinned note reader.
+          # Only the changelog at the checked-out tag is an input here.
+          notes_root=$(mktemp -d)
+          trap 'rm -rf "$notes_root"' EXIT
+          cp CHANGELOG.md "$notes_root/CHANGELOG.md"
+          go run latere.ai/x/ci-gate/cmd/lateregate@${{ inputs.lateregate_version }} release-notes -C "$notes_root" "$TAG" > notes.md
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
