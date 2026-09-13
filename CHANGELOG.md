@@ -10,7 +10,7 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
-## v1.12.0-rc.1 - 2026-09-13
+## v1.12.0 - 2026-09-13
 
 ### Fixed
 
