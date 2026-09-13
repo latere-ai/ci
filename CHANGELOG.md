@@ -10,8 +10,22 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v1.12.0-rc.1 - 2026-09-13
+
+### Fixed
+
+- Release notes read only the checked-out changelog, so a newer consumer
+  gate configuration cannot stop a release using the pinned reader.
+- Service releases build the frontend, binary and image in one job. Artifact
+  storage quota no longer blocks the build, and the live smoke still checks
+  the exact frontend asset produced by that build.
+- Concurrent service image builds use separate Docker credential directories.
+- CLI release race tests have ten minutes for their subprocess end-to-end suites.
+
 ### Added
 
+- `go-verify.yml` accepts `runs_on` for private runners and restores Go
+  caches only on hosted runners. Set `test_os` to the same private label.
 - `lateregate.yml`: configured TypeScript enum checks set up Node 24 and
   Bun 1.3.14, prepare dependencies from committed lockfiles, then run the
   shared gate. Both enum gates follow the shared plan and its dated waivers;

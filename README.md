@@ -142,6 +142,9 @@ are required, and `test-hermetic`, `test-race`, `cover`, `spec-lint`,
 optional target skips its job, which is the gap `lateregate.yml` closes.
 See `examples/go-verify.yml` for the caller.
 
+Set `runs_on: linux-vm` and `test_os: '["linux-vm"]'` for a private
+repository using the org runner. The default remains hosted Linux.
+
 ### The checks live in `ci-gate`, not here
 
 This repo owns **orchestration and ordering**. What each gate asserts lives
@@ -176,6 +179,11 @@ divergence is impossible rather than merely detectable.
 For a frontend service, prefer `split` when you want the asset-pin guarantee;
 `dockerfile` is the deliberate, lower-fidelity option for repos that already
 build everything in one Dockerfile.
+
+Both build modes publish the image from one job. Split mode keeps its
+frontend and binary in that job's workspace, so it needs no artifact storage
+to pass build products between jobs. The frontend asset hash reaches the
+live smoke as a job output.
 
 ## A tag is a release, and a release has notes
 
