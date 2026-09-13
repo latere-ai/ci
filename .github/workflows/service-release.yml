@@ -158,34 +158,43 @@ permissions:
   actions: read
 
 jobs:
-  build-frontend:
-    # split mode only: dockerfile mode builds the frontend inside the image.
-    if: ${{ inputs.build_mode == 'split' && inputs.has_frontend }}
+  build-image:
+    # Keep the SPA, binary and image in one job so builds do not depend on
+    # artifact storage. A failed build step prevents publication and deploy.
     runs-on: ${{ inputs.runs_on }}
+    env:
+      CGO_ENABLED: "0"
     outputs:
       asset: ${{ steps.evidence.outputs.asset }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Isolate Docker credentials
+        run: echo "DOCKER_CONFIG=$RUNNER_TEMP/docker-config" >> "$GITHUB_ENV"
 
       # vue-tsc registers .vue files only under real Node; under bun's node
       # shim it checks none and reports nothing. Hosted runners ship Node,
       # the self-hosted VM does not.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: ${{ inputs.build_mode == 'split' && inputs.has_frontend }}
         with:
           node-version: "22"
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        if: ${{ inputs.build_mode == 'split' && inputs.has_frontend }}
         with:
           bun-version: ${{ inputs.bun_version }}
 
       - name: Install
+        if: ${{ inputs.build_mode == 'split' && inputs.has_frontend }}
         run: bun install --frozen-lockfile
         working-directory: ${{ inputs.frontend_dir }}
 
       - name: Typecheck + build
+        if: ${{ inputs.build_mode == 'split' && inputs.has_frontend }}
         run: bun run build
         working-directory: ${{ inputs.frontend_dir }}
 
       - name: Capture frontend build evidence
+        if: ${{ inputs.build_mode == 'split' && inputs.has_frontend }}
         id: evidence
         # Pin the served bundle to the one CI just built: the hashed Vite entry
         # asset becomes EXPECTED_ASSET for the live smoke, so a stale rollout
@@ -199,27 +208,9 @@ jobs:
           fi
           echo "asset=$asset" >> "$GITHUB_OUTPUT"
 
-      - name: Upload frontend dist
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: frontend-dist
-          path: ${{ inputs.frontend_dir }}/dist/
-          if-no-files-found: error
-
-  build-binary:
-    # split mode only. The embed step is a no-op when spa_embed_dir is empty.
-    # `needs` on a skipped job is satisfied (skipped is not failure); the
-    # failure guard still skips this job if build-frontend actually failed, so
-    # a broken split-mode frontend aborts the release.
-    needs: [build-frontend]
-    if: ${{ always() && !cancelled() && !contains(needs.*.result, 'failure') && inputs.build_mode == 'split' }}
-    runs-on: ${{ inputs.runs_on }}
-    env:
-      CGO_ENABLED: "0"
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        if: ${{ inputs.build_mode == 'split' }}
         with:
           go-version: ${{ inputs.go_version }}
           check-latest: true
@@ -228,62 +219,27 @@ jobs:
           # and restoring a tarball over it fails on every file that exists.
           cache: ${{ startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-') }}
 
-      - name: Download frontend dist
-        if: ${{ inputs.has_frontend && inputs.spa_embed_dir != '' }}
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: frontend-dist
-          path: .ci-frontend-dist
-
       - name: Embed frontend
-        if: ${{ inputs.has_frontend && inputs.spa_embed_dir != '' }}
+        if: ${{ inputs.build_mode == 'split' && inputs.has_frontend && inputs.spa_embed_dir != '' }}
         run: |
           set -euo pipefail
           rm -rf "${{ inputs.spa_embed_dir }}"
           mkdir -p "${{ inputs.spa_embed_dir }}"
-          cp -R .ci-frontend-dist/. "${{ inputs.spa_embed_dir }}/"
+          cp -R "${{ inputs.frontend_dir }}/dist/." "${{ inputs.spa_embed_dir }}/"
           test -f "${{ inputs.spa_embed_dir }}/index.html"
 
       - name: Vet
+        if: ${{ inputs.build_mode == 'split' }}
         run: go vet ./...
 
       - name: Build shippable binary
+        if: ${{ inputs.build_mode == 'split' }}
         run: |
           set -euo pipefail
           go build -trimpath \
             -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" \
             -o "out/${{ inputs.service }}" "${{ inputs.main_package }}"
 
-      - name: Upload binary
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: service-binary
-          path: out/${{ inputs.service }}
-          if-no-files-found: error
-
-  build-image:
-    # Runs in both modes. In split mode build-binary succeeds and gates this
-    # job (a build-binary failure trips the failure guard and skips here, which
-    # cascades to deploy/release). In dockerfile mode build-binary is skipped
-    # (not failure) and this job builds the whole image from the Dockerfile.
-    needs: [build-binary]
-    if: ${{ always() && !cancelled() && !contains(needs.*.result, 'failure') }}
-    runs-on: ${{ inputs.runs_on }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Download binary
-        if: ${{ inputs.build_mode == 'split' }}
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: service-binary
-          path: out
-
-      # upload-artifact drops the executable bit; restore it so the COPY into
-      # the runtime image yields a runnable entrypoint.
-      - name: Restore binary permissions
-        if: ${{ inputs.build_mode == 'split' }}
-        run: chmod +x "out/${{ inputs.service }}"
 
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
@@ -360,9 +316,7 @@ jobs:
           cache-to: type=gha,mode=max
 
   deploy:
-    # Explicit success gate: in dockerfile mode the upstream frontend/binary
-    # jobs are skipped, and a default `if` would transitively propagate that
-    # skip and skip deploy too. Gate only on build-image's own result.
+    # Deployment starts only after every build step and image publication succeeds.
     needs: [build-image]
     if: ${{ always() && needs.build-image.result == 'success' }}
     runs-on: ${{ inputs.runs_on }}
@@ -441,7 +395,7 @@ jobs:
             "deployment/${DEPLOYMENT}" --timeout=${{ inputs.rollout_timeout }}
 
   smoke:
-    needs: [deploy, build-frontend]
+    needs: [deploy, build-image]
     if: ${{ always() && needs.deploy.result == 'success' }}
     runs-on: ${{ inputs.runs_on }}
     outputs:
@@ -497,7 +451,7 @@ jobs:
           BASE_URL: ${{ inputs.url }}
           TAG: ${{ github.ref_name }}
           COMMIT: ${{ github.sha }}
-          EXPECTED_ASSET: ${{ needs.build-frontend.outputs.asset }}
+          EXPECTED_ASSET: ${{ needs.build-image.outputs.asset }}
           # A pre-minted bearer wins over a client_credentials mint; the mint
           # step does not run when one is set.
           SERVICE_TOKEN: ${{ secrets.SMOKE_BEARER || steps.token.outputs.token }}

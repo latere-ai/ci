@@ -82,6 +82,28 @@ else
     pass "no tool is fetched at latest"
 fi
 
+# Build products stay in one job. Artifact storage quota must not prevent a
+# checked frontend from reaching the binary or its image.
+build=$(sed -n '/^  build-image:/,/^  deploy:/p' "$WORKFLOW")
+if grep -qE '^  build-(frontend|binary):' "$WORKFLOW" \
+    || printf '%s' "$build" | grep -qE 'actions/(upload|download)-artifact@'; then
+    fail "release build still transfers required artifacts between jobs"
+else
+    pass "release builds without artifact storage"
+fi
+for step in 'name: Typecheck + build' 'name: Capture frontend build evidence' 'name: Embed frontend' 'name: Vet' 'name: Build shippable binary' 'name: Build and push'; do
+    if printf '%s' "$build" | grep -qF "$step"; then
+        pass "image build retains $step"
+    else
+        fail "image build loses $step"
+    fi
+done
+if grep -qF 'EXPECTED_ASSET: ${{ needs.build-image.outputs.asset }}' "$WORKFLOW"; then
+    pass "live smoke verifies the image build's exact frontend asset"
+else
+    fail "live smoke is not wired to the image build's asset"
+fi
+
 if [ "$FAILURES" -gt 0 ]; then
     exit 1
 fi
