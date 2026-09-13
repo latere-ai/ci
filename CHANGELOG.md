@@ -21,6 +21,8 @@ committed: the commit log already holds that.
   the exact frontend asset produced by that build.
 - Concurrent service image builds use separate Docker credential directories.
 - CLI release race tests have ten minutes for their subprocess end-to-end suites.
+- Coverage checks still fail below their threshold, but an exhausted artifact
+  quota no longer fails CI when uploading the report copy.
 
 ### Added
 
