@@ -190,6 +190,10 @@ jobs:
           name: coverage
           path: coverage.out
           if-no-files-found: warn
+          # 7 days. Long enough to re-run a failed release or pull the file
+          # while it still matters, short enough that the store does not fill:
+          # lectio's hit its quota holding 284 artifacts at the 90-day default.
+          retention-days: 7
 
   # A spec tree nobody checks drifts from the code within one milestone.
   specs:

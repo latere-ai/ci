@@ -10,6 +10,13 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- Run artifacts expire after 7 days in every pipeline, the `*.dockerbuild`
+  build record `docker/build-push-action` uploads beside each image included.
+  GitHub's 90-day default filled one consumer's artifact store with 284
+  artifacts, and a full store fails the upload step of the next release.
+
 ## v1.12.0 - 2026-09-13
 
 ### Fixed

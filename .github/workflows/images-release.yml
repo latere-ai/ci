@@ -179,6 +179,11 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.image.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}
+        # build-push-action uploads a *.dockerbuild build record as a run
+        # artifact of its own, at the repository default. Bound it like every
+        # other upload here rather than leave one unbounded uploader behind.
+        env:
+          DOCKER_BUILD_RECORD_RETENTION_DAYS: 7
 
       - name: Record digest
         run: |
@@ -190,6 +195,10 @@ jobs:
           name: digest-${{ matrix.image.name }}
           path: /tmp/digest/*.json
           if-no-files-found: error
+          # 7 days. Long enough to re-run a failed release or pull the file
+          # while it still matters, short enough that the store does not fill:
+          # lectio's hit its quota holding 284 artifacts at the 90-day default.
+          retention-days: 7
 
   # Stages 1 and 2 build images that FROM an image the previous stage
   # just pushed at the release ref, not :latest, so a release is
@@ -236,6 +245,8 @@ jobs:
             BASE_IMAGE=${{ needs.verify.outputs.registry }}/${{ matrix.image.from }}:${{ github.ref_name }}
           cache-from: type=gha,scope=${{ matrix.image.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}
+        env:
+          DOCKER_BUILD_RECORD_RETENTION_DAYS: 7
 
       - name: Record digest
         run: |
@@ -247,6 +258,7 @@ jobs:
           name: digest-${{ matrix.image.name }}
           path: /tmp/digest/*.json
           if-no-files-found: error
+          retention-days: 7
 
   build-stage2:
     needs: [verify, build-stage1]
@@ -289,6 +301,8 @@ jobs:
             BASE_IMAGE=${{ needs.verify.outputs.registry }}/${{ matrix.image.from }}:${{ github.ref_name }}
           cache-from: type=gha,scope=${{ matrix.image.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}
+        env:
+          DOCKER_BUILD_RECORD_RETENTION_DAYS: 7
 
       - name: Record digest
         run: |
@@ -300,6 +314,7 @@ jobs:
           name: digest-${{ matrix.image.name }}
           path: /tmp/digest/*.json
           if-no-files-found: error
+          retention-days: 7
 
   # Compose catalog.json (digest-pinned refs) and publish it to object
   # storage: the current key is overwritten, the history key is immutable.
@@ -339,6 +354,7 @@ jobs:
           name: catalog-json
           path: catalog.json
           if-no-files-found: error
+          retention-days: 7
 
   # Pull the images that were actually published and run the repo's
   # runtime assertions against them. The evidence block carries the
@@ -398,6 +414,7 @@ jobs:
           name: release-evidence
           path: release-evidence/
           if-no-files-found: error
+          retention-days: 7
 
   release:
     needs: smoke

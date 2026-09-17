@@ -319,6 +319,21 @@ against them, and the digest table in the evidence comes from the same
 `catalog.json` that was published to object storage. The GitHub release exists
 only if all of that held.
 
+## Run artifacts
+
+Everything these pipelines upload to a run expires after **7 days**: coverage
+profiles, image digests, `catalog.json`, release evidence, CLI binaries, and
+the `*.dockerbuild` build record `docker/build-push-action` uploads beside each
+image. That covers a re-run and a download while the release still matters.
+
+The figure is fixed, not an input. An artifact store is a fixed per-repository
+quota and GitHub's default retention is 90 days, so a busy repo fills it and
+then fails the upload step of whatever release runs next; lectio's store hit its
+quota holding 284 artifacts. What is worth keeping longer than a week is already
+kept somewhere durable: CLI binaries are attached to the GitHub release, smoke
+evidence is in the release body, and `catalog.json` is in object storage under
+both a current and an immutable history key.
+
 ## Tag rules
 
 The image tag is the git tag, byte for byte. `kubectl set image`, the stage
