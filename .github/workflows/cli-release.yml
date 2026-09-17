@@ -17,6 +17,11 @@ name: cli-release
 on:
   workflow_call:
     inputs:
+      runs_on:
+        description: "Runner label for the non-matrix jobs; a private repository uses its own (linux-vm). The test matrix follows test_os."
+        required: false
+        type: string
+        default: "ubuntu-latest"
       go_version:
         description: "Go toolchain version."
         required: false
@@ -59,13 +64,17 @@ permissions:
 jobs:
   lint:
     if: ${{ inputs.run_lint }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ inputs.go_version }}
           check-latest: true
+          # The module cache is worth restoring on a hosted runner, which
+          # starts empty. A self-hosted runner keeps its own between jobs,
+          # and restoring a tarball over it fails on every file that exists.
+          cache: ${{ startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-') }}
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: ${{ inputs.golangci_version }}
@@ -84,6 +93,7 @@ jobs:
         with:
           go-version: ${{ inputs.go_version }}
           check-latest: true
+          cache: ${{ startsWith(matrix.os, 'ubuntu-') || startsWith(matrix.os, 'macos-') || startsWith(matrix.os, 'windows-') }}
       - run: go vet ./...
       - run: go test -race -timeout 10m ./...
 
@@ -92,7 +102,7 @@ jobs:
     # skipped job is satisfied, so disabling either still lets the release run.
     needs: [lint, test]
     if: ${{ always() && !cancelled() && !contains(needs.*.result, 'failure') }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -101,6 +111,7 @@ jobs:
         with:
           go-version: ${{ inputs.go_version }}
           check-latest: true
+          cache: ${{ startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-') }}
 
       - name: Read the release note for this tag
         # A tag is a release, and a release has notes. The section for this

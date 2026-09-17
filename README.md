@@ -236,6 +236,9 @@ the tag (or `title: Name` for `Name vX.Y.Z`), and a hyphen in the version
 core marks a prerelease. A re-run edits the body rather than failing on an
 existing release.
 
+The single job takes `runs_on` like every other pipeline here; see
+"Runners".
+
 ## The "actually live" check
 
 "Live" means *this exact build is serving*, not merely that something returns
@@ -280,12 +283,12 @@ the calling job's, and this org defaults to read-only, so omitting it makes the
 run fail at startup (no logs) when the pipeline tries to push the image or
 create the release.
 
-`runs_on` moves every job of the release to one runner label, which is how a
-private repository adopts the self-hosted Linux runner (`runs_on: linux-vm`)
-and how it falls back (remove the line). That machine ships docker, git, jq
-and curl and nothing else, so the pipeline sets up Node beside bun and fetches
-kubectl and gh at `kubectl_version` and `gh_version`, checksum-verified, when
-the runner has none; hosted runners ship all three and skip the fetch.
+`runs_on` moves all five jobs of the release to one runner label; see
+"Runners" for what that costs and requires. The self-hosted machine ships
+docker, git, jq and curl and nothing else, so this pipeline sets up Node beside
+bun and fetches kubectl and gh at `kubectl_version` and `gh_version`,
+checksum-verified, when the runner has none; hosted runners ship all three and
+skip the fetch.
 
 `secrets: inherit` passes the org `DO_TOKEN`. Service-specific smoke credentials
 are declared optional on the reusable workflow. A repo whose secret names differ
@@ -313,11 +316,59 @@ jobs:
     secrets: inherit
 ```
 
+All seven jobs take `runs_on`; a self-hosted runner needs docker and the
+`aws` CLI for the catalog upload. See "Runners".
+
 The images analog of the "actually live" check: the smoke pulls the images
 that were **actually pushed** at the release tag and runs the repo's `test.sh`
 against them, and the digest table in the evidence comes from the same
 `catalog.json` that was published to object storage. The GitHub release exists
 only if all of that held.
+
+## Runners
+
+Every reusable workflow here takes `runs_on` (string, default `ubuntu-latest`):
+the runner label for its jobs. A repository moves off hosted minutes with one
+line on the caller, and back by removing it.
+
+```yaml
+jobs:
+  release:
+    uses: latere-ai/ci/.github/workflows/service-release.yml@v1
+    with:
+      runs_on: linux-vm
+```
+
+The OS test matrix is the exception. `lateregate.yml`, `go-verify.yml` and
+`cli-release.yml` run `test` on the runners `test_os` names, so moving those
+means setting both:
+
+```yaml
+    with:
+      runs_on: linux-vm
+      test_os: '["linux-vm"]'
+```
+
+**The two runners are shared by the whole family.** They are not per-repository.
+Two releases that both ask for `linux-vm` queue behind each other, and a job
+that fans out wider than two runners serialises. A repository that releases
+often, or fans out wide, is better off on hosted runners.
+
+**The runner must already have what the pipeline expects to find.** The VM
+ships docker, git, jq and curl. `service-release.yml` fetches kubectl and gh at
+`kubectl_version` and `gh_version`, checksum-verified, when they are missing,
+and sets up Node beside bun. `images-release.yml` needs docker and the `aws`
+CLI for the catalog upload, and fetches neither. Install what is missing before
+you move the pipeline, not after a release fails half way through.
+
+**The deploy secrets still have to reach it.** `runs_on` changes where a job
+runs, not what it can read: the caller keeps `secrets: inherit` (or its explicit
+mapping) for `DO_TOKEN` and the smoke credentials, and the runner needs network
+reach to the `latere-k8s` cluster and to GHCR.
+
+Go caches follow the label on their own. `actions/setup-go` restores the module
+cache only on a hosted label, because a self-hosted runner keeps its own between
+jobs and restoring a tarball over it fails on every file that already exists.
 
 ## Run artifacts
 

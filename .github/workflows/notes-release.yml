@@ -18,6 +18,11 @@ name: notes-release
 on:
   workflow_call:
     inputs:
+      runs_on:
+        description: "Runner label for the job; a private repository uses its own (linux-vm)."
+        required: false
+        type: string
+        default: "ubuntu-latest"
       title:
         description: "Optional release title prefix (e.g. Lux -> 'Lux v1.2.3'). Empty titles the release with the tag alone."
         required: false
@@ -39,7 +44,7 @@ permissions:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

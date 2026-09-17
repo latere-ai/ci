@@ -17,6 +17,14 @@ committed: the commit log already holds that.
   GitHub's 90-day default filled one consumer's artifact store with 284
   artifacts, and a full store fails the upload step of the next release.
 
+### Added
+
+- `cli-release.yml`, `images-release.yml` and `notes-release.yml` accept
+  `runs_on`, so every reusable pipeline now moves to the family's self-hosted
+  runners with one line on the caller. `cli-release.yml` restores the Go module
+  cache only on a hosted label; set `test_os` to the same label to move its
+  test matrix too.
+
 ## v1.12.0 - 2026-09-13
 
 ### Fixed
