@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v1.13.0 - 2026-09-18
+
 ### Changed
 
 - Run artifacts expire after 7 days in every pipeline, the `*.dockerbuild`
