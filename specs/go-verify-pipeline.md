@@ -7,11 +7,11 @@ affects:
   - ci/ (new reusable go-verify.yml + example caller)
   - ci/README.md (consumer contract)
   - ci/test/run.sh (workflow shell tests)
-  - llmops/ (first consumer; internal/covercheck and internal/speclint deleted)
+  - fornax/ (first consumer; internal/covercheck and internal/speclint deleted)
   - forma/ (second consumer; needs judgement, see "leave alone")
   - 19 further Go repos (adoption ramp, not this spec's delivery)
 effort: large
-trigger: three CI failures in one day in llmops, all from tests that depended on the machine running them; the fix was built in llmops and should not be built again per repo
+trigger: three CI failures in one day in fornax, all from tests that depended on the machine running them; the fix was built in fornax and should not be built again per repo
 created: 2026-08-29
 updated: 2026-08-29
 author: changkun
@@ -38,9 +38,9 @@ A survey of every repo with a `go.mod` on 2026-08-29:
 | Spec-driven (`specs/*.md`, between 1 and 116 specs) | 18 |
 | Have `fmt-check` + `test` + `lint-modernize` | 15 |
 | Have `cover` | 8 |
-| Have `test-hermetic`, `test-race` or `validate` | 1 (llmops) |
-| Have a per-package coverage gate | 2 (llmops, Forma) |
-| Have a spec linter | 2 (Forma; llmops has tests only, no implementation) |
+| Have `test-hermetic`, `test-race` or `validate` | 1 (Fornax) |
+| Have a per-package coverage gate | 2 (Fornax, Forma) |
+| Have a spec linter | 2 (Forma; Fornax has tests only, no implementation) |
 | Have no `Makefile` at all | Forma — its `ci.yml` runs commands inline |
 | Have no workflows at all | latere-cli, llm-gateway-bench |
 
@@ -54,7 +54,7 @@ workflows into Makefiles.
 
 ## Why this is worth doing, concretely
 
-Three llmops CI failures on 2026-08-29 shared one root cause: **tests that
+Three Fornax CI failures on 2026-08-29 shared one root cause: **tests that
 depended on what happened to be installed on the machine running them.**
 
 1. A test shelled out to `systemctl daemon-reload`. macOS has no
@@ -68,7 +68,7 @@ depended on what happened to be installed on the machine running them.**
    but the `LookPath` before it was not, so the stub was never reached.
 
 Every one passed locally and failed in CI, which is the worst order to
-find out. Two gates prevent the whole class, and both now exist in llmops:
+find out. Two gates prevent the whole class, and both now exist in Fornax:
 
 - **hermetic test** — runs the suite with only the Go toolchain and the
   system directories on PATH. Reproduces a runner's environment closely
@@ -79,12 +79,12 @@ find out. Two gates prevent the whole class, and both now exist in llmops:
   costs ten Linux minutes, so only repositories with darwin build tags or a
   darwin artifact pay for it.
 
-A third thing surfaced separately: llmops' repository-average coverage
+A third thing surfaced separately: Fornax' repository-average coverage
 gate passed at **90.4%** while `internal/harness` sat at **85.7%** and
 `internal/install` at **87.8%**. An average lets a well-tested package
 carry an untested one and reports a number nobody can act on.
 
-A fourth is the spec tree. On the same day every row in llmops'
+A fourth is the spec tree. On the same day every row in Fornax'
 `specs/README.md` read `draft`, including five specs that were built,
 deployed and serving. It had been hand-edited a dozen times that day. A
 status column that disagrees with the code is worse than no column,
@@ -205,7 +205,7 @@ must remain impossible**, so `lateregate cover` fails on an empty reason
 rather than warning.
 
 The two spec vocabularies differ for good reasons — Forma has statuses,
-layers, decision records and an outcome rule; llmops has a three-value
+layers, decision records and an outcome rule; Fornax has a three-value
 `draft`/`partial`/`complete` vocabulary and an index whose rows must
 match. That divergence across 18 repos is the argument for a configurable
 linter, not against one. `spec.status` and `spec.require` carry it.
@@ -250,7 +250,7 @@ reads the exit status. A missing optional target skips its job; a missing
 required target fails with a message naming the target and the repo, not
 with make's own error.
 
-`llmops/.github/workflows/ci.yml` at commit `4fd51b4` is a working
+`fornax/.github/workflows/ci.yml` at commit `4fd51b4` is a working
 implementation of this shape — lift it, parameterize what must vary, and
 leave the reasoning comments in place. They explain *why* each job exists,
 which is the part that stops someone deleting a job that looks redundant.
@@ -258,7 +258,7 @@ Note it has a sixth job the earlier draft of this spec omitted: `cross`,
 running `make dist`, because the bare-metal deploy ships those binaries by
 hand and a claim in a document with no gate behind it goes stale silently.
 
-### 4. Convert llmops as the first consumer
+### 4. Convert Fornax as the first consumer
 
 It is the repo the gates were built in, so it should be the proof that the
 reusable version is equivalent. Its workflow shrinks to a caller, its
@@ -267,7 +267,7 @@ Makefile targets shrink to delegations, and `internal/covercheck` and
 
 ## Adoption ramp
 
-Delivery is llmops. The other repos are not this spec's work, but the
+Delivery is fornax. The other repos are not this spec's work, but the
 design is only right if the ramp is cheap, so it is stated here as the
 test of that:
 
@@ -307,7 +307,7 @@ and moving it buys nothing this spec needs.
 
 - **AC1** `latere-ai/ci-gate` exists as module `latere.ai/x/ci-gate` with
   `cmd/lateregate` and the five subcommands, each with tests. Its own
-  dependency graph is gated. The `llmops` copies of `covercheck` and
+  dependency graph is gated. The `fornax` copies of `covercheck` and
   `speclint` are deleted, not left as duplicates. **Forma keeps both**, for the
   reason under "leave alone": its `speclint` also enforces layers, decision
   records, an outcome rule, a blocked-reason rule and a sequencing file, none
@@ -325,7 +325,7 @@ and moving it buys nothing this spec needs.
 - **AC4** A consumer missing an optional target skips that job; a
   consumer missing a required target fails with a message naming the
   target. Both paths are tested in `ci/test/run.sh`.
-- **AC5** llmops calls it, its own workflow is a caller file, and its
+- **AC5** Fornax calls it, its own workflow is a caller file, and its
   full gate set still passes — including on macOS, and including the
   `cross` job.
 - **AC6** `make test-hermetic` and `make cover` are runnable locally in
@@ -337,7 +337,7 @@ and moving it buys nothing this spec needs.
   silently the first time an invocation reaches the network.
 - **AC7** Adopting the three required targets in a repo that has them
   today is a caller workflow plus three one-line Makefile edits, with no
-  `.lateregate.yaml`. Demonstrated on one repo beyond llmops.
+  `.lateregate.yaml`. Demonstrated on one repo beyond fornax.
 - **AC9** No consumer keeps a gate program of its own. What a gate asserts
   lives in `ci-gate`; what a repository asserts about itself lives in its
   `.lateregate.yaml`.
@@ -349,29 +349,29 @@ and moving it buys nothing this spec needs.
 - The release pipelines. They are orthogonal and already centralized.
 - Non-Go repos.
 - Converting Forma, and its cgo-free, fuzz and depcheck gates.
-- Rolling the ramp out past llmops and the one AC7 repo.
+- Rolling the ramp out past Fornax and the one AC7 repo.
 - Any change to what a consumer actually tests or what its specs say.
   This is about where the gates live, not what they assert.
 
 ## Outcome
 
 Shipped 2026-08-29. `latere-ai/ci-gate` at `v0.1.0`, `latere-ai/ci` at
-`v1.3.0` with `v1` moved, llmops migrated.
+`v1.3.0` with `v1` moved, Fornax migrated.
 
 | Criterion | Verdict |
 | --- | --- |
-| AC1 `ci-gate` with five subcommands and tests | satisfied for llmops; Forma deferred as above |
+| AC1 `ci-gate` with five subcommands and tests | satisfied for Fornax; Forma deferred as above |
 | AC2 config carries threshold, exemptions, conventions | satisfied |
 | AC3 `go-verify.yml`, example, README, `ci/test/run.sh` case | satisfied |
 | AC4 optional target skips, required target fails by name | satisfied |
-| AC5 llmops calls it, full gate set passes | satisfied — all ten jobs green, including macOS, `cross` and `validate` |
+| AC5 Fornax calls it, full gate set passes | satisfied — all ten jobs green, including macOS, `cross` and `validate` |
 | AC6 gates run locally, `GOPROXY=off`, fresh clone | satisfied |
 | AC7 a second repo adopts with three one-line edits | **not done** — Forma was converted, but it needed a full config, not three edits |
-| AC9 no consumer keeps gate code | satisfied for llmops and Forma |
+| AC9 no consumer keeps gate code | satisfied for Fornax and Forma |
 | AC8 reasoning comments survive | satisfied |
 
 **A public repo cannot call a private repo's reusable workflow.** This was not
-in the design and it blocked the whole thing: `ci` was private while `llmops`,
+in the design and it blocked the whole thing: `ci` was private while `fornax`,
 `forma`, `pkg` and `ci-gate` are public, so a caller failed at startup with zero
 jobs and no log to read. It was not introduced here — `ai-as-an-infrastructure`
 is public, calls `ci` for its release, and had been failing the same way and
@@ -381,7 +381,7 @@ inherits the same constraint.
 
 What the build changed about the design:
 
-- **The coverage exemption llmops needed no longer exists.** Its `exempt` map
+- **The coverage exemption Fornax needed no longer exists.** Its `exempt` map
   held one entry, for `internal/covercheck` itself, and that package is gone.
   All eight packages clear 90% with an empty exemption map — 91.2% in
   `internal/harness` and 91.5% in `internal/install`, the two the average had
@@ -390,7 +390,7 @@ What the build changed about the design:
   any table row that holds a Markdown link reported drift that was not there:
   a spec document cites other specs from prose tables. `spec-lint` now finds
   the index by its `Status` column and reads that column's position.
-- **`spec-lint` found a real drift on its first run against llmops**, where
+- **`spec-lint` found a real drift on its first run against Fornax**, where
   the index said `draft` and the spec said `partial`. That is the bug class
   the check exists for, found without anyone looking for it.
 - **`modernize` found real modernizations in `ci-gate`'s own source** the
@@ -398,7 +398,7 @@ What the build changed about the design:
 
 ### Forma, converted after all
 
-The spec put Forma out of scope and narrowed AC1 to llmops. That was reversed
+The spec put Forma out of scope and narrowed AC1 to fornax. That was reversed
 deliberately: Forma now keeps no gate code either, and the rules that made its
 linter Forma-specific moved into `ci-gate` instead of staying behind.
 
@@ -406,7 +406,7 @@ Six rules generalized once their vocabulary became config: a second closed
 vocabulary (`layer`), a frontmatter key tied to a status and checked against a
 pattern (`blocked_on`), required sections globally and per status, ids that
 must carry their own spec's number, and table rows that must match their
-header. `depcheck` became a subcommand. llmops took the same rules the same
+header. `depcheck` became a subcommand. Fornax took the same rules the same
 day, which is the point — a repository does not get fewer checks because
 nobody wrote them there.
 
@@ -426,6 +426,6 @@ Three things did not fit the contract, and say so rather than bending it:
 Forma also gained `test-hermetic`, which it never had, and passes it with
 nothing on `PATH` but the toolchain.
 
-Deferred: the adoption ramp past llmops and Forma. Fifteen repos have the three
+Deferred: the adoption ramp past Fornax and Forma. Fifteen repos have the three
 required targets and need only a caller and three one-line edits; eight have
 `cover`; fifteen spec-driven repos still lint nothing.

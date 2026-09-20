@@ -126,7 +126,7 @@ Every repository that tags adopts in one commit each. In order:
 8. images: confirm which pipeline its `release.yml` runs and adopt the step
    there.
 9. latere-ui, topos: a `release.yml` calling `notes-release.yml@v1`.
-10. Repositories on lateregate that have never tagged (llmops, Forma, origo,
+10. Repositories on lateregate that have never tagged (Fornax, Forma, origo,
     managed-agents, pay, llm-gateway-bench): the pin bump seeds the
     changelog; nothing else.
 
