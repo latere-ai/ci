@@ -8,7 +8,7 @@ affects:
   - ci/README.md (consumer contract)
   - ci/test/run.sh (workflow shell tests)
   - llmops/ (first consumer; internal/covercheck and internal/speclint deleted)
-  - tgo/ (second consumer; needs judgement, see "leave alone")
+  - forma/ (second consumer; needs judgement, see "leave alone")
   - 19 further Go repos (adoption ramp, not this spec's delivery)
 effort: large
 trigger: three CI failures in one day in llmops, all from tests that depended on the machine running them; the fix was built in llmops and should not be built again per repo
@@ -39,9 +39,9 @@ A survey of every repo with a `go.mod` on 2026-08-29:
 | Have `fmt-check` + `test` + `lint-modernize` | 15 |
 | Have `cover` | 8 |
 | Have `test-hermetic`, `test-race` or `validate` | 1 (llmops) |
-| Have a per-package coverage gate | 2 (llmops, tgo) |
-| Have a spec linter | 2 (tgo; llmops has tests only, no implementation) |
-| Have no `Makefile` at all | tgo — its `ci.yml` runs commands inline |
+| Have a per-package coverage gate | 2 (llmops, Forma) |
+| Have a spec linter | 2 (Forma; llmops has tests only, no implementation) |
+| Have no `Makefile` at all | Forma — its `ci.yml` runs commands inline |
 | Have no workflows at all | latere-cli, llm-gateway-bench |
 
 Two numbers set the design. **Eighteen repos are spec-driven and
@@ -145,11 +145,11 @@ go tool lateregate cover
 
 **What the tool directive costs a consumer.** It adds
 `latere.ai/x/ci-gate` and its one dependency to that repo's `go.mod`. This
-was checked against the strictest case: `tgo/internal/depcheck` gates
+was checked against the strictest case: `forma/internal/depcheck` gates
 `go list -deps` on named packages rather than `go.mod`, on the stated
 grounds that *a module graph says what could be reached* — and a tool is
 never imported by the packages it checks. So the directive does not enter
-`llmdialect`'s import graph and does not trip tgo's own dependency gate.
+`llmdialect`'s import graph and does not trip Forma's own dependency gate.
 Any future consumer gating its footprint should gate the import graph for
 the same reason.
 
@@ -204,7 +204,7 @@ type constraint for a validation rule: **an exemption without a reason
 must remain impossible**, so `lateregate cover` fails on an empty reason
 rather than warning.
 
-The two spec vocabularies differ for good reasons — tgo has statuses,
+The two spec vocabularies differ for good reasons — Forma has statuses,
 layers, decision records and an outcome rule; llmops has a three-value
 `draft`/`partial`/`complete` vocabulary and an index whose rows must
 match. That divergence across 18 repos is the argument for a configurable
@@ -214,7 +214,7 @@ linter, not against one. `spec.status` and `spec.require` carry it.
 `github.com/goccy/go-yaml`, already vetted in `pkg`. That is a deliberate
 trade against JSON, because exemption reasons are sentences and YAML block
 scalars keep them readable. `ci-gate` gates its own footprint the way
-`tgo/internal/depcheck` does, so the graph stays this small.
+`forma/internal/depcheck` does, so the graph stays this small.
 
 ### 3. A reusable `go-verify.yml` in `ci`
 
@@ -285,19 +285,19 @@ test of that:
 
 ## Leave alone
 
-**Do not standardize tgo's extra jobs yet.** It has three the others do
+**Do not standardize Forma's extra jobs yet.** It has three the others do
 not: a cgo-free grep, a fuzz seed corpus, and a dependency-footprint gate
-(`internal/depcheck`). Each exists because tgo promises something specific
+(`internal/depcheck`). Each exists because Forma promises something specific
 — cgo-free is a stated design decision, `llmdialect`'s stdlib-only subtree
 is a property worth guarding. A shared gate built for one consumer is that
 consumer's gate with extra indirection. Standardize the mechanism when a
 second repo actually wants it. `depcheck` is the likeliest next
 subcommand, since `ci-gate` needs it on itself.
 
-**Converting tgo is not in scope.** It has no Makefile, and its workflow
+**Converting Forma is not in scope.** It has no Makefile, and its workflow
 encodes decisions (a 45-minute race timeout with a documented CPU budget,
 a three-tier test strategy) that should be moved by someone who has read
-`tgo/specs/010-conformance.md`, not mechanically.
+`forma/specs/010-conformance.md`, not mechanically.
 
 **`ci/tools/repo-settings.sh` stays in `ci`.** It is a check by the new
 naming, but it has a workflow and a test suite already living beside it,
@@ -308,11 +308,11 @@ and moving it buys nothing this spec needs.
 - **AC1** `latere-ai/ci-gate` exists as module `latere.ai/x/ci-gate` with
   `cmd/lateregate` and the five subcommands, each with tests. Its own
   dependency graph is gated. The `llmops` copies of `covercheck` and
-  `speclint` are deleted, not left as duplicates. **tgo keeps both**, for the
+  `speclint` are deleted, not left as duplicates. **Forma keeps both**, for the
   reason under "leave alone": its `speclint` also enforces layers, decision
   records, an outcome rule, a blocked-reason rule and a sequencing file, none
   of which are hygiene that generalizes. `ci-gate` implements the seven checks
-  every spec tree needs; tgo's conventions stay in tgo.
+  every spec tree needs; Forma's conventions stay in Forma.
 - **AC2** `.lateregate.yaml` carries threshold, exemptions and spec
   conventions per repo. `lateregate cover` **fails** on an exemption with
   an empty reason, and on a profile that covers no packages. With
@@ -348,7 +348,7 @@ and moving it buys nothing this spec needs.
 
 - The release pipelines. They are orthogonal and already centralized.
 - Non-Go repos.
-- Converting tgo, and its cgo-free, fuzz and depcheck gates.
+- Converting Forma, and its cgo-free, fuzz and depcheck gates.
 - Rolling the ramp out past llmops and the one AC7 repo.
 - Any change to what a consumer actually tests or what its specs say.
   This is about where the gates live, not what they assert.
@@ -360,19 +360,19 @@ Shipped 2026-08-29. `latere-ai/ci-gate` at `v0.1.0`, `latere-ai/ci` at
 
 | Criterion | Verdict |
 | --- | --- |
-| AC1 `ci-gate` with five subcommands and tests | satisfied for llmops; tgo deferred as above |
+| AC1 `ci-gate` with five subcommands and tests | satisfied for llmops; Forma deferred as above |
 | AC2 config carries threshold, exemptions, conventions | satisfied |
 | AC3 `go-verify.yml`, example, README, `ci/test/run.sh` case | satisfied |
 | AC4 optional target skips, required target fails by name | satisfied |
 | AC5 llmops calls it, full gate set passes | satisfied — all ten jobs green, including macOS, `cross` and `validate` |
 | AC6 gates run locally, `GOPROXY=off`, fresh clone | satisfied |
-| AC7 a second repo adopts with three one-line edits | **not done** — tgo was converted, but it needed a full config, not three edits |
-| AC9 no consumer keeps gate code | satisfied for llmops and tgo |
+| AC7 a second repo adopts with three one-line edits | **not done** — Forma was converted, but it needed a full config, not three edits |
+| AC9 no consumer keeps gate code | satisfied for llmops and Forma |
 | AC8 reasoning comments survive | satisfied |
 
 **A public repo cannot call a private repo's reusable workflow.** This was not
 in the design and it blocked the whole thing: `ci` was private while `llmops`,
-`tgo`, `pkg` and `ci-gate` are public, so a caller failed at startup with zero
+`forma`, `pkg` and `ci-gate` are public, so a caller failed at startup with zero
 jobs and no log to read. It was not introduced here — `ai-as-an-infrastructure`
 is public, calls `ci` for its release, and had been failing the same way and
 just as silently before this work began. `latere-ai/ci` is now public, which is
@@ -396,11 +396,11 @@ What the build changed about the design:
 - **`modernize` found real modernizations in `ci-gate`'s own source** the
   first time it ran, which is the dogfooding working as intended.
 
-### tgo, converted after all
+### Forma, converted after all
 
-The spec put tgo out of scope and narrowed AC1 to llmops. That was reversed
-deliberately: tgo now keeps no gate code either, and the rules that made its
-linter tgo-specific moved into `ci-gate` instead of staying behind.
+The spec put Forma out of scope and narrowed AC1 to llmops. That was reversed
+deliberately: Forma now keeps no gate code either, and the rules that made its
+linter Forma-specific moved into `ci-gate` instead of staying behind.
 
 Six rules generalized once their vocabulary became config: a second closed
 vocabulary (`layer`), a frontmatter key tied to a status and checked against a
@@ -413,19 +413,19 @@ nobody wrote them there.
 Three things did not fit the contract, and say so rather than bending it:
 
 - **Windows left the make contract.** The runner image ships GNU make on
-  ubuntu and not on windows, so tgo tests Windows in a small local workflow
+  ubuntu and not on windows, so Forma tests Windows in a small local workflow
   running the three commands its `test` target runs. Checked against
   `actions/runner-images` rather than assumed.
 - **`deps`, `cgo-free` and `fuzz` keep their own make targets** under one
-  `validate` job. Each defends a promise tgo makes and most repos do not, and
+  `validate` job. Each defends a promise Forma makes and most repos do not, and
   a failure still names which one broke.
-- **tgo's `ci-metal.yml` is untouched.** A job that promises a Metal device
+- **Forma's `ci-metal.yml` is untouched.** A job that promises a Metal device
   and finds none is a failure rather than a skip, so it cannot share this
   pipeline.
 
-tgo also gained `test-hermetic`, which it never had, and passes it with
+Forma also gained `test-hermetic`, which it never had, and passes it with
 nothing on `PATH` but the toolchain.
 
-Deferred: the adoption ramp past llmops and tgo. Fifteen repos have the three
+Deferred: the adoption ramp past llmops and Forma. Fifteen repos have the three
 required targets and need only a caller and three one-line edits; eight have
 `cover`; fifteen spec-driven repos still lint nothing.
