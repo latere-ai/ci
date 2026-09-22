@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v1.15.0 - 2026-09-23
+
 ### Removed
 
 - `service-release.yml` no longer accepts `DO_TOKEN` or installs doctl. The
