@@ -28,4 +28,6 @@ jobs:
       spa_embed_dir: internal/web/spa/dist
       main_package: ./cmd/luxd
       # preflight: go run ./tools/deploy -manifest deploy/base/deployment.yaml -namespace sandboxd
+    # Delivers the repository secret DEPLOY_KUBECONFIG, the kubeconfig of the
+    # service's rollout identity (deploy/bootstrap/rollout-identity.yaml).
     secrets: inherit

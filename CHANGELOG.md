@@ -10,6 +10,16 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- `service-release.yml` deploys with the repository secret `DEPLOY_KUBECONFIG`,
+  the kubeconfig of the service's own rollout identity: a ServiceAccount bound
+  to a Role in its namespace over the kinds `deploy/prod` applies. The deploy
+  job then holds no DigitalOcean credential, so a leaked secret reaches one
+  namespace's workloads rather than the account. The README's "Deploy
+  credential" section builds one. `DO_TOKEN` is now optional and deprecated,
+  read only when `DEPLOY_KUBECONFIG` is unset.
+
 ## v1.13.0 - 2026-09-18
 
 ### Changed

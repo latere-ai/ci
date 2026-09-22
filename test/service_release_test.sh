@@ -104,6 +104,25 @@ else
     fail "live smoke is not wired to the image build's asset"
 fi
 
+# The deploy job authenticates as the consumer's rollout identity, a
+# namespace-bound ServiceAccount, through DEPLOY_KUBECONFIG. The file goes
+# under RUNNER_TEMP at mode 600: on the self-hosted runner a kubeconfig under
+# $HOME would outlive the job and be readable from the other slot.
+deploy=$(sed -n '/^  deploy:/,/^  smoke:/p' "$WORKFLOW")
+if printf '%s' "$deploy" | grep -qF 'KUBECONFIG_CONTENT: ${{ secrets.DEPLOY_KUBECONFIG }}' \
+    && printf '%s' "$deploy" | grep -qF 'install -m 700 -d "$RUNNER_TEMP/kube"' \
+    && printf '%s' "$deploy" | grep -qF 'chmod 600 "$RUNNER_TEMP/kube/config"' \
+    && printf '%s' "$deploy" | grep -qF 'echo "KUBECONFIG=$RUNNER_TEMP/kube/config" >> "$GITHUB_ENV"'; then
+    pass "deploy writes DEPLOY_KUBECONFIG to a 600 file under RUNNER_TEMP"
+else
+    fail "deploy does not write DEPLOY_KUBECONFIG to a private file under RUNNER_TEMP"
+fi
+if grep -A3 '^      DEPLOY_KUBECONFIG:' "$WORKFLOW" | grep -qE '^\s+description:'; then
+    pass "DEPLOY_KUBECONFIG is a declared workflow_call secret"
+else
+    fail "DEPLOY_KUBECONFIG is not declared, so 'secrets: inherit' cannot deliver it"
+fi
+
 if [ "$FAILURES" -gt 0 ]; then
     exit 1
 fi

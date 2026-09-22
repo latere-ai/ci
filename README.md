@@ -290,12 +290,67 @@ bun and fetches kubectl and gh at `kubectl_version` and `gh_version`,
 checksum-verified, when the runner has none; hosted runners ship all three and
 skip the fetch.
 
-`secrets: inherit` passes the org `DO_TOKEN`. Service-specific smoke credentials
-are declared optional on the reusable workflow. A repo whose secret names differ
-(e.g. Cella's `CELLA_SMOKE_CLIENT_*`) passes them explicitly instead of
-`inherit`, mapping them onto `SMOKE_CLIENT_ID`/`SMOKE_CLIENT_SECRET` (and then
-also passing `DO_TOKEN: ${{ secrets.DO_TOKEN }}` by hand, since you cannot mix
-`inherit` with explicit secrets).
+`secrets: inherit` passes the repository secret `DEPLOY_KUBECONFIG`, the
+kubeconfig the deploy job applies the release with. It belongs to the service's
+own rollout identity: a ServiceAccount in the service's namespace, bound to a
+Role over the kinds `deploy/prod` applies, kept in the consumer at
+`deploy/bootstrap/rollout-identity.yaml` and applied by an operator. The job
+holds no DigitalOcean credential, so a leaked kubeconfig reaches one namespace's
+workloads rather than the account. See "Deploy credential" below for building
+one.
+
+Service-specific smoke credentials are declared optional on the reusable
+workflow. A repo whose secret names differ (e.g. Cella's `CELLA_SMOKE_CLIENT_*`)
+passes them explicitly instead of `inherit`, mapping them onto
+`SMOKE_CLIENT_ID`/`SMOKE_CLIENT_SECRET` (and then also passing
+`DEPLOY_KUBECONFIG: ${{ secrets.DEPLOY_KUBECONFIG }}` by hand, since you cannot
+mix `inherit` with explicit secrets).
+
+`DO_TOKEN` is still read when `DEPLOY_KUBECONFIG` is unset, and is deprecated.
+
+### Deploy credential
+
+The identity is a ServiceAccount, a Role and RoleBinding in each namespace
+`deploy/prod` writes to, and a `kubernetes.io/service-account-token` Secret
+bound to the account; `latere-ai/origo`'s
+`deploy/bootstrap/rollout-identity.yaml` is the reference. The Role lists
+`get, list, create, update, patch` on each kind `deploy/prod` contains,
+`watch` on Deployments and `get, list, watch` on ReplicaSets for
+`rollout status`, and `get, list` on pods and `get` on `pods/log`. It holds
+nothing on Secrets, Namespaces, or RBAC, and no `delete`. A kind that is not
+listed fails the apply with Forbidden, which is the intended failure: add the
+kind to the Role and re-apply it.
+
+RBAC objects and cluster-scoped objects do not belong in `deploy/prod`. A
+subject can write a Role or ClusterRole only with the grants it already holds,
+so a pipeline able to write one could give itself anything; they live in
+`deploy/bootstrap` beside the identity.
+
+The kubeconfig is built from the token Secret, set on the repository, and not
+kept anywhere else:
+
+```bash
+kubectl apply -f deploy/bootstrap/rollout-identity.yaml
+NS=latere SA=<service>-rollout
+kubeconfig=$(mktemp) && chmod 600 "$kubeconfig"
+KUBECONFIG="$kubeconfig" kubectl config set-cluster latere-k8s \
+  --server="$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')"
+KUBECONFIG="$kubeconfig" kubectl config set clusters.latere-k8s.certificate-authority-data \
+  "$(kubectl -n "$NS" get secret "$SA-token" -o jsonpath='{.data.ca\.crt}')"
+KUBECONFIG="$kubeconfig" kubectl config set-credentials "$SA" \
+  --token="$(kubectl -n "$NS" get secret "$SA-token" -o jsonpath='{.data.token}' | base64 -d)"
+KUBECONFIG="$kubeconfig" kubectl config set-context "$SA" \
+  --cluster=latere-k8s --user="$SA" --namespace="$NS"
+KUBECONFIG="$kubeconfig" kubectl config use-context "$SA"
+KUBECONFIG="$kubeconfig" kubectl apply -k deploy/prod --dry-run=server  # or -f
+gh secret set DEPLOY_KUBECONFIG --repo <owner>/<repo> < "$kubeconfig"
+rm "$kubeconfig"
+```
+
+The server-side dry run authorizes every object the release applies without
+changing any, so a Role that misses a kind fails here rather than in a release.
+Rotating the credential is deleting the token Secret, re-applying the identity
+file, and running the same steps.
 
 ## Using it (images)
 
@@ -363,8 +418,8 @@ you move the pipeline, not after a release fails half way through.
 
 **The deploy secrets still have to reach it.** `runs_on` changes where a job
 runs, not what it can read: the caller keeps `secrets: inherit` (or its explicit
-mapping) for `DO_TOKEN` and the smoke credentials, and the runner needs network
-reach to the `latere-k8s` cluster and to GHCR.
+mapping) for `DEPLOY_KUBECONFIG` and the smoke credentials, and the runner needs
+network reach to the `latere-k8s` cluster and to GHCR.
 
 Go caches follow the label on their own. `actions/setup-go` restores the module
 cache only on a hosted label, because a self-hosted runner keeps its own between
@@ -503,7 +558,7 @@ Both run on your own `gh` credentials, so neither needs a stored token.
 
 ## Local checks
 
-Reusable workflows, `secrets: inherit`, environments, and doctl only exercise on
+Reusable workflows, `secrets: inherit`, and environments only exercise on
 GitHub runners; you cannot run this pipeline locally. The local loop is:
 
 ```bash

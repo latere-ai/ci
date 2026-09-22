@@ -24,4 +24,6 @@ jobs:
       build_mode: dockerfile
       dockerfile: Dockerfile
       has_frontend: false
+    # Delivers the repository secret DEPLOY_KUBECONFIG, the kubeconfig of the
+    # service's rollout identity (deploy/bootstrap/rollout-identity.yaml).
     secrets: inherit
