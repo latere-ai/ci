@@ -306,7 +306,8 @@ passes them explicitly instead of `inherit`, mapping them onto
 `DEPLOY_KUBECONFIG: ${{ secrets.DEPLOY_KUBECONFIG }}` by hand, since you cannot
 mix `inherit` with explicit secrets).
 
-`DO_TOKEN` is still read when `DEPLOY_KUBECONFIG` is unset, and is deprecated.
+A repository without `DEPLOY_KUBECONFIG` still builds and publishes its image;
+its deploy job fails with an error naming the secret.
 
 ### Deploy credential
 

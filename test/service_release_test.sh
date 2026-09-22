@@ -117,6 +117,11 @@ if printf '%s' "$deploy" | grep -qF 'KUBECONFIG_CONTENT: ${{ secrets.DEPLOY_KUBE
 else
     fail "deploy does not write DEPLOY_KUBECONFIG to a private file under RUNNER_TEMP"
 fi
+if grep -qE 'DO_TOKEN|action-doctl|doctl ' "$WORKFLOW"; then
+    fail "the workflow still reaches for a DigitalOcean credential"
+else
+    pass "the workflow holds no DigitalOcean credential"
+fi
 if grep -A3 '^      DEPLOY_KUBECONFIG:' "$WORKFLOW" | grep -qE '^\s+description:'; then
     pass "DEPLOY_KUBECONFIG is a declared workflow_call secret"
 else

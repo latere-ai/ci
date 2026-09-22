@@ -140,10 +140,7 @@ on:
         default: "v0.29.0"
     secrets:
       DEPLOY_KUBECONFIG:
-        description: "Kubeconfig of the service's rollout identity: a ServiceAccount bound to a Role in its namespace over the kinds deploy/prod applies (the consumer's deploy/bootstrap/rollout-identity.yaml). A repository secret of this name reaches the pipeline through 'secrets: inherit'."
-        required: false
-      DO_TOKEN:
-        description: "Deprecated. A DigitalOcean PAT the deploy job trades for a one-hour kubeconfig, used only when DEPLOY_KUBECONFIG is unset."
+        description: "Kubeconfig of the service's rollout identity: a ServiceAccount bound to a Role in its namespace over the kinds deploy/prod applies (the consumer's deploy/bootstrap/rollout-identity.yaml). A repository secret of this name reaches the pipeline through 'secrets: inherit'. Optional here so a service whose cluster side is not provisioned yet still builds and publishes its image; its deploy job fails naming the secret."
         required: false
       SMOKE_BEARER:
         description: "Optional pre-minted bearer for an authenticated smoke, used verbatim. Takes precedence over SMOKE_CLIENT_ID/SECRET. Use this when the service issues its own credentials and auth holds no scope for the smoke to request."
@@ -362,38 +359,22 @@ jobs:
           echo "$dir" >> "$GITHUB_PATH"
           "$dir/kubectl" version --client
 
-      # The secrets context is not available to a step's `if`, so whether the
-      # kubeconfig is set travels through an output. The output carries only
-      # that fact, never the value.
-      - name: Choose the cluster credential
-        id: credential
-        env:
-          HAS_KUBECONFIG: ${{ secrets.DEPLOY_KUBECONFIG != '' }}
-        run: echo "kubeconfig=${HAS_KUBECONFIG}" >> "$GITHUB_OUTPUT"
-
       # The kubeconfig lives in this job's temp directory, which the runner
       # empties when the job ends: on a self-hosted runner a file under $HOME
       # would outlive the job and be shared with the other slot.
       - name: Write the kubeconfig
-        if: ${{ steps.credential.outputs.kubeconfig == 'true' }}
         env:
           KUBECONFIG_CONTENT: ${{ secrets.DEPLOY_KUBECONFIG }}
         run: |
           set -euo pipefail
+          if [ -z "$KUBECONFIG_CONTENT" ]; then
+            echo "::error::DEPLOY_KUBECONFIG is not set on this repository. Build it from the service's rollout identity; see the latere-ai/ci README, 'Deploy credential'."
+            exit 1
+          fi
           install -m 700 -d "$RUNNER_TEMP/kube"
           printf '%s' "$KUBECONFIG_CONTENT" > "$RUNNER_TEMP/kube/config"
           chmod 600 "$RUNNER_TEMP/kube/config"
           echo "KUBECONFIG=$RUNNER_TEMP/kube/config" >> "$GITHUB_ENV"
-
-      - uses: digitalocean/action-doctl@3cb3953159719656269e044e0e24ca16dd2a690f # v2.5.2
-        if: ${{ steps.credential.outputs.kubeconfig != 'true' }}
-        with:
-          token: ${{ secrets.DO_TOKEN }}
-
-      # --expiry-seconds uses doctl's ephemeral /credentials endpoint instead of
-      # minting a persistent PAT per run.
-      - if: ${{ steps.credential.outputs.kubeconfig != 'true' }}
-        run: doctl kubernetes cluster kubeconfig save latere-k8s --expiry-seconds 3600
 
       - name: Preflight
         if: ${{ inputs.preflight != '' }}

@@ -10,6 +10,14 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Removed
+
+- `service-release.yml` no longer accepts `DO_TOKEN` or installs doctl. The
+  deploy job authenticates only with `DEPLOY_KUBECONFIG`, and fails with an
+  error naming it when the repository has none. A caller that passes
+  `DO_TOKEN` explicitly, rather than through `secrets: inherit`, must drop it:
+  an undeclared secret fails the call before any job starts.
+
 ## v1.14.0 - 2026-09-23
 
 ### Changed
