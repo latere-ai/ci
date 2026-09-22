@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v1.16.0 - 2026-09-23
+
 ### Changed
 
 - `lateregate.yml` builds every job with `GOFLAGS=-trimpath` when the job runs
