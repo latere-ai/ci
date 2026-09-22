@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v1.14.0 - 2026-09-23
+
 ### Changed
 
 - `service-release.yml` deploys with the repository secret `DEPLOY_KUBECONFIG`,
