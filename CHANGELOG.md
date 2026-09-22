@@ -10,6 +10,20 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- `lateregate.yml` builds every job with `GOFLAGS=-trimpath` when the job runs
+  on a self-hosted label, and never on a hosted one. A self-hosted runner keeps
+  one Go cache for all of its runner processes, and without the flag the cache
+  keys a package on the work directory it was built in, which differs between
+  processes: a gate that landed on the other process reran every package. A
+  test that finds repository files through `runtime.Caller` gets a
+  module-relative path under the flag; use a path relative to the package
+  directory, where `go test` runs it.
+- Only the `lint` gate runs with the runner process's own `TMPDIR`. Every
+  other gate keeps the machine's, because a cached test result is keyed on the
+  `TMPDIR` the test read and a per-process value split the cache the same way.
+
 ## v1.15.0 - 2026-09-23
 
 ### Removed

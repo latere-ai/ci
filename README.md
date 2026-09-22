@@ -133,6 +133,17 @@ version is pinned in the binary, so there is no input for it, and a
 repository that cannot lint waives `lint` with a reason and a date rather
 than turning the job off.
 
+On a self-hosted label every job builds with `GOFLAGS=-trimpath`. Such a
+runner keeps one Go build and test cache for all of its runner processes, and
+each process checks out under a work directory of its own; without the flag
+the cache keys a package on that directory and no process replays a result
+another recorded. For the same reason only the `lint` gate gets the runner
+process's own `TMPDIR`, which golangci-lint's machine-wide lock needs: a
+cached test result is keyed on the `TMPDIR` the test read. A test that finds
+repository files through `runtime.Caller` gets a module-relative path under
+`-trimpath`; `go test` runs each package in its own directory, so a path
+relative to it works on every runner.
+
 ### `go-verify.yml`
 
 The previous pipeline. It probes the consumer's `Makefile` with `make -np`

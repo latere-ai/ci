@@ -48,6 +48,9 @@ jobs:
   probe:
     name: which gates apply
     runs-on: ${{ inputs.runs_on }}
+    env:
+      # -trimpath on a self-hosted runner: see the gate job.
+      GOFLAGS: ${{ !(startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-')) && '-trimpath' || '' }}
     outputs:
       gates: ${{ steps.plan.outputs.gates }}
       test: ${{ steps.plan.outputs.test }}
@@ -79,6 +82,9 @@ jobs:
     needs: probe
     if: ${{ needs.probe.outputs.test == 'true' }}
     runs-on: ${{ matrix.os }}
+    env:
+      # -trimpath on a self-hosted runner: see the gate job.
+      GOFLAGS: ${{ !(startsWith(matrix.os, 'ubuntu-') || startsWith(matrix.os, 'macos-') || startsWith(matrix.os, 'windows-')) && '-trimpath' || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -105,6 +111,12 @@ jobs:
       fail-fast: false
       matrix:
         gate: ${{ fromJSON(needs.probe.outputs.gates) }}
+    env:
+      # A self-hosted runner keeps one Go build and test cache for all of its
+      # runner processes, and without -trimpath the cache keys a package on
+      # the directory it was built in. Each process checks out under a work
+      # directory of its own, so none would replay a result another recorded.
+      GOFLAGS: ${{ !(startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-')) && '-trimpath' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -128,9 +140,16 @@ jobs:
       - name: Prepare TypeScript enum projects
         if: ${{ matrix.gate == 'enum-typescript' }}
         run: go tool lateregate enum-typescript-prepare
+      # Every gate but lint keeps the machine's TMPDIR. A cached test result is
+      # keyed on the TMPDIR the test read, and a value per runner process
+      # would keep each process from replaying what another recorded.
       - run: go tool lateregate ${{ matrix.gate }}
+        if: ${{ matrix.gate != 'lint' }}
+      # golangci-lint locks a file under TMPDIR for the whole machine, so lint
+      # gets the runner process's own directory and two of them do not collide.
+      - run: go tool lateregate lint
+        if: ${{ matrix.gate == 'lint' }}
         env:
-          # golangci-lint's lock must not collide with another runner slot.
           TMPDIR: ${{ runner.temp }}
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ always() && matrix.gate == 'cover' }}
@@ -151,6 +170,9 @@ jobs:
   contract:
     name: wiring is in shape
     runs-on: ${{ inputs.runs_on }}
+    env:
+      # -trimpath on a self-hosted runner: see the gate job.
+      GOFLAGS: ${{ !(startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-')) && '-trimpath' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
