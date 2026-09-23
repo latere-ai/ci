@@ -433,7 +433,7 @@ means setting both:
 
 **The two runners are shared by the whole family.** They are not per-repository.
 Two releases that both ask for `linux-vm` queue behind each other, and a job
-that fans out wider than two runners serialises. A repository that releases
+that fans out wider than two runners serializes. A repository that releases
 often, or fans out wide, is better off on hosted runners.
 
 **The runner must already have what the pipeline expects to find.** The VM

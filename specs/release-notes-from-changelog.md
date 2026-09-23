@@ -50,7 +50,7 @@ TypeScript SDK, a bun library) and in Go repositories whose pin may predate
 the command. The version is a workflow input with a default, like
 `goreleaser_version`, and moves by editing this repository. The module is
 fetched through the Go proxy and verified against the checksum database,
-which is the same trust every `go get` in the organisation already places.
+which is the same trust every `go get` in the organization already places.
 
 **The body is the section, then the evidence.** `service-release.yml` and
 `images-release.yml` write `notes.md`, a blank line, the evidence marker

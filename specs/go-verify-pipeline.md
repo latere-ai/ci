@@ -263,7 +263,7 @@ hand and a claim in a document with no gate behind it goes stale silently.
 It is the repo the gates were built in, so it should be the proof that the
 reusable version is equivalent. Its workflow shrinks to a caller, its
 Makefile targets shrink to delegations, and `internal/covercheck` and
-`internal/speclint` are deleted in favour of the `ci-gate` subcommands.
+`internal/speclint` are deleted in favor of the `ci-gate` subcommands.
 
 ## Adoption ramp
 
