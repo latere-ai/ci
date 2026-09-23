@@ -209,7 +209,7 @@ jobs:
           cache: ${{ startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-') }}
       - run: make spec-lint
 
-  # A licence only binds the people it reaches, and a file that leaves the
+  # A license only binds the people it reaches, and a file that leaves the
   # repository without its notice reaches them as if it had no terms.
   license:
     name: every source file declares its licence
