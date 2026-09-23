@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v1.17.0 - 2026-09-23
+
 ### Changed
 
 - On a self-hosted runner, `lateregate.yml` runs the gates that take seconds
