@@ -108,10 +108,25 @@ prints.
 
 | Job | Runs |
 | --- | --- |
-| `probe` | `lateregate list -json`; its output is the matrix |
-| `test on <os>` | `lateregate test` on each runner in `test_os` |
-| `<gate>` | `lateregate <gate>`, one job per running gate; `cover` uploads `coverage.out` |
-| `wiring is in shape` | `lateregate contract`: the caller, hook, gitignore and pin are the shared ones |
+| `probe` | `lateregate list -json`; its outputs are the job sets |
+| `test on <os>` | `lateregate test` on each runner in `test_os`, except `runs_on` once the plan has `suite` |
+| `<gate>` | `lateregate <gate>`, one job per running gate on a hosted runner, and only the suite gates on a self-hosted one; `cover` or `suite` uploads `coverage.out` |
+| `static gates and wiring` | self-hosted only: every other running gate, one after another, then `lateregate contract` |
+| `wiring is in shape` | hosted only: `lateregate contract`, the caller, hook, gitignore and pin are the shared ones |
+
+The suite gates are the ones that each run the whole test suite: `suite`,
+which a lateregate with it runs in place of `test`, `race`, `cover`,
+`tempdir` and `hermetic`, or those four one by one in a lateregate that
+predates it. `suite` runs once, on `runs_on`: the other systems in
+`test_os` keep plain `test`, because `suite` adds the race detector and
+coverage to the run and a macOS minute bills at ten times a Linux one.
+
+On a self-hosted runner a job is a turn on one of a few runner slots, and one
+job per gate made the queue out of job setup rather than checks. So there the
+gates that take seconds share the `static gates and wiring` job, each in a
+log group of its own, each run whether another failed, and each named in an
+annotation when it fails. A hosted runner keeps one job per gate, since its
+parallelism costs nothing.
 
 `go tool lateregate` on a laptop runs the same set. That split is the
 point: a gate that only runs in CI tells you too late.

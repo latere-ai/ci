@@ -10,6 +10,23 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- On a self-hosted runner, `lateregate.yml` runs the gates that take seconds
+  in one job, `static gates and wiring`, followed by `lateregate contract`,
+  and keeps jobs of their own only for the gates that run the whole test
+  suite. A push used to take one job per gate, about eighteen, and on a
+  runner with two slots the queue was made of job setup rather than checks.
+  Each folded gate still runs whether another failed, gets a log group, and
+  is named in an annotation when it fails. Hosted runners keep one job per
+  gate.
+- With a lateregate that has the `suite` gate, `suite` runs as one gate job
+  on `runs_on` in place of `test`, `race`, `cover`, `tempdir` and
+  `hermetic`, and uploads `coverage.out`. The `test_os` matrix drops
+  `runs_on` and runs plain `test` on the other systems, so a macOS leg does
+  not pay for the race detector and coverage. A lateregate without `suite`
+  runs as before.
+
 ## v1.16.0 - 2026-09-23
 
 ### Changed
