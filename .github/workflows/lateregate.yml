@@ -102,9 +102,11 @@ jobs:
           else
             tests='[]'
           fi
-          echo "gates=$gates" >> "$GITHUB_OUTPUT"
-          echo "fold=$fold" >> "$GITHUB_OUTPUT"
-          echo "tests=$tests" >> "$GITHUB_OUTPUT"
+          {
+            echo "gates=$gates"
+            echo "fold=$fold"
+            echo "tests=$tests"
+          } >> "$GITHUB_OUTPUT"
 
   test:
     name: test on ${{ matrix.os }}
