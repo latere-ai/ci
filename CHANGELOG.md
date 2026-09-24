@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v1.17.1 - 2026-09-24
+
 ### Changed
 
 - The README is organized around what a calling repository adds, with an
