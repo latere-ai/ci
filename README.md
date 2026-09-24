@@ -326,11 +326,12 @@ The identity is a ServiceAccount, a Role and RoleBinding in each namespace
 `deploy/prod` writes to, and a `kubernetes.io/service-account-token`
 Secret bound to the account; `latere-ai/origo`'s
 `deploy/bootstrap/rollout-identity.yaml` is the reference. The Role lists
-`get, list, create, update, patch` on each kind `deploy/prod` contains,
-`watch` on Deployments and `get, list, watch` on ReplicaSets for `rollout
-status`, and `get, list` on pods and `get` on `pods/log`. It holds nothing
-on Secrets, Namespaces or RBAC, and no `delete`. A kind that is not listed
-fails the apply with Forbidden, which is the intended failure: add the
+`get, list, create, update, patch` on each kind `deploy/prod` contains and
+`watch` on Deployments, which is what `apply`, `set image` and `rollout
+status` use: `rollout status` reads the rollout's state from the
+Deployment's status and reads no ReplicaSet or Pod. It holds nothing on
+Secrets, Namespaces, or RBAC, and no `delete`. A kind that is not
+listed fails the apply with Forbidden, which is the intended failure: add the
 kind to the Role and re-apply it.
 
 RBAC objects and cluster-scoped objects do not belong in `deploy/prod`. A
