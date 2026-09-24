@@ -10,6 +10,13 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- The README is organized around what a calling repository adds, with an
+  input and secret table for `service-release.yml` and the jobs and
+  conventions of every pipeline. How to cut a version and try a change on
+  one repository first moved to `CONTRIBUTING.md`. No pipeline changed.
+
 ## v1.17.0 - 2026-09-23
 
 ### Changed
