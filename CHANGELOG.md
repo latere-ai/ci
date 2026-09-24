@@ -17,6 +17,13 @@ committed: the commit log already holds that.
   conventions of every pipeline. How to cut a version and try a change on
   one repository first moved to `CONTRIBUTING.md`. No pipeline changed.
 
+### Fixed
+
+- `cli-release.yml` publishes again. It wrote the release note to
+  `notes.md` inside the checkout, and goreleaser refuses to publish from a
+  tree with an untracked file, so every CLI release failed after its tests
+  passed. The note is now written under the runner's temp directory.
+
 ## v1.17.0 - 2026-09-23
 
 ### Changed

@@ -57,10 +57,12 @@ which is the same trust every `go get` in the organization already places.
 and the smoke evidence, and create or edit the release with that. The
 "reuse the existing body as prefix" branch goes: the section is the same on
 a re-run, so the body is rebuilt from the changelog every time and a re-run
-replaces rather than stacks. `cli-release.yml` passes `--release-notes
-notes.md` to goreleaser, which then publishes that file instead of its
-commit list; the consumer's `changelog:` block becomes unused and is
-deleted on adoption.
+replaces rather than stacks. `cli-release.yml` writes the section to
+`$RUNNER_TEMP/notes.md` and passes `--release-notes` with that path to
+goreleaser, which then publishes that file instead of its commit list; the
+consumer's `changelog:` block becomes unused and is deleted on adoption.
+The file stays out of the checkout because goreleaser refuses to publish
+from a tree with an untracked file in it.
 
 **A fourth pipeline for repositories that build nothing.** pkg, ci-gate,
 latere-ui and topos tag a module or a library: no image, no deploy, no
@@ -92,7 +94,8 @@ back.
 2. `service-release.yml` and `images-release.yml` build the body as
    section, blank line, marker, evidence; the publish-tail copy in the test
    matches the workflow; an edit path produces the same body as a create.
-3. `cli-release.yml` runs goreleaser with `--release-notes notes.md`.
+3. `cli-release.yml` runs goreleaser with `--release-notes` pointing at
+   the notes under the runner's temp directory, outside the checkout.
 4. `notes-release.yml` publishes a release whose body is exactly the
    section, marks a prerelease, and fails on a tag with no section.
 5. `actionlint` passes; `README.md` documents the changelog convention as a

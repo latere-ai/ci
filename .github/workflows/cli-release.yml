@@ -118,6 +118,8 @@ jobs:
         # tag in CHANGELOG.md is the body, and no section fails the job before
         # goreleaser builds anything. The reader is lateregate's at a version
         # pinned here, the same reader the pre-push hook refuses the tag with.
+        # The notes go under RUNNER_TEMP, not into the checkout: goreleaser
+        # refuses to publish from a tree with an untracked file in it.
         env:
           TAG: ${{ github.ref_name }}
         run: |
@@ -127,13 +129,13 @@ jobs:
           notes_root=$(mktemp -d)
           trap 'rm -rf "$notes_root"' EXIT
           cp CHANGELOG.md "$notes_root/CHANGELOG.md"
-          go run latere.ai/x/ci-gate/cmd/lateregate@${{ inputs.lateregate_version }} release-notes -C "$notes_root" "$TAG" > notes.md
+          go run latere.ai/x/ci-gate/cmd/lateregate@${{ inputs.lateregate_version }} release-notes -C "$notes_root" "$TAG" > "$RUNNER_TEMP/notes.md"
 
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           distribution: goreleaser
           version: ${{ inputs.goreleaser_version }}
           # --release-notes replaces goreleaser's commit list with the section.
-          args: release --clean --release-notes notes.md
+          args: release --clean --release-notes ${{ runner.temp }}/notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
