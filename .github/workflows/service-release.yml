@@ -7,8 +7,8 @@ name: service-release
 #   jobs:
 #     release:
 #       uses: latere-ai/ci/.github/workflows/service-release.yml@v1
-#       with: { service: luxd, image: ghcr.io/latere-ai/luxd, namespace: latere,
-#               url: https://lux.latere.ai, title: Lux }
+#       with: { service: platformd, image: ghcr.io/latere-ai/platformd, namespace: latere,
+#               url: https://platform.latere.ai, title: Latere Platform }
 #       secrets: inherit
 #
 # Flow (one run): build-frontend -> build-binary -> build-image -> deploy ->

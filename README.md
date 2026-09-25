@@ -290,12 +290,12 @@ jobs:
   release:
     uses: latere-ai/ci/.github/workflows/service-release.yml@v1
     with:
-      service: luxd
-      image: ghcr.io/latere-ai/luxd
+      service: platformd
+      image: ghcr.io/latere-ai/platformd
       namespace: latere
-      url: https://lux.latere.ai
-      title: Lux
-      main_package: ./cmd/luxd
+      url: https://platform.latere.ai
+      title: Latere Platform
+      main_package: ./cmd/platformd
       spa_embed_dir: internal/web/spa/dist
     secrets: inherit
 ```

@@ -19,14 +19,14 @@ jobs:
   release:
     uses: latere-ai/ci/.github/workflows/service-release.yml@v1
     with:
-      service: luxd
-      image: ghcr.io/latere-ai/luxd
+      service: platformd
+      image: ghcr.io/latere-ai/platformd
       namespace: latere
-      url: https://lux.latere.ai
-      title: Lux
+      url: https://platform.latere.ai
+      title: Latere Platform
       has_frontend: true
       spa_embed_dir: internal/web/spa/dist
-      main_package: ./cmd/luxd
+      main_package: ./cmd/platformd
       # preflight: go run ./tools/deploy -manifest deploy/base/deployment.yaml -namespace sandboxd
     # Delivers the repository secret DEPLOY_KUBECONFIG, the kubeconfig of the
     # service's rollout identity (deploy/bootstrap/rollout-identity.yaml).
