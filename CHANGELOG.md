@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v1.18.0 - 2026-09-25
+
 ### Added
 
 - `ci-gate-bump.yml` moves a Go repository's `latere.ai/x/ci-gate` pin to
