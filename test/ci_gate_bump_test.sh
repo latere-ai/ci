@@ -472,6 +472,7 @@ if printf '%s' "$body" | grep -q '`lint`, `suite`' \
     && printf '%s' "$body" | grep -q 'The pin stays at v0.49.0' \
     && printf '%s' "$body" | grep -q 'https://github.test/run/1' \
     && printf '%s' "$body" | grep -q 'go get -tool latere.ai/x/ci-gate/cmd/lateregate@v0.50.1' \
+    && printf '%s' "$body" | grep -qx 'go tool lateregate contract' \
     && printf '%s' "$body" | grep -q '<summary>go tool lateregate suite</summary>' \
     && printf '%s' "$body" | grep -q 'FAIL suite: it failed'; then
     pass "the body names the failing gates, the pin, the run, the reproduction and each gate's output"

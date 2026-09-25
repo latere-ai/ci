@@ -10,6 +10,14 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Fixed
+
+- The issue `ci-gate-bump.yml` opens lists `go tool lateregate contract`
+  among the commands that reproduce the failure. The bump runs the wiring
+  check after the bar, and a failure there, such as a per-push caller
+  without the top-level `concurrency` block newer releases require, did not
+  reproduce with `go tool lateregate` alone.
+
 ## v1.18.0 - 2026-09-25
 
 ### Added

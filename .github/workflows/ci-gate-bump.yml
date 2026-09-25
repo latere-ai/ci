@@ -381,6 +381,7 @@ jobs:
             echo "go get -tool latere.ai/x/ci-gate/cmd/lateregate@$LATEST"
             echo "go mod tidy"
             echo "go tool lateregate"
+            echo "go tool lateregate contract"
             echo '```'
             echo
             echo "Fix the tree, with or without the pin in the same commit. The next daily run moves the pin once the bar passes, and this issue closes when the pin reaches $LATEST. Until then every run that still fails updates it."
