@@ -10,6 +10,18 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Added
+
+- `ci-gate-bump.yml` moves a Go repository's `latere.ai/x/ci-gate` pin to
+  the latest release once a day. It runs the whole bar and the wiring check
+  on the new version. When they pass, it pushes `gate: ci-gate vX.Y.Z` to
+  the branch and dispatches the per-push caller on that commit. When they
+  fail, it pushes nothing and opens one issue for the version, with each
+  failing gate's output, which later runs update and a moved pin closes. A
+  current pin costs one short job and no gate run. Copy
+  `examples/ci-gate-bump.yml` and add `workflow_dispatch:` to the per-push
+  caller's triggers.
+
 ## v1.17.1 - 2026-09-24
 
 ### Changed

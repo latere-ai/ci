@@ -1,10 +1,11 @@
 # ci
 
 Reusable GitHub Actions pipelines for Latere repositories: the per-push
-quality gate, and the tag-triggered releases for a Kubernetes service, a
-command-line tool, a container image catalog, and a library. A repository
-keeps a short caller workflow; the logic lives here and reaches every
-caller through the moving `@v1` tag.
+quality gate, the daily move of the gate's version pin, and the
+tag-triggered releases for a Kubernetes service, a command-line tool, a
+container image catalog, and a library. A repository keeps a short caller
+workflow; the logic lives here and reaches every caller through the moving
+`@v1` tag.
 
 [![test](https://github.com/latere-ai/ci/actions/workflows/test.yml/badge.svg)](https://github.com/latere-ai/ci/actions/workflows/test.yml)
 [![actionlint](https://github.com/latere-ai/ci/actions/workflows/actionlint.yml/badge.svg)](https://github.com/latere-ai/ci/actions/workflows/actionlint.yml)
@@ -21,6 +22,7 @@ repository, by convention rather than through a long list of inputs.
 | Workflow | Runs on | For | Jobs |
 | --- | --- | --- | --- |
 | [`lateregate.yml`](.github/workflows/lateregate.yml) | every push and pull request | a Go repository | the plan, one job per gate, the test matrix, the wiring check |
+| [`ci-gate-bump.yml`](.github/workflows/ci-gate-bump.yml) | once a day | a Go repository that pins `latere.ai/x/ci-gate` | move the pin to the latest release when the bar passes on it, or open an issue |
 | [`go-verify.yml`](.github/workflows/go-verify.yml) | every push and pull request | a Go repository that has not moved to `lateregate.yml` | Makefile targets, probed |
 | [`service-release.yml`](.github/workflows/service-release.yml) | a `v*` tag | a Kubernetes service | build the image, deploy, smoke the live surface, publish the release |
 | [`cli-release.yml`](.github/workflows/cli-release.yml) | a `v*` tag | a command-line tool | lint, test, GoReleaser |
@@ -60,12 +62,19 @@ For a new Go repository:
    `go tool lateregate contract` says whether the wiring is in shape, and
    `go tool lateregate` runs the bar locally exactly as CI will.
 
-2. **A release caller**, chosen by what the repository ships: copy the
+2. **The daily pin move.** Copy
+   [`examples/ci-gate-bump.yml`](examples/ci-gate-bump.yml) to
+   `.github/workflows/ci-gate-bump.yml`, give its cron a minute no other
+   repository on the same runner uses, and add `workflow_dispatch:` to the
+   triggers of the per-push caller; see
+   [Moving the gate pin](#moving-the-gate-pin-ci-gate-bumpyml).
+
+3. **A release caller**, chosen by what the repository ships: copy the
    matching file from [`examples/`](examples/) to
    `.github/workflows/release.yml` and adjust its inputs. The sections
    below say what each pipeline needs from the repository.
 
-3. **Repository settings.** Run `tools/repo-settings.sh apply <repo>` once
+4. **Repository settings.** Run `tools/repo-settings.sh apply <repo>` once
    when the repository is created; see
    [Repository settings](#repository-settings).
 
@@ -152,6 +161,76 @@ enum-typescript-prepare` before checking, which installs each configured
 project's dependencies from its committed npm or Bun lockfile. Go gates
 install no JavaScript tooling. Domain configuration is documented in
 [ci-gate's gate reference](https://github.com/latere-ai/ci-gate/blob/main/docs/gates.md).
+
+## Moving the gate pin: `ci-gate-bump.yml`
+
+A repository pins `latere.ai/x/ci-gate` by exact version in its `go.mod`
+tool directive, so the hooks on a laptop and CI run the same `lateregate`.
+The pin moves only in a commit, and this pipeline makes that commit once a
+day:
+
+```yaml
+# .github/workflows/ci-gate-bump.yml
+name: ci-gate bump
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+permissions:
+  contents: write
+  issues: write
+  actions: write
+jobs:
+  bump:
+    uses: latere-ai/ci/.github/workflows/ci-gate-bump.yml@v1
+    with:
+      runs_on: linux-vm   # only where the per-push gate runs there too
+```
+
+The `permissions` block is mandatory: the pipeline pushes the pin, opens
+issues, and dispatches the per-push gate, and the organization's token is
+read-only by default.
+
+| Job | Runs |
+| --- | --- |
+| `is the pin current` | asks the module proxy for the newest release above the pin, and closes the issues this pipeline opened for versions the pin has reached. When the pin is current, the run ends here: no gate runs. |
+| `bump to vX.Y.Z` | `go get -tool latere.ai/x/ci-gate/cmd/lateregate@vX.Y.Z` and `go mod tidy`, then the whole bar on the result: every gate `go tool lateregate` runs, one after another, and `lateregate contract`. |
+
+When the bar passes, the job commits `go.mod` and `go.sum` as
+`gate: ci-gate vX.Y.Z` and pushes to the branch the run is on, which for
+the schedule is the default branch. A branch that moved while the bar ran
+is rebased onto, up to three attempts; when the new commits touched
+`go.mod`, the pin is moved again on top of them. A push made with the
+Actions token starts no workflow, so the job then dispatches the per-push
+caller, the one workflow that calls `lateregate.yml`, on the new commit.
+That is why the per-push caller needs `workflow_dispatch:` among its
+triggers: without a run on the commit, `lateregate release` has no CI to
+read.
+
+When the bar fails, nothing is pushed. The job opens one issue per version,
+titled `ci-gate vX.Y.Z does not pass the gate`, with each failing gate's
+output, and updates its body on every later run that still fails; one a
+person closed stays closed. The run itself
+stays green with a warning that links the issue: `lateregate release`
+refuses to cut while the latest run of any workflow on the branch is red,
+and a release the repository does not yet pass should not hold back
+releases the current pin verifies. Fix the tree, with or without the pin in
+the same commit; the next run moves the pin once the bar passes, and the
+issue closes when the pin reaches the version. A release that would raise
+the repository's `go` or `toolchain` line is reported the same way, since
+which Go a repository builds with is decided by hand.
+
+| Input | Default | Meaning |
+| --- | --- | --- |
+| `go_version` | `1.27` | the Go toolchain; keep it the one the per-push gate runs, since `vuln` judges the standard library of the toolchain that runs it |
+| `runs_on` | `ubuntu-latest` | the runner label for both jobs |
+
+The bar runs as the per-push gate's jobs do: no service containers, a test
+that needs Docker reaches the runner's daemon, `lint` gets the runner
+process's own `TMPDIR`, and on a self-hosted label every gate builds with
+`GOFLAGS=-trimpath`. The TypeScript enum gate gets Node and Bun as in
+`lateregate.yml`. No credential stays in the checkout while the new release
+and the repository's tests run; only the push step hands git the token.
 
 ## The previous per-push gate: `go-verify.yml`
 
@@ -533,7 +612,11 @@ run new code with that access in every caller at once. A SHA cannot be
 repointed. For the same reason no step fetches a tool at `latest`: Bun,
 GoReleaser, kubectl, gh and the changelog reader are explicit inputs with
 pinned defaults, and the TypeScript enum gate pins Bun in
-`lateregate.yml`.
+`lateregate.yml`. The one exception is the release `ci-gate-bump.yml`
+exists to try, the repository's own gate: it is resolved to an exact
+version, verified against the Go checksum database, run with no token in
+its environment or in the checkout, and lands only as an exact pin in a
+commit.
 
 ## Repository settings
 
