@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v1.18.1 - 2026-09-25
+
 ### Fixed
 
 - The issue `ci-gate-bump.yml` opens lists `go tool lateregate contract`
