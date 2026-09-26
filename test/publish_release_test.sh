@@ -33,9 +33,8 @@ FAILURES=0
 pass() { printf "  \033[32mPASS\033[0m %s\n" "$1"; }
 fail() { printf "  \033[31mFAIL\033[0m %s\n" "$1"; FAILURES=$((FAILURES + 1)); }
 
-# assemble_body is the verbatim body line of the service-release and
-# images-release "publish" steps: the changelog section, a blank line, the
-# smoke evidence. It reads notes.md and evidence.md in the working directory.
+# assemble_body is the verbatim body line of the service-release "publish"
+# step: the changelog section, a blank line, the smoke evidence. It reads notes.md and evidence.md in the working directory.
 assemble_body() {
     { cat notes.md; printf '\n'; cat evidence.md; } > body.md
 }
@@ -110,18 +109,14 @@ test_body_is_section_then_evidence() {
     fi
 }
 
-# The copy above must match what the workflows ship.
+# The copy above must match what the workflow ships.
 assert_body_line_matches_workflows() {
-    local name="service-release.yml and images-release.yml carry the tested body line"
+    local name="service-release.yml carries the tested body line"
     local line="{ cat notes.md; printf '\\n'; cat evidence.md; } > body.md"
-    local missing=""
-    for wf in service-release.yml images-release.yml; do
-        grep -qF "$line" "$REPO_ROOT/.github/workflows/$wf" || missing="${missing} $wf"
-    done
-    if [ -z "$missing" ]; then
+    if grep -qF "$line" "$REPO_ROOT/.github/workflows/service-release.yml"; then
         pass "$name"
     else
-        fail "$name (missing in:${missing})"
+        fail "$name"
     fi
 }
 

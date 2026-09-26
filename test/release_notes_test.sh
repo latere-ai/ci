@@ -79,10 +79,10 @@ test_every_release_workflow_publishes_notes() {
     fi
 }
 
-test_four_release_workflows_exist() {
-    local name="the four release pipelines exist: service, cli, images, notes"
+test_three_release_workflows_exist() {
+    local name="the three release pipelines exist: service, cli, notes"
     local ok=1
-    for kind in service cli images notes; do
+    for kind in service cli notes; do
         [ -f "$REPO_ROOT/.github/workflows/${kind}-release.yml" ] || ok=0
     done
     if [ "$ok" -eq 1 ]; then
@@ -155,7 +155,7 @@ test_every_release_workflow_reads_the_section
 test_every_release_workflow_declares_the_version_input
 test_no_workflow_generates_notes
 test_every_release_workflow_publishes_notes
-test_four_release_workflows_exist
+test_three_release_workflows_exist
 
 if [ "$FAILURES" -gt 0 ]; then
     printf "\n%d failure(s)\n" "$FAILURES"

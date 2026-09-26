@@ -76,7 +76,7 @@ test_rejection() {
 # cannot reference.
 assert_workflows_reject_build_metadata() {
     local wf
-    for wf in service-release.yml images-release.yml; do
+    for wf in service-release.yml; do
         local name="$wf refuses a tag carrying build metadata"
         if grep -q 'Reject build-metadata tags' "$WORKFLOWS/$wf" \
             && grep -q '\*+\*)' "$WORKFLOWS/$wf"; then
@@ -119,7 +119,7 @@ test_classification() {
 # The bash publish blocks must strip build metadata before the hyphen test.
 assert_bash_strips_build_metadata() {
     local wf
-    for wf in service-release.yml images-release.yml; do
+    for wf in service-release.yml; do
         local name="$wf publish strips build metadata before the hyphen test"
         if grep -q 'core="\${TAG%%+\*}"' "$WORKFLOWS/$wf"; then
             pass "$name"

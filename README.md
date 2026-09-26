@@ -2,10 +2,9 @@
 
 Reusable GitHub Actions pipelines for Latere repositories: the per-push
 quality gate, the daily move of the gate's version pin, and the
-tag-triggered releases for a Kubernetes service, a command-line tool, a
-container image catalog, and a library. A repository keeps a short caller
-workflow; the logic lives here and reaches every caller through the moving
-`@v1` tag.
+tag-triggered releases for a Kubernetes service, a command-line tool, and
+a library. A repository keeps a short caller workflow; the logic lives here
+and reaches every caller through the moving `@v1` tag.
 
 [![test](https://github.com/latere-ai/ci/actions/workflows/test.yml/badge.svg)](https://github.com/latere-ai/ci/actions/workflows/test.yml)
 [![actionlint](https://github.com/latere-ai/ci/actions/workflows/actionlint.yml/badge.svg)](https://github.com/latere-ai/ci/actions/workflows/actionlint.yml)
@@ -26,7 +25,6 @@ repository, by convention rather than through a long list of inputs.
 | [`go-verify.yml`](.github/workflows/go-verify.yml) | every push and pull request | a Go repository that has not moved to `lateregate.yml` | Makefile targets, probed |
 | [`service-release.yml`](.github/workflows/service-release.yml) | a `v*` tag | a Kubernetes service | build the image, deploy, smoke the live surface, publish the release |
 | [`cli-release.yml`](.github/workflows/cli-release.yml) | a `v*` tag | a command-line tool | lint, test, GoReleaser |
-| [`images-release.yml`](.github/workflows/images-release.yml) | a `v*` tag | a container image catalog | verify, build in dependency order, publish the catalog, smoke the published images, publish the release |
 | [`notes-release.yml`](.github/workflows/notes-release.yml) | a `v*` tag | a module or library that builds nothing on a tag | publish the release |
 
 Every release pipeline publishes the GitHub release last, with the tag's
@@ -470,39 +468,6 @@ without a section fails before GoReleaser runs. Inputs: `go_version`,
 `lateregate_version`, `run_lint`, `run_tests`, `test_os` and `runs_on`.
 The caller grants `contents: write`.
 
-## Releasing an image catalog: `images-release.yml`
-
-```yaml
-permissions:
-  contents: write
-  packages: write
-jobs:
-  release:
-    uses: latere-ai/ci/.github/workflows/images-release.yml@v1
-    with:
-      title: Sandbox Images
-    secrets: inherit
-```
-
-`verify` lints the catalog and runs its tests, three `build-stage` jobs
-build and push the images in dependency order, `publish-catalog` writes
-the digest-pinned `catalog.json` to object storage, `smoke` pulls the
-images that were actually pushed at the tag and runs the repository's
-`test.sh` against them, and `release` publishes the release with the
-digest table and the smoke output. The repository provides:
-
-| Convention | Purpose |
-| --- | --- |
-| `catalog.yaml` | the image inventory: name, context directory, platforms, `from` (an in-repository base), labels, resource hints |
-| `catalog.sh` | `lint`, `matrix` and `compose` subcommands driven by `catalog.yaml`: the schema lint, the per-stage build matrices (stage N is FROM-depth N, up to three stages), and the `catalog.json` consumers read |
-| `catalog_test.sh` | tests for the catalog tooling |
-| `test.sh <tag>` | runtime assertions against the published images at that tag; honors `RUNTIME` for the container runtime; its output becomes the release evidence |
-
-It needs the `CATALOG_S3_ENDPOINT`, `CATALOG_S3_REGION`,
-`CATALOG_S3_BUCKET`, `CATALOG_S3_PREFIX`, `CATALOG_S3_ACCESS_KEY` and
-`CATALOG_S3_SECRET_KEY` secrets. Give the key a grant on that one bucket
-only, since it is readable by the repository's Actions.
-
 ## Releasing a module or library: `notes-release.yml`
 
 ```yaml
@@ -554,9 +519,7 @@ those means setting both:
 - **The runner must already have what the pipeline expects.** The machine
   ships docker, git, jq and curl. `service-release.yml` fetches kubectl
   and gh at `kubectl_version` and `gh_version`, checksum-verified, when
-  they are missing, and sets up Node beside Bun. `images-release.yml`
-  needs docker and the `aws` CLI for the catalog upload and fetches
-  neither.
+  they are missing, and sets up Node beside Bun.
 - **The secrets still have to reach it.** `runs_on` changes where a job
   runs, not what it can read: the caller keeps `secrets: inherit` (or its
   explicit mapping), and the runner needs network reach to the cluster and
@@ -569,28 +532,26 @@ tarball over it fails on every file that already exists.
 ## Run artifacts
 
 Everything these pipelines upload to a run expires after 7 days: coverage
-profiles, image digests, `catalog.json`, release evidence, command-line
-binaries, and the `*.dockerbuild` build record `docker/build-push-action`
+profiles, release evidence, command-line binaries, and the
+`*.dockerbuild` build record `docker/build-push-action`
 uploads beside each image. The figure is fixed, not an input. A
 repository's artifact store has a fixed quota and GitHub's default
 retention is 90 days, so a busy repository would fill it and fail the
 upload step of its next release. What is worth keeping longer is kept
-elsewhere: binaries on the GitHub release, smoke evidence in the release
-body, and `catalog.json` in object storage under a current and an
-immutable history key.
+elsewhere: binaries on the GitHub release and smoke evidence in the
+release body.
 
 ## Tag rules
 
-The image tag is the git tag, byte for byte. `kubectl set image`, the
-`BASE_IMAGE` build argument of a later image stage, and `catalog.json`'s
-references all use the tag you pushed, with no normalization in between.
+The image tag is the git tag, byte for byte. `kubectl set image` uses the
+tag you pushed, with no normalization in between.
 
 That costs one restriction: **a release tag cannot contain `+`.** Docker
 tags are limited to `[a-zA-Z0-9._-]`, so a SemVer build-metadata tag such
 as `v1.0.0+exp-sha.5114f85` would push as `v1.0.0-exp-sha.5114f85` while
-everything downstream asked for the `+` form. The service and image
-pipelines refuse such a tag in their first job, before anything is built,
-pushed or deployed.
+everything downstream asked for the `+` form. The service pipeline
+refuses such a tag in its first job, before anything is built, pushed or
+deployed.
 
 Prereleases work normally: `v1.2.3-rc1` publishes as a GitHub prerelease
 and is not tagged `latest` in the registry. A hyphen marks a prerelease

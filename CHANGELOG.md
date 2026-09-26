@@ -10,6 +10,13 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Removed
+
+- `images-release.yml`. No repository calls it: `latere-ai/sandbox-images`
+  releases through its own workflow, and the hosted Cella plane pins its
+  images in platformd's catalog rather than reading the `catalog.json` this
+  pipeline published.
+
 ## v1.19.0 - 2026-09-26
 
 ### Added
