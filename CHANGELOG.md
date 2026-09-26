@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v1.19.0 - 2026-09-26
+
 ### Added
 
 - `lateregate.yml` ends with an `all gates passed` job that runs after every
