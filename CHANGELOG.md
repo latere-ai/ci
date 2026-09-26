@@ -10,6 +10,14 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Added
+
+- `lateregate.yml` ends with an `all gates passed` job that runs after every
+  other job and fails unless each one succeeded or was skipped. Branch
+  protection can require that single check, `gate / all gates passed` for
+  a caller whose job id is `gate`, in place of the per-gate jobs, whose
+  names change as the plan adds or drops gates.
+
 ## v1.18.1 - 2026-09-25
 
 ### Fixed

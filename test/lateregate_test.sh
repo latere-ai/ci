@@ -46,6 +46,7 @@ step_script() {
 
 PLAN_SCRIPT=$(step_script "Read the plan")
 LOOP_SCRIPT=$(step_script "Run the gates")
+PASSED_SCRIPT=$(step_script "Check every job's result")
 STUB=$(mktemp -d)
 trap 'rm -rf "$STUB"' EXIT
 
@@ -177,6 +178,91 @@ fold_case "the wiring check runs with no gate to fold and fails the job on its o
     '[]' "contract" \
     "contract TMPDIR=/tmp;" 1 "contract "
 
+echo "passed step"
+
+passed_case() {
+    name="$1"; needs="$2"; want_status="$3"; want_errors="$4"
+    out=$(NEEDS="$needs" bash -c "set -euo pipefail; $PASSED_SCRIPT" 2>&1)
+    status=$?
+    got_errors=$(printf '%s\n' "$out" | sed -n 's/^::error title=\([^:]*\)::.*/\1/p' | tr '\n' ' ')
+    if [ "$status" -eq "$want_status" ] && [ "$got_errors" = "$want_errors" ]; then
+        pass "$name"
+    else
+        fail "$name: status=$status errors=[$got_errors], want status=$want_status errors=[$want_errors]; output: $out"
+    fi
+}
+
+passed_case "every job succeeded" \
+    '{"probe":{"result":"success","outputs":{}},"test":{"result":"success","outputs":{}},"gate":{"result":"success","outputs":{}},"fold":{"result":"skipped","outputs":{}},"contract":{"result":"success","outputs":{}}}' \
+    0 ""
+
+passed_case "a job that did not apply was skipped" \
+    '{"probe":{"result":"success","outputs":{}},"test":{"result":"skipped","outputs":{}},"gate":{"result":"success","outputs":{}},"fold":{"result":"success","outputs":{}},"contract":{"result":"skipped","outputs":{}}}' \
+    0 ""
+
+passed_case "a failed gate fails the check and is named" \
+    '{"probe":{"result":"success","outputs":{}},"test":{"result":"success","outputs":{}},"gate":{"result":"failure","outputs":{}},"fold":{"result":"skipped","outputs":{}},"contract":{"result":"success","outputs":{}}}' \
+    1 "gate "
+
+passed_case "a cancelled job fails the check" \
+    '{"probe":{"result":"success","outputs":{}},"test":{"result":"cancelled","outputs":{}},"gate":{"result":"success","outputs":{}},"fold":{"result":"skipped","outputs":{}},"contract":{"result":"success","outputs":{}}}' \
+    1 "test "
+
+passed_case "a failed probe skips the rest and still fails the check" \
+    '{"probe":{"result":"failure","outputs":{}},"test":{"result":"skipped","outputs":{}},"gate":{"result":"skipped","outputs":{}},"fold":{"result":"skipped","outputs":{}},"contract":{"result":"failure","outputs":{}}}' \
+    1 "probe contract "
+
+# ---------------------------------------------------------------------------
+# The aggregate job is the one check branch protection requires, so its id,
+# its name and its needs are part of the interface: a renamed job leaves a
+# required check that never reports, and a job left out of needs is a gate
+# the check passes over.
+# ---------------------------------------------------------------------------
+echo "passed job"
+
+jobs=$(awk '
+    /^jobs:$/ { injobs = 1; next }
+    injobs && /^[^[:space:]#]/ { exit }
+    injobs && /^  [[:alnum:]_-]+:$/ { sub(/^  /, ""); sub(/:$/, ""); print }
+' "$WORKFLOW")
+passed_block=$(awk '
+    $0 == "  passed:" { injob = 1; next }
+    injob && /^  [[:alnum:]_-]+:/ { exit }
+    injob { print }
+' "$WORKFLOW")
+
+if [ -n "$passed_block" ]; then
+    pass "the workflow has a job with id passed"
+else
+    fail "the workflow has no job with id passed; jobs are: $(printf '%s' "$jobs" | tr '\n' ' ')"
+fi
+
+if printf '%s\n' "$passed_block" | grep -qxF '    name: all gates passed'; then
+    pass "the passed job is named 'all gates passed'"
+else
+    fail "the passed job must be named 'all gates passed', got: $(printf '%s\n' "$passed_block" | sed -n 's/^    name: //p')"
+fi
+
+if printf '%s\n' "$passed_block" | grep -qxF '    if: ${{ always() }}'; then
+    pass "the passed job runs whatever the jobs it needs did"
+else
+    fail "the passed job must run with if: \${{ always() }}"
+fi
+
+want_needs=$(printf '%s\n' "$jobs" | grep -vx passed | sort | tr '\n' ' ')
+got_needs=$(printf '%s\n' "$passed_block" | sed -n 's/^    needs: \[\(.*\)\]$/\1/p' | tr ',' '\n' | tr -d ' ' | grep -v '^$' | sort | tr '\n' ' ')
+if [ -n "$want_needs" ] && [ "$got_needs" = "$want_needs" ]; then
+    pass "the passed job needs every other job: $want_needs"
+else
+    fail "the passed job needs [$got_needs], want every other job [$want_needs]"
+fi
+
+if printf '%s\n' "$passed_block" | grep -qF 'NEEDS: ${{ toJSON(needs) }}'; then
+    pass "the passed step reads every result from toJSON(needs)"
+else
+    fail "the passed step must read NEEDS: \${{ toJSON(needs) }}"
+fi
+
 # ---------------------------------------------------------------------------
 # The workflow wires the outputs the steps write.
 # ---------------------------------------------------------------------------
@@ -200,10 +286,10 @@ do
     fi
 done
 
-if [ -n "$PLAN_SCRIPT" ] && [ -n "$LOOP_SCRIPT" ]; then
-    pass "both steps under test were found in the workflow"
+if [ -n "$PLAN_SCRIPT" ] && [ -n "$LOOP_SCRIPT" ] && [ -n "$PASSED_SCRIPT" ]; then
+    pass "every step under test was found in the workflow"
 else
-    fail "a step under test was not found in the workflow (plan=${#PLAN_SCRIPT} loop=${#LOOP_SCRIPT})"
+    fail "a step under test was not found in the workflow (plan=${#PLAN_SCRIPT} loop=${#LOOP_SCRIPT} passed=${#PASSED_SCRIPT})"
 fi
 
 # Every uses: is SHA-pinned, as in every other workflow here.
@@ -218,8 +304,8 @@ fi
 # A bare ubuntu-latest on a job would pin that job to hosted runners.
 fixed=$(grep -cE '^\s+runs-on: ubuntu-latest$' "$WORKFLOW")
 routed=$(grep -cF 'runs-on: ${{ inputs.runs_on }}' "$WORKFLOW")
-if [ "$fixed" -eq 0 ] && [ "$routed" -eq 4 ]; then
-    pass "probe, gate, fold and contract run on inputs.runs_on"
+if [ "$fixed" -eq 0 ] && [ "$routed" -eq 5 ]; then
+    pass "probe, gate, fold, contract and passed run on inputs.runs_on"
 else
     fail "runs_on does not route every non-matrix job (fixed=$fixed routed=$routed)"
 fi

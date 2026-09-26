@@ -9,6 +9,11 @@
 # your repository and runs one job per gate. `go tool lateregate` on your
 # laptop runs the same set.
 #
+# Branch protection requires one check: `gate / all gates passed`. It is the
+# last job, reports under that name on every run, and fails when any gate or
+# the wiring check failed. The first half is this file's job id, so keep it
+# `gate` or change the required check with it.
+#
 # See ci/README.md for the pipeline and ci-gate/README.md for the gates.
 
 name: ci
