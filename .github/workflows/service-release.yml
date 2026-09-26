@@ -19,15 +19,15 @@ on:
   workflow_call:
     inputs:
       service:
-        description: "Deployment + container name, and binary name (e.g. luxd)."
+        description: "Deployment + container name, and binary name (e.g. platformd)."
         required: true
         type: string
       image:
-        description: "Image path without tag (e.g. ghcr.io/latere-ai/luxd)."
+        description: "Image path without tag (e.g. ghcr.io/latere-ai/platformd)."
         required: true
         type: string
       namespace:
-        description: "Kubernetes namespace (e.g. latere or sandboxd)."
+        description: "Kubernetes namespace (e.g. latere)."
         required: true
         type: string
       url:
@@ -35,7 +35,7 @@ on:
         required: true
         type: string
       title:
-        description: "Release title prefix (e.g. Lux -> 'Lux v1.2.3')."
+        description: "Release title prefix (e.g. Latere Platform -> 'Latere Platform v1.2.3')."
         required: true
         type: string
       go_version:

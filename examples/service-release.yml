@@ -27,7 +27,7 @@ jobs:
       has_frontend: true
       spa_embed_dir: internal/web/spa/dist
       main_package: ./cmd/platformd
-      # preflight: go run ./tools/deploy -manifest deploy/base/deployment.yaml -namespace sandboxd
+      # preflight: go run ./tools/deploy -manifest deploy/base/deployment.yaml -namespace latere
     # Delivers the repository secret DEPLOY_KUBECONFIG, the kubeconfig of the
     # service's rollout identity (deploy/bootstrap/rollout-identity.yaml).
     secrets: inherit
