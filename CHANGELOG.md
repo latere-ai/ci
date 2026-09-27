@@ -10,6 +10,15 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v1.20.0 - 2026-09-27
+
+### Fixed
+
+- Every `setup-bun` step installs bun into the job's own temp directory.
+  Runner slots on one machine share a home directory, and a job running bun
+  while another slot extracted it failed with `spawn ETXTBSY`, which failed
+  a release's image build at random.
+
 ### Removed
 
 - `images-release.yml`. No repository calls it: `latere-ai/sandbox-images`
