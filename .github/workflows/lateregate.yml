@@ -169,6 +169,11 @@ jobs:
         if: ${{ matrix.gate == 'enum-typescript' }}
         with:
           bun-version: "1.3.14"
+        # bun goes to $HOME/.bun/bin. Runner slots on one machine share a
+        # HOME, and a job executing bun while another slot extracts it
+        # fails with ETXTBSY, so each job installs into its own temp dir.
+        env:
+          HOME: ${{ runner.temp }}
       - name: Prepare TypeScript enum projects
         if: ${{ matrix.gate == 'enum-typescript' }}
         run: go tool lateregate enum-typescript-prepare
@@ -229,6 +234,11 @@ jobs:
         if: ${{ contains(fromJSON(needs.probe.outputs.fold), 'enum-typescript') }}
         with:
           bun-version: "1.3.14"
+        # bun goes to $HOME/.bun/bin. Runner slots on one machine share a
+        # HOME, and a job executing bun while another slot extracts it
+        # fails with ETXTBSY, so each job installs into its own temp dir.
+        env:
+          HOME: ${{ runner.temp }}
       - name: Prepare TypeScript enum projects
         if: ${{ contains(fromJSON(needs.probe.outputs.fold), 'enum-typescript') }}
         run: go tool lateregate enum-typescript-prepare
