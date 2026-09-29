@@ -125,13 +125,16 @@ rather than turning the job off.
 | `<gate>` | `lateregate <gate>`: one job per running gate on a hosted runner, and only the suite gates on a self-hosted one; `cover` or `suite` uploads `coverage.out` |
 | `static gates and wiring` | self-hosted only: every other running gate, one after another, then `lateregate contract` |
 | `wiring is in shape` | hosted only: `lateregate contract` |
-| `all gates passed` | always, after every other job: passes when each one succeeded or was skipped, and fails on a failure or a cancellation |
+| `all gates passed` | after every other job, whatever they did, except in a cancelled push run: passes when each one succeeded or was skipped, and fails on a failure or a cancellation |
 
 Branch protection requires one check: `all gates passed`. The gate jobs
 are named for the gates the plan picks, so the set changes when a pin adds
 or drops a gate, and a job that did not apply reports as skipped. This
 job is always present under the same name, runs whatever the other jobs
-did, and fails unless each of them succeeded or was skipped. GitHub names
+did, and fails unless each of them succeeded or was skipped. A cancelled
+push run skips it: that run was superseded by a newer push or was a
+duplicate delivery of the same one, its conclusion already says cancelled,
+and branch protection reads the pull request run. GitHub names
 a reusable workflow's check after the caller's job id, so a caller whose
 job is `gate` requires `gate / all gates passed`.
 

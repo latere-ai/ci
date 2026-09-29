@@ -292,10 +292,15 @@ jobs:
   # breaks each time a pin adds or drops a gate; this job is always there
   # under one name. It runs whatever happened above and passes only when
   # every job it needs succeeded or was skipped because it did not apply.
+  # In a cancelled push run it is skipped instead: branch protection reads
+  # the pull request run, and a push run is cancelled when a newer push to
+  # the ref supersedes it through the caller's concurrency group, or when
+  # GitHub delivers one push twice. Running it there would take a runner
+  # slot to report the cancellation the run's own conclusion already holds.
   passed:
     name: all gates passed
     needs: [probe, test, gate, fold, contract]
-    if: ${{ always() }}
+    if: ${{ github.event_name != 'push' || !cancelled() }}
     runs-on: ${{ inputs.runs_on }}
     steps:
       # Keep in step with test/lateregate_test.sh, which runs a copy of this

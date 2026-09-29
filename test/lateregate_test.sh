@@ -243,10 +243,10 @@ else
     fail "the passed job must be named 'all gates passed', got: $(printf '%s\n' "$passed_block" | sed -n 's/^    name: //p')"
 fi
 
-if printf '%s\n' "$passed_block" | grep -qxF '    if: ${{ always() }}'; then
-    pass "the passed job runs whatever the jobs it needs did"
+if printf '%s\n' "$passed_block" | grep -qxF "    if: \${{ github.event_name != 'push' || !cancelled() }}"; then
+    pass "the passed job runs whatever the jobs it needs did, except in a cancelled push run"
 else
-    fail "the passed job must run with if: \${{ always() }}"
+    fail "the passed job must run with if: \${{ github.event_name != 'push' || !cancelled() }}"
 fi
 
 want_needs=$(printf '%s\n' "$jobs" | grep -vx passed | sort | tr '\n' ' ')

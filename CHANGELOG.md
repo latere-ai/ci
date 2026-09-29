@@ -10,6 +10,16 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- `lateregate.yml`'s `all gates passed` job is skipped in a cancelled push
+  run. Every run a newer push supersedes, and every duplicate run GitHub
+  starts for one push, still queued it on the caller's runner, so on the
+  two-slot self-hosted runner each cancellation held a slot for about half
+  a minute to report what the run's conclusion already says. Pull request
+  runs, which branch protection reads, keep running it after a
+  cancellation and fail.
+
 ## v1.20.0 - 2026-09-27
 
 ### Fixed
