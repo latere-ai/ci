@@ -10,6 +10,16 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Added
+
+- `service-release.yml` takes `after_roll`, a shell command the deploy job
+  runs once the Deployment has rolled, with the same kubeconfig and before
+  the smoke. A repository whose release also owns a second tree, whose
+  workloads call the new release and so must start after it, applies that
+  tree there and waits for it. A failing command fails the deploy job, so
+  neither the smoke nor the release runs. It defaults to empty, which skips
+  the step, so no caller changes until it sets one.
+
 ### Changed
 
 - `lateregate.yml`'s `all gates passed` job is skipped in a cancelled push

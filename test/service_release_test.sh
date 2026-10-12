@@ -122,6 +122,31 @@ if grep -qE 'DO_TOKEN|action-doctl|doctl ' "$WORKFLOW"; then
 else
     pass "the workflow holds no DigitalOcean credential"
 fi
+# after_roll runs a caller's command once its Deployment has rolled, in the
+# deploy job, so it holds the same kubeconfig and runs before the smoke. A
+# caller that sets nothing changes nothing: the input defaults to empty and
+# the step is skipped when it is.
+if grep -A4 '^      after_roll:' "$WORKFLOW" | grep -qF 'default: ""'; then
+    pass "after_roll is an input that defaults to empty"
+else
+    fail "after_roll is not declared, or has a default that changes every caller"
+fi
+roll_line=$(printf '%s\n' "$deploy" | grep -nF 'name: Roll new image' | cut -d: -f1)
+after_line=$(printf '%s\n' "$deploy" | grep -nF 'name: After the roll' | cut -d: -f1)
+after_step=$(printf '%s\n' "$deploy" | sed -n '/name: After the roll/,$p')
+if [ -n "$roll_line" ] && [ -n "$after_line" ] && [ "$after_line" -gt "$roll_line" ]; then
+    pass "the after_roll step is in the deploy job, after the roll"
+else
+    fail "the after_roll step is missing from the deploy job or runs before the roll (roll=$roll_line after=$after_line)"
+fi
+if printf '%s\n' "$after_step" | grep -qF "if: \${{ inputs.after_roll != '' }}" \
+    && printf '%s\n' "$after_step" | grep -qF 'set -euo pipefail' \
+    && printf '%s\n' "$after_step" | grep -qF '${{ inputs.after_roll }}'; then
+    pass "the after_roll step is skipped when empty and stops at the first failing command"
+else
+    fail "the after_roll step runs unconditionally or without set -euo pipefail"
+fi
+
 if grep -A3 '^      DEPLOY_KUBECONFIG:' "$WORKFLOW" | grep -qE '^\s+description:'; then
     pass "DEPLOY_KUBECONFIG is a declared workflow_call secret"
 else

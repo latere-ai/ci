@@ -118,6 +118,11 @@ on:
         required: false
         type: string
         default: ""
+      after_roll:
+        description: "Optional shell command run in the deploy job once the Deployment has rolled, with the same kubeconfig (e.g. applying a second tree that must follow this service, and waiting for it). A failure fails the deploy job, so neither the smoke nor the release runs. Empty skips it."
+        required: false
+        type: string
+        default: ""
       smoke_scope:
         description: "Optional OAuth scope requested when minting the smoke token. Empty requests no scope."
         required: false
@@ -412,6 +417,19 @@ jobs:
             "${CONTAINER}=${{ inputs.image }}:${GITHUB_REF_NAME}"
           kubectl -n "${{ inputs.namespace }}" rollout status \
             "deployment/${DEPLOYMENT}" --timeout=${{ inputs.rollout_timeout }}
+
+      - name: After the roll
+        # Runs only once the rollout above has finished, as the same rollout
+        # identity, so a tree whose workloads call the new release (and
+        # would ask it what the old one cannot answer) rolls second. A
+        # failure fails this job: the smoke and the release are skipped and
+        # the run is red, and re-running the failed jobs repeats the apply,
+        # the roll and this step.
+        if: ${{ inputs.after_roll != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ${{ inputs.after_roll }}
 
   smoke:
     needs: [deploy, build-image]

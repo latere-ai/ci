@@ -317,8 +317,9 @@ pushes the image or creates the release.
 
 The run is five jobs in order. `build-image` builds and pushes the image;
 in `split` mode it first builds the frontend (with a typecheck) and the Go
-binary (after `go vet`) on the runner. `deploy` applies `deploy/prod/` and rolls the Deployment to the new
-image. `smoke` runs the repository's smoke script against the live URL.
+binary (after `go vet`) on the runner. `deploy` applies `deploy/prod/`,
+rolls the Deployment to the new image, then runs `after_roll` when it is
+set. `smoke` runs the repository's smoke script against the live URL.
 `cli` builds command-line binaries when `build_cli` is set. `release`
 publishes the GitHub release with the changelog section and the smoke
 evidence. The pipeline does not run the test suite: the per-push gate on
@@ -359,6 +360,7 @@ pipeline can `kubectl set image` without reading the manifests.
 | `deployment`, `container` | `service` | the Deployment, and the container in it, that get the new image |
 | `rollout_timeout` | `180s` | `kubectl rollout status` timeout |
 | `preflight` | empty | a shell command run after the kubeconfig is written and before the apply |
+| `after_roll` | empty | a shell command run once the Deployment has rolled, with the same kubeconfig, before the smoke. Use it for a second tree whose workloads call this service and so must roll after it. A failure fails the deploy job, and neither the smoke nor the release runs |
 | `smoke_script` | `tools/smoke/release.sh` | the post-deploy smoke |
 | `smoke_scope` | empty | an OAuth scope requested with the smoke token |
 | `build_cli`, `cli_build_cmd` | `false`, empty | also build command-line binaries (the command writes them under `dist/`) and attach them to the release |
@@ -421,7 +423,8 @@ status` use: `rollout status` reads the rollout's state from the
 Deployment's status and reads no ReplicaSet or Pod. It holds nothing on
 Secrets, Namespaces, or RBAC, and no `delete`. A kind that is not
 listed fails the apply with Forbidden, which is the intended failure: add the
-kind to the Role and re-apply it.
+kind to the Role and re-apply it. An `after_roll` command runs as the same
+identity, so the kinds it applies belong in the Role too.
 
 RBAC objects and cluster-scoped objects do not belong in `deploy/prod`. A
 subject can write a Role or ClusterRole only with the grants it already
