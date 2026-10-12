@@ -145,7 +145,7 @@ on:
         default: "v0.29.0"
     secrets:
       DEPLOY_KUBECONFIG:
-        description: "Kubeconfig of the service's rollout identity: a ServiceAccount bound to a Role in its namespace over the kinds deploy/prod applies (the consumer's deploy/bootstrap/rollout-identity.yaml). A repository secret of this name reaches the pipeline through 'secrets: inherit'. Optional here so a service whose cluster side is not provisioned yet still builds and publishes its image; its deploy job fails naming the secret."
+        description: "Kubeconfig of the service's rollout identity: a ServiceAccount bound to a Role in its namespace over the kinds deploy/prod and any after_roll command apply (the consumer's deploy/bootstrap/rollout-identity.yaml). A repository secret of this name reaches the pipeline through 'secrets: inherit'. Optional here so a service whose cluster side is not provisioned yet still builds and publishes its image; its deploy job fails naming the secret."
         required: false
       SMOKE_BEARER:
         description: "Optional pre-minted bearer for an authenticated smoke, used verbatim. Takes precedence over SMOKE_CLIENT_ID/SECRET. Use this when the service issues its own credentials and auth holds no scope for the smoke to request."
