@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v1.21.0 - 2026-10-13
+
 ### Added
 
 - `service-release.yml` takes `after_roll`, a shell command the deploy job
