@@ -553,6 +553,10 @@ differently:
   gh api -X PATCH /orgs/latere-ai/actions/variables/CI_RUNNER_PRIVATE -f value=linux-vm       # it is back
   ```
 
+  A busy runner is not offline: while both slots are taken, a private
+  repository's jobs wait in the queue for one and do not move to hosted
+  runners.
+
   To hold the variable still, for maintenance on the machine, disable the
   workflow (`gh workflow disable runner-health.yml --repo latere-ai/ci`).
   GitHub also disables a public repository's scheduled workflows after 60
