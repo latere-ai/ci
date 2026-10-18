@@ -49,10 +49,10 @@ on:
         type: string
         default: "1.3.14"
       runs_on:
-        description: "Runner for every job. ubuntu-latest by default. A private repository that adopts the self-hosted linux-vm runner passes its label here and falls back to hosted runners by removing the line. The self-hosted machine ships docker, git, jq and curl and nothing else; the steps below fetch Node, kubectl and gh at pinned versions when they are missing."
+        description: "Runner for every job. By default the organization's runner policy picks the label (README, Runners): a private repository runs on the self-hosted runner, or on ubuntu-latest while that runner is offline; a public one on ubuntu-latest, and never on the self-hosted runner for a pull request. A label passed here overrides the policy and its fallback. The self-hosted machine ships docker, git, jq and curl and nothing else; the steps below fetch Node, kubectl and gh at pinned versions when they are missing."
         required: false
         type: string
-        default: "ubuntu-latest"
+        default: ${{ (github.event.repository.private || contains(fromJSON('["push","schedule","workflow_dispatch","release"]'), github.event_name)) && (vars.CI_RUNNER_PRIVATE || vars.CI_RUNNER_PUBLIC) || 'ubuntu-latest' }}
       kubectl_version:
         description: "kubectl release fetched for the deploy job when the runner has none, verified against its published sha256. Hosted runners ship kubectl and skip the fetch. Keep within one minor of the cluster."
         required: false

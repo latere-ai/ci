@@ -26,10 +26,10 @@ on:
   workflow_call:
     inputs:
       runs_on:
-        description: "Runner label for non-matrix jobs; private repositories use linux-vm."
+        description: "Runner label for the non-matrix jobs. By default the organization's runner policy picks the label (README, Runners): a private repository runs on the self-hosted runner, or on ubuntu-latest while that runner is offline; a public one on ubuntu-latest, and never on the self-hosted runner for a pull request. A label passed here overrides the policy and its fallback."
         required: false
         type: string
-        default: "ubuntu-latest"
+        default: ${{ (github.event.repository.private || contains(fromJSON('["push","schedule","workflow_dispatch","release"]'), github.event_name)) && (vars.CI_RUNNER_PRIVATE || vars.CI_RUNNER_PUBLIC) || 'ubuntu-latest' }}
       go_version:
         description: "Go toolchain version."
         required: false
@@ -41,10 +41,10 @@ on:
         type: string
         default: "v2.13.1"
       test_os:
-        description: "JSON array of runners for the test matrix. Linux only by default: every service deploys on Linux, and macOS bills at ten times the Linux rate. A repository with darwin build tags or a macOS artifact adds macos-latest here."
+        description: "JSON array of runners for the test matrix. Empty means the runner runs_on resolves to: every service deploys on Linux, and macOS bills at ten times the Linux rate. A repository with darwin build tags or a macOS artifact adds macos-latest here."
         required: false
         type: string
-        default: '["ubuntu-latest"]'
+        default: ""
       run_lint:
         description: "Run golangci-lint. The modernize gate runs regardless, through make lint-modernize."
         required: false
@@ -127,7 +127,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(inputs.test_os) }}
+        os: ${{ fromJSON(inputs.test_os || format('["{0}"]', inputs.runs_on)) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0

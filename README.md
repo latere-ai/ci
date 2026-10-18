@@ -111,8 +111,8 @@ gate that applies does not run is a dated waiver in the repository's
 | Input | Default | Meaning |
 | --- | --- | --- |
 | `go_version` | `1.27` | the Go toolchain |
-| `test_os` | `["ubuntu-latest"]` | the runners `test` runs on, as a JSON array |
-| `runs_on` | `ubuntu-latest` | the runner label for every other job |
+| `test_os` | empty: the `runs_on` runner | the runners `test` runs on, as a JSON array |
+| `runs_on` | the [runner policy](#runners) | the runner label for every other job |
 
 golangci-lint's version is pinned in the binary, so there is no input for
 it. A repository that cannot lint waives `lint` with a reason and a date
@@ -193,8 +193,6 @@ permissions:
 jobs:
   bump:
     uses: latere-ai/ci/.github/workflows/ci-gate-bump.yml@v1
-    with:
-      runs_on: linux-vm   # only where the per-push gate runs there too
 ```
 
 The `permissions` block is mandatory: the pipeline pushes the pin, opens
@@ -233,7 +231,7 @@ which Go a repository builds with is decided by hand.
 | Input | Default | Meaning |
 | --- | --- | --- |
 | `go_version` | `1.27` | the Go toolchain; keep it the one the per-push gate runs, since `vuln` judges the standard library of the toolchain that runs it |
-| `runs_on` | `ubuntu-latest` | the runner label for both jobs |
+| `runs_on` | the [runner policy](#runners) | the runner label for both jobs |
 
 The bar runs as the per-push gate's jobs do: no service containers, a test
 that needs Docker reaches the runner's daemon, `lint` gets the runner
@@ -367,7 +365,7 @@ pipeline can `kubectl set image` without reading the manifests.
 | `go_version`, `bun_version` | `1.27`, `1.3.14` | toolchains |
 | `kubectl_version`, `gh_version` | `1.35.1`, `2.100.0` | fetched, checksum-verified, when the runner has none |
 | `lateregate_version` | `v0.29.0` | the `ci-gate` release whose `release-notes` reads the changelog |
-| `runs_on` | `ubuntu-latest` | the runner label for all five jobs |
+| `runs_on` | the [runner policy](#runners) | the runner label for all five jobs |
 
 | Secret | Meaning |
 | --- | --- |
@@ -496,27 +494,81 @@ existing release.
 
 ## Runners
 
-Every pipeline takes `runs_on` (default `ubuntu-latest`), the runner label
-for its jobs. A repository moves to the self-hosted runner with one line
-on the caller, and back by removing it:
+Where a job runs is the organization's policy, and every pipeline here
+applies it as the default of its `runs_on` input:
+
+| Repository | Runs on | Falls back to |
+| --- | --- | --- |
+| private | the self-hosted runner, `linux-vm` | `ubuntu-latest`, while no `linux-vm` runner is online |
+| public | `ubuntu-latest` | `linux-vm`, while hosted runners are down, for events only the repository starts |
+
+A caller that passes nothing gets the policy and its fallback. A label
+passed as `runs_on` overrides both. `test_os`, where a pipeline has one,
+defaults to the runner `runs_on` resolves to; in `lateregate.yml` the
+suite already runs there, so a repository that adds macOS passes
+`test_os: '["macos-latest"]'`.
+
+The policy is one expression, and a repository's own jobs use it too:
 
 ```yaml
-jobs:
-  release:
-    uses: latere-ai/ci/.github/workflows/service-release.yml@v1
-    with:
-      runs_on: linux-vm
+    runs-on: ${{ (github.event.repository.private || contains(fromJSON('["push","schedule","workflow_dispatch","release"]'), github.event_name)) && (vars.CI_RUNNER_PRIVATE || vars.CI_RUNNER_PUBLIC) || 'ubuntu-latest' }}
 ```
 
-The test matrix is the exception. `lateregate.yml`, `go-verify.yml` and
-`cli-release.yml` run `test` on the runners `test_os` names, so moving
-those means setting both:
+It reads two organization variables:
 
-```yaml
-    with:
-      runs_on: linux-vm
-      test_os: '["linux-vm"]'
-```
+| Variable | Visible to | Value |
+| --- | --- | --- |
+| `CI_RUNNER_PRIVATE` | private repositories | `linux-vm`, or `ubuntu-latest` while no `linux-vm` runner is online |
+| `CI_RUNNER_PUBLIC` | every repository | `ubuntu-latest`, or `linux-vm` while hosted runners are down |
+
+A public repository reads `CI_RUNNER_PRIVATE` as empty, so the
+variable's visibility is what tells the two kinds of repository apart, on
+every event: a scheduled run's payload names no repository. With neither
+variable set, every job runs on `ubuntu-latest`.
+
+The two fallbacks have different triggers, because the two runners fail
+differently:
+
+- **The self-hosted runner is offline.** A job aimed at a label with no
+  online runner waits in the queue until GitHub drops it a day later; it
+  never moves by itself. [`runner-health.yml`](.github/workflows/runner-health.yml)
+  runs every ten minutes on a hosted runner here, where a public
+  repository's minutes cost nothing, looks for an online `linux-vm`
+  runner for a minute, and moves `CI_RUNNER_PRIVATE` to `ubuntu-latest`
+  when none answers and back to `linux-vm` when one does. Only jobs
+  created after the move follow it; one already queued for `linux-vm`
+  waits for the runner. GitHub's token can neither list the
+  organization's runners nor write its variables, so the workflow reads
+  `RUNNER_HEALTH_TOKEN`, a fine-grained token for the organization with
+  the permissions "Self-hosted runners: read" and "Variables: read and
+  write", stored as a secret of this repository. Without it the run warns
+  and changes nothing, and the variable is moved by hand:
+
+  ```sh
+  gh api -X PATCH /orgs/latere-ai/actions/variables/CI_RUNNER_PRIVATE -f value=ubuntu-latest  # linux-vm is offline
+  gh api -X PATCH /orgs/latere-ai/actions/variables/CI_RUNNER_PRIVATE -f value=linux-vm       # it is back
+  ```
+
+  To hold the variable still, for maintenance on the machine, disable the
+  workflow (`gh workflow disable runner-health.yml --repo latere-ai/ci`).
+  GitHub also disables a public repository's scheduled workflows after 60
+  days without a commit; the variable then keeps its last value.
+- **Hosted runners are down.** A public repository pays nothing for
+  hosted runners, so its fallback is for a GitHub outage, which a check
+  on a hosted runner cannot see while it lasts: `CI_RUNNER_PUBLIC` is
+  moved by hand. A private repository's hosted fallback spends the
+  Actions budget, and a spent budget fails a job at zero steps with no
+  log; when the self-hosted runner is offline as well, nothing is left to
+  route to.
+
+A public repository's job reaches the self-hosted runner only on `push`,
+`schedule`, `workflow_dispatch` and `release`, events only the
+repository itself can start. A pull request, from a fork or not, stays on
+`ubuntu-latest`, so a fork's code never runs on the machine. The
+organization's runner group must also allow public repositories; while it
+does not, a public job routed to `linux-vm` waits in the queue forever,
+so `CI_RUNNER_PUBLIC` moves to `linux-vm` only after that setting
+changes.
 
 - **The self-hosted runners are shared by every repository.** Two
   releases that both ask for `linux-vm` queue behind each other, and a job

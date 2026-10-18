@@ -220,8 +220,8 @@ test_lint_config_runs_before_the_linter() {
 }
 
 test_the_default_matrix_is_linux_only() {
-    local name="the default test matrix is ubuntu only"
-    if grep -qF "default: '[\"ubuntu-latest\"]'" "$WORKFLOW" && ! grep -qF '"macos-latest"]' "$WORKFLOW"; then
+    local name="the default test matrix is the runs_on runner alone"
+    if grep -qF "os: \${{ fromJSON(inputs.test_os || format('[\"{0}\"]', inputs.runs_on)) }}" "$WORKFLOW" && ! grep -qF '"macos-latest"]' "$WORKFLOW"; then
         pass "$name"
     else
         fail "$name"

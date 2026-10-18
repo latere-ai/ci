@@ -18,10 +18,10 @@ on:
   workflow_call:
     inputs:
       runs_on:
-        description: "Runner label for the non-matrix jobs; a private repository uses its own (linux-vm). The test matrix follows test_os."
+        description: "Runner label for the non-matrix jobs; the test matrix follows test_os. By default the organization's runner policy picks the label (README, Runners): a private repository runs on the self-hosted runner, or on ubuntu-latest while that runner is offline; a public one on ubuntu-latest, and never on the self-hosted runner for a pull request. A label passed here overrides the policy and its fallback."
         required: false
         type: string
-        default: "ubuntu-latest"
+        default: ${{ (github.event.repository.private || contains(fromJSON('["push","schedule","workflow_dispatch","release"]'), github.event_name)) && (vars.CI_RUNNER_PRIVATE || vars.CI_RUNNER_PUBLIC) || 'ubuntu-latest' }}
       go_version:
         description: "Go toolchain version."
         required: false
@@ -48,10 +48,10 @@ on:
         type: boolean
         default: true
       test_os:
-        description: "JSON array of runners for the test job. A CLI that ships a darwin binary lists macos-latest here so the release, not every push, pays for the macOS run."
+        description: "JSON array of runners for the test job; empty means the runner runs_on resolves to. A CLI that ships a darwin binary lists macos-latest here so the release, not every push, pays for the macOS run."
         required: false
         type: string
-        default: '["ubuntu-latest"]'
+        default: ""
       lateregate_version:
         description: "latere-ai/ci-gate version whose `release-notes` reads the CHANGELOG.md section for the tag. Explicit rather than the consumer's tool pin so the reader is the same in every repository, including ones that pin no Go tool."
         required: false
@@ -85,7 +85,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(inputs.test_os) }}
+        os: ${{ fromJSON(inputs.test_os || format('["{0}"]', inputs.runs_on)) }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -29,15 +29,15 @@ on:
         type: string
         default: "1.27"
       test_os:
-        description: "JSON array of runners for the test job. Linux only by default: every service deploys on Linux, and macOS bills at ten times the Linux rate. A repository with darwin build tags or a macOS artifact adds macos-latest here."
+        description: "JSON array of runners for the test job. Empty means the runner runs_on resolves to: every service deploys on Linux, and macOS bills at ten times the Linux rate. A repository with darwin build tags or a macOS artifact lists macos-latest here; the suite already covers the runs_on runner."
         required: false
         type: string
-        default: '["ubuntu-latest"]'
+        default: ""
       runs_on:
-        description: "Runner for every job except the test matrix: the probe, the gates and the wiring check. ubuntu-latest by default. A private repository that adopts the self-hosted linux-vm runner passes its label here and in test_os, and falls back to hosted runners by removing both lines."
+        description: "Runner for every job except the test matrix: the probe, the gates and the wiring check. By default the organization's runner policy picks the label (README, Runners): a private repository runs on the self-hosted runner, or on ubuntu-latest while that runner is offline; a public one on ubuntu-latest, and never on the self-hosted runner for a pull request. A label passed here overrides the policy and its fallback."
         required: false
         type: string
-        default: "ubuntu-latest"
+        default: ${{ (github.event.repository.private || contains(fromJSON('["push","schedule","workflow_dispatch","release"]'), github.event_name)) && (vars.CI_RUNNER_PRIVATE || vars.CI_RUNNER_PUBLIC) || 'ubuntu-latest' }}
 
 permissions:
   contents: read
@@ -71,7 +71,7 @@ jobs:
         env:
           HOSTED: ${{ startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-') }}
           RUNS_ON: ${{ inputs.runs_on }}
-          TEST_OS: ${{ inputs.test_os }}
+          TEST_OS: ${{ inputs.test_os || format('["{0}"]', inputs.runs_on) }}
         run: |
           set -euo pipefail
           plan=$(go tool lateregate list -json)

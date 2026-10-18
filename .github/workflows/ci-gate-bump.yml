@@ -34,10 +34,10 @@ on:
         type: string
         default: "1.27"
       runs_on:
-        description: "Runner for both jobs. ubuntu-latest by default; a private repository on the self-hosted runner passes linux-vm, the label its per-push gate runs on."
+        description: "Runner for both jobs. By default the organization's runner policy picks the label (README, Runners): a private repository runs on the self-hosted runner, or on ubuntu-latest while that runner is offline; a public one on ubuntu-latest, and never on the self-hosted runner for a pull request. A label passed here overrides the policy and its fallback."
         required: false
         type: string
-        default: "ubuntu-latest"
+        default: ${{ (github.event.repository.private || contains(fromJSON('["push","schedule","workflow_dispatch","release"]'), github.event_name)) && (vars.CI_RUNNER_PRIVATE || vars.CI_RUNNER_PUBLIC) || 'ubuntu-latest' }}
 
 permissions:
   contents: read
