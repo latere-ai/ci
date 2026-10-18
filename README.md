@@ -503,7 +503,7 @@ applies it as the default of its `runs_on` input:
 
 | Repository | Runs on | Falls back to |
 | --- | --- | --- |
-| private | the self-hosted runner, `linux-vm` | `ubuntu-latest`, while no `linux-vm` runner is online |
+| private | the self-hosted runner, `linux-vm` | `ubuntu-latest`, while no `linux-vm` runner is online, or while a job has waited for one more than 20 minutes |
 | public | `ubuntu-latest` | `linux-vm`, while hosted runners are down, for events only the repository starts |
 
 A caller that passes nothing gets the policy and its fallback. A label
@@ -522,7 +522,7 @@ It reads two organization variables:
 
 | Variable | Visible to | Value |
 | --- | --- | --- |
-| `CI_RUNNER_PRIVATE` | private repositories | `linux-vm`, or `ubuntu-latest` while no `linux-vm` runner is online |
+| `CI_RUNNER_PRIVATE` | private repositories | `linux-vm`, or `ubuntu-latest` while `linux-vm` is offline or busy |
 | `CI_RUNNER_PUBLIC` | every repository | `ubuntu-latest`, or `linux-vm` while hosted runners are down |
 
 A public repository reads `CI_RUNNER_PRIVATE` as empty, so the
@@ -533,29 +533,47 @@ variable set, every job runs on `ubuntu-latest`.
 The two fallbacks have different triggers, because the two runners fail
 differently:
 
-- **The self-hosted runner is offline.** A job aimed at a label with no
-  online runner waits in the queue until GitHub drops it a day later; it
-  never moves by itself. [`runner-health.yml`](.github/workflows/runner-health.yml)
-  runs every ten minutes on a hosted runner here, where a public
-  repository's minutes cost nothing, looks for an online `linux-vm`
-  runner for a minute, and moves `CI_RUNNER_PRIVATE` to `ubuntu-latest`
-  when none answers and back to `linux-vm` when one does. Only jobs
-  created after the move follow it; one already queued for `linux-vm`
-  waits for the runner. GitHub's token can neither list the
-  organization's runners nor write its variables, so the workflow reads
-  `RUNNER_HEALTH_TOKEN`, a fine-grained token for the organization with
-  the permissions "Self-hosted runners: read" and "Variables: read and
-  write", stored as a secret of this repository. Without it the run warns
-  and changes nothing, and the variable is moved by hand:
+- **The self-hosted runner is offline or busy.** A job aimed at a label
+  with no online runner waits in the queue until GitHub drops it a day
+  later, and one aimed at a busy runner waits for a slot; neither moves by
+  itself. [`runner-health.yml`](.github/workflows/runner-health.yml) runs
+  every ten minutes on a hosted runner here, where a public repository's
+  minutes cost nothing, and moves `CI_RUNNER_PRIVATE` by two rules, the
+  first winning:
+
+  | Rule | Moves to `ubuntu-latest` when | Moves back to `linux-vm` when |
+  | --- | --- | --- |
+  | offline | no `linux-vm` runner answers over a minute | a runner is online and the busy rule is clear |
+  | busy | a runner is online and a queued job that asks for `linux-vm` has waited more than `BUSY_AFTER_MINUTES` (20) | no such job has waited more than `CLEAR_BELOW_MINUTES` (5) |
+
+  Between the two thresholds the variable keeps its value, so it does not
+  flap. The queue is every queued job in the organization's private,
+  unarchived repositories whose labels include `linux-vm`, read only while
+  a runner is online. Only jobs created after a move follow it; one
+  already queued for `linux-vm` waits for the runner.
+
+  Every move is a line in the organization variable `CI_RUNNER_SWITCHES`
+  (visible to private repositories, newest 200 lines): the time, the two
+  labels, the rule with the oldest wait, and how long the previous label
+  held. That is how often, and for how long, private jobs ran on hosted
+  minutes:
 
   ```sh
-  gh api -X PATCH /orgs/latere-ai/actions/variables/CI_RUNNER_PRIVATE -f value=ubuntu-latest  # linux-vm is offline
-  gh api -X PATCH /orgs/latere-ai/actions/variables/CI_RUNNER_PRIVATE -f value=linux-vm       # it is back
+  gh api /orgs/latere-ai/actions/variables/CI_RUNNER_SWITCHES --jq .value
   ```
 
-  A busy runner is not offline: while both slots are taken, a private
-  repository's jobs wait in the queue for one and do not move to hosted
-  runners.
+  GitHub's token can neither list the organization's runners, nor read
+  other repositories' runs, nor write organization variables, so the
+  workflow reads `RUNNER_HEALTH_TOKEN`, a fine-grained token for the
+  organization with "Self-hosted runners: read", "Variables: read and
+  write" and "Actions: read" on every repository, stored as a secret of
+  this repository. Without it the run warns and changes nothing, and the
+  variable is moved by hand:
+
+  ```sh
+  gh api -X PATCH /orgs/latere-ai/actions/variables/CI_RUNNER_PRIVATE -f value=ubuntu-latest  # linux-vm is offline or busy
+  gh api -X PATCH /orgs/latere-ai/actions/variables/CI_RUNNER_PRIVATE -f value=linux-vm       # it is back
+  ```
 
   To hold the variable still, for maintenance on the machine, disable the
   workflow (`gh workflow disable runner-health.yml --repo latere-ai/ci`).

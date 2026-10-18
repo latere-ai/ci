@@ -1,21 +1,34 @@
 name: runner health
 
 # Keeps the organization variable CI_RUNNER_PRIVATE naming a runner that can
-# take jobs. Every private repository's jobs run where that variable says
-# (README, Runners), and a job aimed at a label with no online runner waits
-# in the queue until GitHub drops it a day later. So when no linux-vm runner
-# is online for a minute, this moves the variable to the hosted label, and
-# when one is online again, back.
+# take a private repository's jobs soon. Every private repository's jobs run
+# where that variable says (README, Runners). Two rules move it to the hosted
+# label, and they compose with the first winning:
+#
+# - offline: no linux-vm runner is online for a minute. A job aimed at a
+#   label with no online runner waits in the queue until GitHub drops it a
+#   day later.
+# - busy: a runner is online, but a queued job that asks for linux-vm has
+#   waited more than BUSY_AFTER_MINUTES. The variable goes back to linux-vm
+#   once a runner is online and no such job has waited more than
+#   CLEAR_BELOW_MINUTES; between the two thresholds it keeps its value, so
+#   it does not flap.
+#
+# Only jobs created after a move follow it. Every move is a line in the
+# organization variable CI_RUNNER_SWITCHES, with the rule, the oldest wait
+# and the time spent on the previous label, so how often private CI runs on
+# hosted minutes can be read back.
 #
 # It runs on a hosted runner because it watches the self-hosted one, and in
 # this repository because a public repository's hosted minutes cost nothing;
 # in a private one each run would bill a minute against the Actions budget.
 #
-# GITHUB_TOKEN can neither list the organization's runners nor write its
-# variables. RUNNER_HEALTH_TOKEN is a fine-grained token for the organization
-# with "Self-hosted runners: read" and "Variables: read and write"; without it
-# the run warns and changes nothing. No pull request starts this workflow, so
-# a fork never runs with the token.
+# GITHUB_TOKEN can neither list the organization's runners, nor read other
+# repositories' runs, nor write organization variables. RUNNER_HEALTH_TOKEN is
+# a fine-grained token for the organization with "Self-hosted runners: read",
+# "Variables: read and write", and "Actions: read" on every repository;
+# without it the run warns and changes nothing. No pull request starts this
+# workflow, so a fork never runs with the token.
 
 on:
   schedule:
@@ -30,31 +43,83 @@ concurrency:
 
 jobs:
   check:
-    name: point private repositories at an online runner
+    name: point private repositories at a runner that takes jobs
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
-      # Keep in step with test/runner_health_test.sh, which runs a copy of
-      # this script against a stub gh.
-      - name: Look for an online linux-vm runner and set CI_RUNNER_PRIVATE
+      # Keep in step with test/runner_health_test.sh, which runs this script
+      # against a stub gh and evaluates its decide function on a table.
+      - name: Look at linux-vm and its queue and set CI_RUNNER_PRIVATE
         env:
           GH_TOKEN: ${{ secrets.RUNNER_HEALTH_TOKEN }}
           ORG: ${{ github.repository_owner }}
           LABEL: linux-vm
           FALLBACK: ubuntu-latest
           VARIABLE: CI_RUNNER_PRIVATE
+          LOG_VARIABLE: CI_RUNNER_SWITCHES
+          # The log keeps the newest lines, well inside the size GitHub
+          # allows a variable.
+          LOG_LINES: "200"
           # Six looks fifteen seconds apart. Each slot registers anew after
           # every job, so both can be between registrations at one instant,
           # and a single look would send private CI to hosted runners for
           # ten minutes over a gap of seconds.
           SAMPLES: "6"
           INTERVAL: "15"
+          # The busy rule's thresholds, in minutes of the oldest queued
+          # linux-vm job's wait.
+          BUSY_AFTER_MINUTES: "20"
+          CLEAR_BELOW_MINUTES: "5"
         run: |
           set -euo pipefail
           if [ -z "$GH_TOKEN" ]; then
             echo "::warning title=runner health::RUNNER_HEALTH_TOKEN is not set, so $VARIABLE is not kept in step with the $LABEL runner. The README's Runners section says what the token needs."
             exit 0
           fi
+          now=${NOW:-$(date +%s)}
+
+          # decide ONLINE OLDEST HAVE prints the label CI_RUNNER_PRIVATE
+          # should hold, a tab, and why. ONLINE counts online linux-vm
+          # runners, OLDEST is the oldest queued linux-vm job's wait in
+          # seconds, HAVE is the variable's value now. Offline wins; the busy
+          # rule applies only while a runner is online.
+          decide() {
+            local online=$1 oldest=$2 have=$3
+            local mins=$((oldest / 60))
+            if [ "$online" -eq 0 ]; then
+              printf '%s\t%s\n' "$FALLBACK" "offline: no $LABEL runner online"
+            elif [ "$oldest" -gt $((BUSY_AFTER_MINUTES * 60)) ]; then
+              printf '%s\t%s\n' "$FALLBACK" "busy: the oldest queued $LABEL job has waited ${mins}m, over ${BUSY_AFTER_MINUTES}m, with $online runner(s) online"
+            elif [ "$oldest" -le $((CLEAR_BELOW_MINUTES * 60)) ]; then
+              printf '%s\t%s\n' "$LABEL" "clear: $online runner(s) online and the oldest queued $LABEL job has waited ${mins}m, ${CLEAR_BELOW_MINUTES}m or less"
+            else
+              printf '%s\t%s\n' "$have" "between thresholds: the oldest queued $LABEL job has waited ${mins}m, so $VARIABLE keeps its value"
+            fi
+          }
+
+          # The longest a queued job that asks for linux-vm has waited, in
+          # seconds, across the organization's private repositories; 0 when
+          # none waits. A job is queued in a queued run or, beside its
+          # running siblings, in a run in progress.
+          oldest_wait() {
+            local repos repo queued running run found stamps=""
+            repos=$(gh api --paginate "/orgs/$ORG/repos?type=all&per_page=100" \
+              --jq '.[] | select(.private and (.archived | not)) | .name') || return 1
+            for repo in $repos; do
+              queued=$(gh api --paginate "/repos/$ORG/$repo/actions/runs?status=queued&per_page=100" \
+                --jq '.workflow_runs[].id') || return 1
+              running=$(gh api --paginate "/repos/$ORG/$repo/actions/runs?status=in_progress&per_page=100" \
+                --jq '.workflow_runs[].id') || return 1
+              for run in $queued $running; do
+                found=$(gh api --paginate "/repos/$ORG/$repo/actions/runs/$run/jobs?filter=latest&per_page=100" \
+                  --jq ".jobs[] | select(.status == \"queued\") | select(any(.labels[]?; . == \"$LABEL\")) | .created_at // .started_at") || return 1
+                stamps="$stamps"$'\n'"$found"
+              done
+            done
+            printf '%s\n' "$stamps" | jq -R -s --argjson now "$now" \
+              '[split("\n")[] | select(length > 0) | fromdateiso8601] | if length == 0 then 0 else ($now - min | floor) end'
+          }
+
           online=0
           i=1
           while :; do
@@ -71,24 +136,51 @@ jobs:
             i=$((i + 1))
             sleep "$INTERVAL"
           done
-          if [ "$online" -gt 0 ]; then
-            want=$LABEL
-          else
-            want=$FALLBACK
+
+          # The queue matters only while a runner is online: offline wins.
+          oldest=0
+          if [ "$online" -gt 0 ] && ! oldest=$(oldest_wait); then
+            echo "::error title=runner health::cannot read the queued jobs of $ORG's private repositories; $VARIABLE is left as it is"
+            exit 1
           fi
+
           if ! have=$(gh api "/orgs/$ORG/actions/variables/$VARIABLE" --jq .value); then
             echo "::error title=runner health::cannot read the organization variable $VARIABLE; create it with visibility private (README, Runners)"
             exit 1
           fi
+          decision=$(decide "$online" "$oldest" "$have")
+          want=${decision%%$'\t'*}
+          reason=${decision#*$'\t'}
+
           if [ "$have" = "$want" ]; then
-            msg="$VARIABLE stays $have: $online $LABEL runner(s) online"
+            msg="$VARIABLE stays $have. $reason"
             echo "$msg"
           else
             if ! gh api -X PATCH "/orgs/$ORG/actions/variables/$VARIABLE" -f value="$want" >/dev/null; then
               echo "::error title=runner health::cannot set $VARIABLE to $want; it is still $have"
               exit 1
             fi
-            msg="$VARIABLE moved from $have to $want: $online $LABEL runner(s) online"
+            msg="$VARIABLE moved from $have to $want. $reason"
             echo "::notice title=runner health::$msg"
+            # One line per move, with how long the previous label held when
+            # the log's last line is the move to it.
+            if ! log=$(gh api "/orgs/$ORG/actions/variables/$LOG_VARIABLE" --jq .value); then
+              echo "::error title=runner health::moved $VARIABLE to $want but cannot read $LOG_VARIABLE to record it; create it with visibility private (README, Runners)"
+              exit 1
+            fi
+            stamp=$(jq -nr --argjson now "$now" '$now | todate')
+            last=$(printf '%s\n' "$log" | tail -n 1)
+            held=""
+            case "$last" in
+              20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*Z" "*" -> $have: "*)
+                held=$(jq -nr --arg t "${last%% *}" --argjson now "$now" '(($now - ($t | fromdateiso8601)) / 60 | floor | tostring) + "m"')
+                ;;
+            esac
+            line="$stamp $have -> $want: $reason${held:+; $have held for $held}"
+            new=$(printf '%s\n%s\n' "$log" "$line" | sed '/^$/d' | tail -n "$LOG_LINES")
+            if ! gh api -X PATCH "/orgs/$ORG/actions/variables/$LOG_VARIABLE" -f value="$new" >/dev/null; then
+              echo "::error title=runner health::moved $VARIABLE to $want but cannot record it in $LOG_VARIABLE"
+              exit 1
+            fi
           fi
           echo "$msg" >> "$GITHUB_STEP_SUMMARY"
