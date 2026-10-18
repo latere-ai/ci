@@ -1,0 +1,94 @@
+name: runner health
+
+# Keeps the organization variable CI_RUNNER_PRIVATE naming a runner that can
+# take jobs. Every private repository's jobs run where that variable says
+# (README, Runners), and a job aimed at a label with no online runner waits
+# in the queue until GitHub drops it a day later. So when no linux-vm runner
+# is online for a minute, this moves the variable to the hosted label, and
+# when one is online again, back.
+#
+# It runs on a hosted runner because it watches the self-hosted one, and in
+# this repository because a public repository's hosted minutes cost nothing;
+# in a private one each run would bill a minute against the Actions budget.
+#
+# GITHUB_TOKEN can neither list the organization's runners nor write its
+# variables. RUNNER_HEALTH_TOKEN is a fine-grained token for the organization
+# with "Self-hosted runners: read" and "Variables: read and write"; without it
+# the run warns and changes nothing. No pull request starts this workflow, so
+# a fork never runs with the token.
+
+on:
+  schedule:
+    - cron: "4,14,24,34,44,54 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: runner-health
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: point private repositories at an online runner
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Keep in step with test/runner_health_test.sh, which runs a copy of
+      # this script against a stub gh.
+      - name: Look for an online linux-vm runner and set CI_RUNNER_PRIVATE
+        env:
+          GH_TOKEN: ${{ secrets.RUNNER_HEALTH_TOKEN }}
+          ORG: ${{ github.repository_owner }}
+          LABEL: linux-vm
+          FALLBACK: ubuntu-latest
+          VARIABLE: CI_RUNNER_PRIVATE
+          # Six looks fifteen seconds apart. Each slot registers anew after
+          # every job, so both can be between registrations at one instant,
+          # and a single look would send private CI to hosted runners for
+          # ten minutes over a gap of seconds.
+          SAMPLES: "6"
+          INTERVAL: "15"
+        run: |
+          set -euo pipefail
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning title=runner health::RUNNER_HEALTH_TOKEN is not set, so $VARIABLE is not kept in step with the $LABEL runner. The README's Runners section says what the token needs."
+            exit 0
+          fi
+          online=0
+          i=1
+          while :; do
+            if ! pages=$(gh api --paginate "/orgs/$ORG/actions/runners?per_page=100" \
+              --jq "[.runners[] | select(.status == \"online\") | select(any(.labels[]; .name == \"$LABEL\"))] | length"); then
+              echo "::error title=runner health::cannot list the runners of $ORG; $VARIABLE is left as it is"
+              exit 1
+            fi
+            online=$(printf '%s\n' "$pages" | awk '{ n += $1 } END { print n + 0 }')
+            if [ "$online" -gt 0 ] || [ "$i" -ge "$SAMPLES" ]; then
+              break
+            fi
+            echo "no online $LABEL runner at look $i of $SAMPLES"
+            i=$((i + 1))
+            sleep "$INTERVAL"
+          done
+          if [ "$online" -gt 0 ]; then
+            want=$LABEL
+          else
+            want=$FALLBACK
+          fi
+          if ! have=$(gh api "/orgs/$ORG/actions/variables/$VARIABLE" --jq .value); then
+            echo "::error title=runner health::cannot read the organization variable $VARIABLE; create it with visibility private (README, Runners)"
+            exit 1
+          fi
+          if [ "$have" = "$want" ]; then
+            msg="$VARIABLE stays $have: $online $LABEL runner(s) online"
+            echo "$msg"
+          else
+            if ! gh api -X PATCH "/orgs/$ORG/actions/variables/$VARIABLE" -f value="$want" >/dev/null; then
+              echo "::error title=runner health::cannot set $VARIABLE to $want; it is still $have"
+              exit 1
+            fi
+            msg="$VARIABLE moved from $have to $want: $online $LABEL runner(s) online"
+            echo "::notice title=runner health::$msg"
+          fi
+          echo "$msg" >> "$GITHUB_STEP_SUMMARY"
