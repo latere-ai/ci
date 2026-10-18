@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v1.24.0 - 2026-10-18
+
 ### Added
 
 - `runner-health.yml` also moves `CI_RUNNER_PRIVATE` to `ubuntu-latest`
