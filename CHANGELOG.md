@@ -10,6 +10,21 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Added
+
+- `runner-health.yml` also moves `CI_RUNNER_PRIVATE` to `ubuntu-latest`
+  while the self-hosted runner is busy: when a runner is online and a
+  queued job that asks for `linux-vm` in a private repository has waited
+  more than 20 minutes (`BUSY_AFTER_MINUTES`). It moves back once no such
+  job has waited more than 5 minutes (`CLEAR_BELOW_MINUTES`), and keeps
+  its value in between. The offline rule is unchanged and wins over the
+  busy one. `RUNNER_HEALTH_TOKEN` now also needs "Actions: read" on every
+  repository.
+- Every move of `CI_RUNNER_PRIVATE` is a line in the organization variable
+  `CI_RUNNER_SWITCHES`, with the rule, the oldest wait and how long the
+  previous label held, so the hosted minutes the fallback spends can be
+  read back.
+
 ## v1.23.0 - 2026-10-18
 
 ### Added
