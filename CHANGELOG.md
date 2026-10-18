@@ -10,6 +10,38 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- Every pipeline's `runs_on` defaults to the organization's runner policy
+  instead of `ubuntu-latest`: a private repository runs on the self-hosted
+  runner and falls back to `ubuntu-latest` while that runner is offline; a
+  public repository runs on `ubuntu-latest` and falls back to the
+  self-hosted runner, for a push, a tag, a schedule, a dispatch or a
+  release only, while hosted runners are down. The organization variables
+  `CI_RUNNER_PRIVATE` and `CI_RUNNER_PUBLIC` hold the two labels; see the
+  README's Runners section. A caller that passes `runs_on: linux-vm`
+  keeps that label and gives up the fallback, so private repositories
+  drop the line.
+- `test_os` in `lateregate.yml`, `go-verify.yml` and `cli-release.yml`
+  defaults to the runner `runs_on` resolves to, so a caller no longer
+  passes `test_os: '["linux-vm"]'` beside `runs_on`.
+
+### Added
+
+- `runner-health.yml` runs every ten minutes in this repository, looks for
+  an online `linux-vm` runner, and moves `CI_RUNNER_PRIVATE` to
+  `ubuntu-latest` when none is online for a minute and back when one is.
+  It needs the `RUNNER_HEALTH_TOKEN` secret described in the README; until
+  it is set, the run warns and the variable is moved by hand.
+
+### Fixed
+
+- `notes-release.yml` fetches the GitHub CLI at `gh_version` (default
+  `2.100.0`), checksum-verified, when the runner has none, as
+  `service-release.yml` does. On the self-hosted runner the publish step
+  failed with no `gh`, which pushed private repositories' releases onto
+  hosted runners.
+
 ## v1.21.0 - 2026-10-13
 
 ### Added
