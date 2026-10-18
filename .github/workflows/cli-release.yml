@@ -12,7 +12,9 @@ name: cli-release
 # Flow: lint -> test -> goreleaser. goreleaser builds the cross-platform
 # binaries, driven by the consumer repo's .goreleaser.yaml, and publishes the
 # GitHub release whose body is the tag's CHANGELOG.md section; a tag without
-# one fails before goreleaser runs.
+# one fails before goreleaser runs. A consumer whose .goreleaser.yaml signs
+# its release reads the key from RELEASE_SIGNING_KEY in goreleaser's
+# environment.
 
 on:
   workflow_call:
@@ -57,6 +59,10 @@ on:
         required: false
         type: string
         default: "v0.29.0"
+    secrets:
+      RELEASE_SIGNING_KEY:
+        description: "The private key a consumer's .goreleaser.yaml `signs` entry signs the release with, in whatever encoding its signer reads. A repository secret of this name reaches the pipeline through 'secrets: inherit', and only the goreleaser step sees it. Optional: a consumer that signs nothing has none, and the variable is empty."
+        required: false
 
 permissions:
   contents: write
@@ -139,3 +145,7 @@ jobs:
           args: release --clean --release-notes ${{ runner.temp }}/notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Only this step holds the signing key. The lint and test jobs run
+          # the consumer's linters and tests, which have no use for it, and
+          # every step that does not hold it is one fewer place it can leak.
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}

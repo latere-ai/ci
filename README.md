@@ -472,6 +472,10 @@ without a section fails before GoReleaser runs. Inputs: `go_version`,
 `lateregate_version`, `run_lint`, `run_tests`, `test_os` and `runs_on`.
 The caller grants `contents: write`.
 
+| Secret | Meaning |
+| --- | --- |
+| `RELEASE_SIGNING_KEY` | the private key a `signs` entry in the repository's `.goreleaser.yaml` signs the release with, set in GoReleaser's environment for the GoReleaser step alone. Optional: without it the variable is empty, so a repository that signs nothing is unaffected, and one whose signer requires the key fails before anything is published. |
+
 ## Releasing a module or library: `notes-release.yml`
 
 ```yaml
