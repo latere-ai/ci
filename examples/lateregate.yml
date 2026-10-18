@@ -29,7 +29,9 @@ permissions:
 jobs:
   gate:
     uses: latere-ai/ci/.github/workflows/lateregate.yml@v1
-    # Both inputs are optional. Override only what your repo needs:
+    # The runner policy picks the runner (README, Runners), and the suite
+    # runs there. Both inputs are optional; test_os lists the systems the
+    # tests also run on:
     # with:
     #   go_version: "1.27"
-    #   test_os: '["ubuntu-latest", "macos-latest", "windows-latest"]'
+    #   test_os: '["macos-latest", "windows-latest"]'
