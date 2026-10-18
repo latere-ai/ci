@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v1.23.0 - 2026-10-18
+
 ### Added
 
 - `cli-release.yml` takes an optional `RELEASE_SIGNING_KEY` secret and sets
