@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v1.22.0 - 2026-10-18
+
 ### Changed
 
 - Every pipeline's `runs_on` defaults to the organization's runner policy
