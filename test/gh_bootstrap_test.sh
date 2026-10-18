@@ -25,7 +25,7 @@ for f in $(grep -l '^  workflow_call:$' "$WORKFLOWS"/*.yml); do
         /^jobs:$/ { injobs = 1; next }
         injobs && /^  [a-z0-9_-]+:$/ { if (calls && !ensures) print job; job = $1; calls = 0; ensures = 0 }
         injobs && /name: Ensure gh$/ { ensures = 1 }
-        injobs && /(^|[[:space:];(!])gh (release|api|run|pr|issue|workflow) / { calls = 1 }
+        injobs && /(^|[[:space:];(!])gh (release|api|run|pr|issue|workflow|secret|variable|label|repo|cache|auth) / { calls = 1 }
         END { if (calls && !ensures) print job }
     ' "$f" | tr -d ':' | tr '\n' ' ')
     if [ -z "$bare" ]; then
