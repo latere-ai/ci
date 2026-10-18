@@ -10,6 +10,14 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Added
+
+- `cli-release.yml` takes an optional `RELEASE_SIGNING_KEY` secret and sets
+  it in GoReleaser's environment, for a repository whose `.goreleaser.yaml`
+  signs its release. `secrets: inherit` passes a repository secret of that
+  name. Only the GoReleaser step sees it, and a repository without the
+  secret builds and publishes as before.
+
 ## v1.22.0 - 2026-10-18
 
 ### Changed
