@@ -421,7 +421,9 @@ Live means this exact build is serving, not merely that something returns
 200. The smoke compares the served asset hash (`EXPECTED_ASSET`) with the
 bundle CI just built, and reads `/version` to compare the served
 `version` with the tag. The release is published only after that smoke
-passes.
+passes. Right after the roll an old pod can still answer for some
+seconds, so a failed smoke runs again every 10 seconds for up to three
+minutes before the release fails.
 
 ### Deploy credential
 

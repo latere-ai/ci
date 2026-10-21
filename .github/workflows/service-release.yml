@@ -538,10 +538,32 @@ jobs:
           # step does not run when one is set.
           SERVICE_TOKEN: ${{ secrets.SMOKE_BEARER || steps.token.outputs.token }}
           DEPLOY_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SMOKE_WINDOW: "180"
+          SMOKE_INTERVAL: "10"
         run: |
           set -euo pipefail
           mkdir -p release-evidence
-          OUTPUT_MD=release-evidence/smoke.md "${{ inputs.smoke_script }}"
+          # `rollout status` returns once the new pods are ready, while an old
+          # pod may still be leaving and the ingress may route to it for some
+          # seconds more, so a smoke straight after the roll can see the
+          # previous build. The smoke runs again every SMOKE_INTERVAL seconds
+          # until it passes or SMOKE_WINDOW seconds have gone by: a build that
+          # never goes live still fails, only later. Keep in step with
+          # test/smoke_retry_test.sh, which runs this function from this file.
+          smoke_until_live() {
+            local deadline=$((SECONDS + SMOKE_WINDOW)) attempt=1
+            until "$@"; do
+              if [ "$SECONDS" -ge "$deadline" ]; then
+                echo "::error::the smoke failed $attempt times over ${SMOKE_WINDOW}s; the last failure is above"
+                return 1
+              fi
+              echo "smoke attempt $attempt failed; trying again in ${SMOKE_INTERVAL}s"
+              attempt=$((attempt + 1))
+              sleep "$SMOKE_INTERVAL"
+            done
+          }
+          export OUTPUT_MD=release-evidence/smoke.md
+          smoke_until_live "${{ inputs.smoke_script }}"
           cat release-evidence/smoke.md >> "$GITHUB_STEP_SUMMARY"
           {
             echo 'evidence<<CI_EOF'

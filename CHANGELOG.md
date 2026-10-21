@@ -27,6 +27,15 @@ committed: the commit log already holds that.
   on the self-hosted runner, pull request runs included, cancels the job,
   which reports cancelled.
 
+### Fixed
+
+- `service-release.yml` runs the smoke again every 10 seconds, for up to
+  three minutes, until it passes. Since the release became one job the
+  smoke starts the moment `kubectl rollout status` returns, while an old
+  pod can still answer for some seconds; platform v0.157.0's first smoke
+  saw the previous bundle that way. A build that never goes live still
+  fails, three minutes later.
+
 ## v1.25.1 - 2026-10-21
 
 ### Fixed
