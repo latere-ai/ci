@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v1.25.1 - 2026-10-21
+
 ### Fixed
 
 - `service-release.yml` refuses a tag once a newer `vX.Y.Z` tag exists,
