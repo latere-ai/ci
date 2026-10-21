@@ -11,7 +11,7 @@ name: service-release
 #               url: https://platform.latere.ai, title: Latere Platform }
 #       secrets: inherit
 #
-# Flow (one run): build-frontend -> build-binary -> build-image -> deploy ->
+# Flow (one job): build the frontend, the binary and the image -> deploy ->
 # smoke -> release. The release publishes only after the live smoke proves the
 # exact build is serving. See this repo's README for the consumer conventions.
 
@@ -49,17 +49,17 @@ on:
         type: string
         default: "1.3.14"
       runs_on:
-        description: "Runner for every job. By default the organization's runner policy picks the label (README, Runners): a private repository runs on the self-hosted runner, or on ubuntu-latest while that runner is offline; a public one on ubuntu-latest, and never on the self-hosted runner for a pull request. A label passed here overrides the policy and its fallback. The self-hosted machine ships docker, git, jq and curl and nothing else; the steps below fetch Node, kubectl and gh at pinned versions when they are missing."
+        description: "Runner for the job. By default the organization's runner policy picks the label (README, Runners): a private repository runs on the self-hosted runner, or on ubuntu-latest while that runner is offline; a public one on ubuntu-latest, and never on the self-hosted runner for a pull request. A label passed here overrides the policy and its fallback. The self-hosted machine ships docker, git, jq and curl and nothing else; the steps below fetch Node, kubectl and gh at pinned versions when they are missing."
         required: false
         type: string
         default: ${{ (github.event.repository.private || contains(fromJSON('["push","schedule","workflow_dispatch","release"]'), github.event_name)) && (vars.CI_RUNNER_PRIVATE || vars.CI_RUNNER_PUBLIC) || 'ubuntu-latest' }}
       kubectl_version:
-        description: "kubectl release fetched for the deploy job when the runner has none, verified against its published sha256. Hosted runners ship kubectl and skip the fetch. Keep within one minor of the cluster."
+        description: "kubectl release fetched for the deploy steps when the runner has none, verified against its published sha256. Hosted runners ship kubectl and skip the fetch. Keep within one minor of the cluster."
         required: false
         type: string
         default: "1.35.1"
       gh_version:
-        description: "GitHub CLI release fetched for the release job when the runner has none, verified against the release's checksums file. Hosted runners ship gh and skip the fetch."
+        description: "GitHub CLI release fetched for the publish step when the runner has none, verified against the release's checksums file. Hosted runners ship gh and skip the fetch."
         required: false
         type: string
         default: "2.100.0"
@@ -119,7 +119,7 @@ on:
         type: string
         default: ""
       after_roll:
-        description: "Optional shell command run in the deploy job once the Deployment has rolled, with the same kubeconfig (e.g. applying a second tree that must follow this service, and waiting for it). A failure fails the deploy job, so neither the smoke nor the release runs. Empty skips it."
+        description: "Optional shell command run once the Deployment has rolled, with the same kubeconfig (e.g. applying a second tree that must follow this service, and waiting for it). A failure fails the job, so neither the smoke nor the release runs. Empty skips it."
         required: false
         type: string
         default: ""
@@ -145,7 +145,7 @@ on:
         default: "v0.29.0"
     secrets:
       DEPLOY_KUBECONFIG:
-        description: "Kubeconfig of the service's rollout identity: a ServiceAccount bound to a Role in its namespace over the kinds deploy/prod and any after_roll command apply (the consumer's deploy/bootstrap/rollout-identity.yaml). A repository secret of this name reaches the pipeline through 'secrets: inherit'. Optional here so a service whose cluster side is not provisioned yet still builds and publishes its image; its deploy job fails naming the secret."
+        description: "Kubeconfig of the service's rollout identity: a ServiceAccount bound to a Role in its namespace over the kinds deploy/prod and any after_roll command apply (the consumer's deploy/bootstrap/rollout-identity.yaml). A repository secret of this name reaches the pipeline through 'secrets: inherit'. Optional here so a service whose cluster side is not provisioned yet still builds and publishes its image; its deploy fails naming the secret."
         required: false
       SMOKE_BEARER:
         description: "Optional pre-minted bearer for an authenticated smoke, used verbatim. Takes precedence over SMOKE_CLIENT_ID/SECRET. Use this when the service issues its own credentials and auth holds no scope for the smoke to request."
@@ -163,16 +163,25 @@ permissions:
   actions: read
 
 jobs:
-  build-image:
-    # Keep the SPA, binary and image in one job so builds do not depend on
-    # artifact storage. A failed build step prevents publication and deploy.
+  release:
+    # One job, so a release waits for a runner once. On a busy self-hosted
+    # runner each job waits for a slot of its own, and separate build,
+    # deploy, smoke and publish jobs waited four times for a few minutes of
+    # work. A failed step skips every step after it: nothing deploys from a
+    # failed build, nothing is smoked after a failed deploy, and nothing
+    # publishes after a failed smoke or CLI build. The whole job runs in the
+    # production environment, so where that environment asks for an
+    # approval, the approval comes before the build.
     runs-on: ${{ inputs.runs_on }}
-    env:
-      CGO_ENABLED: "0"
-    outputs:
-      asset: ${{ steps.evidence.outputs.asset }}
+    environment:
+      name: production
+      url: ${{ inputs.url }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The CLI build may read the tag history; the rest needs one commit.
+          fetch-depth: ${{ inputs.build_cli && '0' || '1' }}
+
       - name: Isolate Docker credentials
         run: echo "DOCKER_CONFIG=$RUNNER_TEMP/docker-config" >> "$GITHUB_ENV"
 
@@ -180,11 +189,11 @@ jobs:
       # shim it checks none and reports nothing. Hosted runners ship Node,
       # the self-hosted VM does not.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        if: ${{ inputs.build_mode == 'split' && inputs.has_frontend }}
+        if: ${{ (inputs.build_mode == 'split' && inputs.has_frontend) || inputs.build_cli }}
         with:
           node-version: "22"
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        if: ${{ inputs.build_mode == 'split' && inputs.has_frontend }}
+        if: ${{ (inputs.build_mode == 'split' && inputs.has_frontend) || inputs.build_cli }}
         with:
           bun-version: ${{ inputs.bun_version }}
         # bun goes to $HOME/.bun/bin. Runner slots on one machine share a
@@ -219,8 +228,9 @@ jobs:
           echo "asset=$asset" >> "$GITHUB_OUTPUT"
 
 
+      # Every mode needs Go: the split build, the deploy's preflight and
+      # after_roll commands, and the release-note reader.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        if: ${{ inputs.build_mode == 'split' }}
         with:
           go-version: ${{ inputs.go_version }}
           check-latest: true
@@ -240,10 +250,14 @@ jobs:
 
       - name: Vet
         if: ${{ inputs.build_mode == 'split' }}
+        env:
+          CGO_ENABLED: "0"
         run: go vet ./...
 
       - name: Build shippable binary
         if: ${{ inputs.build_mode == 'split' }}
+        env:
+          CGO_ENABLED: "0"
         run: |
           set -euo pipefail
           go build -trimpath \
@@ -330,23 +344,6 @@ jobs:
         env:
           DOCKER_BUILD_RECORD_RETENTION_DAYS: 7
 
-  deploy:
-    # Deployment starts only after every build step and image publication succeeds.
-    needs: [build-image]
-    if: ${{ always() && needs.build-image.result == 'success' }}
-    runs-on: ${{ inputs.runs_on }}
-    environment:
-      name: production
-      url: ${{ inputs.url }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: ${{ inputs.go_version }}
-          check-latest: true
-          cache: false
-
       # Hosted runners ship kubectl; the self-hosted VM does not. The pinned
       # release is fetched with its published sha256 into a directory that
       # exists for this job alone.
@@ -372,6 +369,7 @@ jobs:
       # The kubeconfig lives in this job's temp directory, which the runner
       # empties when the job ends: on a self-hosted runner a file under $HOME
       # would outlive the job and be shared with the other slot.
+      # "Drop the kubeconfig" removes it once the deploy steps are done.
       - name: Write the kubeconfig
         env:
           KUBECONFIG_CONTENT: ${{ secrets.DEPLOY_KUBECONFIG }}
@@ -422,8 +420,8 @@ jobs:
         # Runs only once the rollout above has finished, as the same rollout
         # identity, so a tree whose workloads call the new release (and
         # would ask it what the old one cannot answer) rolls second. A
-        # failure fails this job: the smoke and the release are skipped and
-        # the run is red, and re-running the failed jobs repeats the apply,
+        # failure fails the job: the smoke and the release are skipped and
+        # the run is red, and re-running it repeats the build, the apply,
         # the roll and this step.
         if: ${{ inputs.after_roll != '' }}
         shell: bash
@@ -431,14 +429,15 @@ jobs:
           set -euo pipefail
           ${{ inputs.after_roll }}
 
-  smoke:
-    needs: [deploy, build-image]
-    if: ${{ always() && needs.deploy.result == 'success' }}
-    runs-on: ${{ inputs.runs_on }}
-    outputs:
-      evidence: ${{ steps.run.outputs.evidence }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Drop the kubeconfig
+        # The steps after this one run the smoke script, the CLI build and
+        # the note reader, none of which needs the rollout identity. Runs
+        # when a deploy step failed too.
+        if: ${{ always() }}
+        run: |
+          set -euo pipefail
+          rm -rf "$RUNNER_TEMP/kube"
+          echo "KUBECONFIG=" >> "$GITHUB_ENV"
 
       - name: Mint smoke token
         id: token
@@ -488,7 +487,7 @@ jobs:
           BASE_URL: ${{ inputs.url }}
           TAG: ${{ github.ref_name }}
           COMMIT: ${{ github.sha }}
-          EXPECTED_ASSET: ${{ needs.build-image.outputs.asset }}
+          EXPECTED_ASSET: ${{ steps.evidence.outputs.asset }}
           # A pre-minted bearer wins over a client_credentials mint; the mint
           # step does not run when one is set.
           SERVICE_TOKEN: ${{ secrets.SMOKE_BEARER || steps.token.outputs.token }}
@@ -520,66 +519,12 @@ jobs:
           # lectio's hit its quota holding 284 artifacts at the 90-day default.
           retention-days: 7
 
-  cli:
-    # Dual CLI+service repos build cross-platform binaries to attach to the
-    # release. The repo-specific logic (ssg build, SPA embed, ldflags, sandbox
-    # tag, GOOS/GOARCH matrix) lives in cli_build_cmd, not here, so the workflow
-    # stays generic. Runs in parallel with the deploy path; gates the release.
-    if: ${{ inputs.build_cli }}
-    runs-on: ${{ inputs.runs_on }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: ${{ inputs.go_version }}
-          check-latest: true
-          # The module cache is worth restoring on a hosted runner, which
-          # starts empty. A self-hosted runner keeps its own between jobs,
-          # and restoring a tarball over it fails on every file that exists.
-          cache: ${{ startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-') }}
-
-      # vue-tsc registers .vue files only under real Node; under bun's node
-      # shim it checks none and reports nothing. Hosted runners ship Node,
-      # the self-hosted VM does not.
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: "22"
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: ${{ inputs.bun_version }}
-        # bun goes to $HOME/.bun/bin. Runner slots on one machine share a
-        # HOME, and a job executing bun while another slot extracts it
-        # fails with ETXTBSY, so each job installs into its own temp dir.
-        env:
-          HOME: ${{ runner.temp }}
-
       - name: Build CLI binaries
+        # After the smoke, as before: a failed CLI build leaves the
+        # deployed service in place and publishes no release. The
+        # binaries stay in dist/ for the publish step.
+        if: ${{ inputs.build_cli }}
         run: ${{ inputs.cli_build_cmd }}
-
-      - name: Upload CLI binaries
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: cli-binaries
-          path: dist/
-          if-no-files-found: error
-          retention-days: 7
-
-  release:
-    # cli is skipped (satisfied) when build_cli is false; when it runs and
-    # fails, this job skips so a broken CLI build does not publish the release.
-    needs: [smoke, cli]
-    if: ${{ always() && needs.smoke.result == 'success' && needs.cli.result != 'failure' }}
-    runs-on: ${{ inputs.runs_on }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: ${{ inputs.go_version }}
-          cache: false
 
       # Hosted runners ship gh; the self-hosted VM does not. The pinned
       # release is fetched and verified against its checksums file.
@@ -622,13 +567,6 @@ jobs:
           cp CHANGELOG.md "$notes_root/CHANGELOG.md"
           go run latere.ai/x/ci-gate/cmd/lateregate@${{ inputs.lateregate_version }} release-notes -C "$notes_root" "$TAG" > notes.md
 
-      - name: Download CLI binaries
-        if: ${{ inputs.build_cli }}
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: cli-binaries
-          path: dist
-
       - name: Publish release with evidence
         # The body is the changelog section, then the smoke evidence, and
         # it is rebuilt from both on every run, so an edit re-run replaces
@@ -638,7 +576,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
           TITLE: ${{ inputs.title }}
-          EVIDENCE: ${{ needs.smoke.outputs.evidence }}
+          EVIDENCE: ${{ steps.run.outputs.evidence }}
           BUILD_CLI: ${{ inputs.build_cli }}
         run: |
           set -euo pipefail

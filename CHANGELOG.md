@@ -10,6 +10,19 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- `service-release.yml` runs as one job instead of five. On a busy
+  self-hosted runner each job waits for a slot of its own, so the build,
+  deploy, smoke, CLI and publish stages each waited in the queue; a release
+  now waits once. The steps and their order are unchanged, and a failed
+  step still stops everything after it. Two consequences for callers: the
+  whole job runs in the `production` environment, so an approval that
+  environment requires now comes before the build rather than before the
+  deploy; and re-running a failed release repeats the build. The
+  kubeconfig is removed as soon as the deploy steps finish, so the smoke
+  script, the CLI build and the note reader never hold it.
+
 ## v1.24.0 - 2026-10-18
 
 ### Added

@@ -82,33 +82,64 @@ else
     pass "no tool is fetched at latest"
 fi
 
-# Build products stay in one job. Artifact storage quota must not prevent a
-# checked frontend from reaching the binary or its image.
-build=$(sed -n '/^  build-image:/,/^  deploy:/p' "$WORKFLOW")
-if grep -qE '^  build-(frontend|binary):' "$WORKFLOW" \
-    || printf '%s' "$build" | grep -qE 'actions/(upload|download)-artifact@'; then
-    fail "release build still transfers required artifacts between jobs"
+# A release is one job. On a busy self-hosted runner each job waits for a
+# slot of its own, so stages split into jobs wait once per stage; one job
+# waits once. Build products stay on the runner, so artifact storage quota
+# cannot stop a checked frontend from reaching the binary or its image.
+if [ "$jobs" -eq 1 ]; then
+    pass "the release is one job"
+else
+    fail "the release is split into $jobs jobs, each waiting for a runner"
+fi
+if grep -qF 'actions/download-artifact@' "$WORKFLOW" \
+    || [ "$(grep -c 'actions/upload-artifact@' "$WORKFLOW")" -ne 1 ]; then
+    fail "release moves build products through artifact storage"
 else
     pass "release builds without artifact storage"
 fi
 for step in 'name: Typecheck + build' 'name: Capture frontend build evidence' 'name: Embed frontend' 'name: Vet' 'name: Build shippable binary' 'name: Build and push'; do
-    if printf '%s' "$build" | grep -qF "$step"; then
+    if grep -qF "$step" "$WORKFLOW"; then
         pass "image build retains $step"
     else
         fail "image build loses $step"
     fi
 done
-if grep -qF 'EXPECTED_ASSET: ${{ needs.build-image.outputs.asset }}' "$WORKFLOW"; then
+if grep -qF 'EXPECTED_ASSET: ${{ steps.evidence.outputs.asset }}' "$WORKFLOW"; then
     pass "live smoke verifies the image build's exact frontend asset"
 else
     fail "live smoke is not wired to the image build's asset"
 fi
 
-# The deploy job authenticates as the consumer's rollout identity, a
+# The steps run in the order the stages need: nothing deploys before the
+# image is pushed, nothing is smoked before the roll, and the release is
+# published last, after the smoke and any CLI build.
+prev=0
+order_ok=1
+for step in 'name: Build and push' 'name: Write the kubeconfig' 'name: Apply manifests' 'name: Roll new image' 'name: After the roll' 'name: Drop the kubeconfig' 'name: Smoke production release' 'name: Build CLI binaries' 'name: Publish release with evidence'; do
+    line=$(grep -nF "$step" "$WORKFLOW" | head -1 | cut -d: -f1)
+    if [ -z "$line" ] || [ "$line" -le "$prev" ]; then
+        fail "$step is missing or out of order"
+        order_ok=0
+    fi
+    prev=${line:-$prev}
+done
+[ "$order_ok" -eq 1 ] && pass "build, deploy, smoke, CLI build and publish run in order"
+
+# The production environment holds the whole job, so an approval it
+# requires comes before anything is built or deployed.
+if sed -n '/^  release:/,/steps:/p' "$WORKFLOW" | grep -qE '^      name: production$'; then
+    pass "the job runs in the production environment"
+else
+    fail "the job is not in the production environment"
+fi
+
+# The deploy authenticates as the consumer's rollout identity, a
 # namespace-bound ServiceAccount, through DEPLOY_KUBECONFIG. The file goes
 # under RUNNER_TEMP at mode 600: on the self-hosted runner a kubeconfig under
-# $HOME would outlive the job and be readable from the other slot.
-deploy=$(sed -n '/^  deploy:/,/^  smoke:/p' "$WORKFLOW")
+# $HOME would outlive the job and be readable from the other slot. Once the
+# deploy steps are done it is removed, even when one of them failed, so the
+# smoke script, the CLI build and the note reader never hold it.
+deploy=$(sed -n '/name: Write the kubeconfig/,/name: Mint smoke token/p' "$WORKFLOW")
 if printf '%s' "$deploy" | grep -qF 'KUBECONFIG_CONTENT: ${{ secrets.DEPLOY_KUBECONFIG }}' \
     && printf '%s' "$deploy" | grep -qF 'install -m 700 -d "$RUNNER_TEMP/kube"' \
     && printf '%s' "$deploy" | grep -qF 'chmod 600 "$RUNNER_TEMP/kube/config"' \
@@ -117,13 +148,21 @@ if printf '%s' "$deploy" | grep -qF 'KUBECONFIG_CONTENT: ${{ secrets.DEPLOY_KUBE
 else
     fail "deploy does not write DEPLOY_KUBECONFIG to a private file under RUNNER_TEMP"
 fi
+drop=$(sed -n '/name: Drop the kubeconfig/,/name: Mint smoke token/p' "$WORKFLOW")
+if printf '%s' "$drop" | grep -qF 'if: ${{ always() }}' \
+    && printf '%s' "$drop" | grep -qF 'rm -rf "$RUNNER_TEMP/kube"' \
+    && printf '%s' "$drop" | grep -qF 'echo "KUBECONFIG=" >> "$GITHUB_ENV"'; then
+    pass "the kubeconfig is removed after the deploy, whatever its outcome"
+else
+    fail "the kubeconfig outlives the deploy steps"
+fi
 if grep -qE 'DO_TOKEN|action-doctl|doctl ' "$WORKFLOW"; then
     fail "the workflow still reaches for a DigitalOcean credential"
 else
     pass "the workflow holds no DigitalOcean credential"
 fi
-# after_roll runs a caller's command once its Deployment has rolled, in the
-# deploy job, so it holds the same kubeconfig and runs before the smoke. A
+# after_roll runs a caller's command once its Deployment has rolled, among
+# the deploy steps, so it holds the same kubeconfig and runs before the smoke. A
 # caller that sets nothing changes nothing: the input defaults to empty and
 # the step is skipped when it is.
 if grep -A4 '^      after_roll:' "$WORKFLOW" | grep -qF 'default: ""'; then
@@ -135,9 +174,9 @@ roll_line=$(printf '%s\n' "$deploy" | grep -nF 'name: Roll new image' | cut -d: 
 after_line=$(printf '%s\n' "$deploy" | grep -nF 'name: After the roll' | cut -d: -f1)
 after_step=$(printf '%s\n' "$deploy" | sed -n '/name: After the roll/,$p')
 if [ -n "$roll_line" ] && [ -n "$after_line" ] && [ "$after_line" -gt "$roll_line" ]; then
-    pass "the after_roll step is in the deploy job, after the roll"
+    pass "the after_roll step is among the deploy steps, after the roll"
 else
-    fail "the after_roll step is missing from the deploy job or runs before the roll (roll=$roll_line after=$after_line)"
+    fail "the after_roll step is missing from the deploy steps or runs before the roll (roll=$roll_line after=$after_line)"
 fi
 if printf '%s\n' "$after_step" | grep -qF "if: \${{ inputs.after_roll != '' }}" \
     && printf '%s\n' "$after_step" | grep -qF 'set -euo pipefail' \

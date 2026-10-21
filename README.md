@@ -256,7 +256,7 @@ repository that calls it has moved; see
 
 Every release pipeline here reads the tag's section from the consuming
 repository's `CHANGELOG.md` and publishes it as the release body. No
-section fails the release job before anything is created or edited. The
+section fails the publish step before anything is created or edited. The
 pipelines do not fall back to GitHub's generated notes: those are built
 from pull request titles, and a repository that commits to main directly
 would get a compare link and nothing else.
@@ -277,10 +277,10 @@ vX.Y.Z` moves the notes under `Unreleased` into the tag's section,
 commits, tags and pushes. A repository without the tool writes the
 section by hand and pushes the tag.
 
-In `service-release.yml` the release job is the last one, so when it fails
-on a missing section production is already serving the tag. That is the
+In `service-release.yml` publishing is the last step, so when it fails on
+a missing section production is already serving the tag. That is the
 intended order, a release announces what is live, and the fix is to add
-the section and re-run the job rather than re-tag.
+the section and re-run the release rather than re-tag.
 
 ## Releasing a service: `service-release.yml`
 
@@ -313,14 +313,17 @@ exceed the calling job's, and the organization defaults to read-only, so
 without it the run fails at startup, with no logs, when the pipeline
 pushes the image or creates the release.
 
-The run is five jobs in order. `build-image` builds and pushes the image;
-in `split` mode it first builds the frontend (with a typecheck) and the Go
-binary (after `go vet`) on the runner. `deploy` applies `deploy/prod/`,
-rolls the Deployment to the new image, then runs `after_roll` when it is
-set. `smoke` runs the repository's smoke script against the live URL.
-`cli` builds command-line binaries when `build_cli` is set. `release`
-publishes the GitHub release with the changelog section and the smoke
-evidence. The pipeline does not run the test suite: the per-push gate on
+The run is one job, so on a busy self-hosted runner a release waits for
+a slot once rather than before every stage. Its steps run in order, and a
+failed step skips the rest. The build pushes the image; in `split` mode it
+first builds the frontend (with a typecheck) and the Go binary (after
+`go vet`) on the runner. The deploy applies `deploy/prod/`, rolls the
+Deployment to the new image, runs `after_roll` when it is set, and drops
+the kubeconfig. The smoke runs the repository's smoke script against the
+live URL. When `build_cli` is set, command-line binaries build next. The
+last step publishes the GitHub release with the changelog section and the
+smoke evidence. The job runs in the `production` environment, so an
+approval that environment requires comes before the build. The pipeline does not run the test suite: the per-push gate on
 the tagged commit is the verification, and `lateregate release` refuses to
 cut a tag while CI is red.
 
@@ -358,7 +361,7 @@ pipeline can `kubectl set image` without reading the manifests.
 | `deployment`, `container` | `service` | the Deployment, and the container in it, that get the new image |
 | `rollout_timeout` | `180s` | `kubectl rollout status` timeout |
 | `preflight` | empty | a shell command run after the kubeconfig is written and before the apply |
-| `after_roll` | empty | a shell command run once the Deployment has rolled, with the same kubeconfig, before the smoke. Use it for a second tree whose workloads call this service and so must roll after it. A failure fails the deploy job, and neither the smoke nor the release runs |
+| `after_roll` | empty | a shell command run once the Deployment has rolled, with the same kubeconfig, before the smoke. Use it for a second tree whose workloads call this service and so must roll after it. A failure fails the job, and neither the smoke nor the release runs |
 | `smoke_script` | `tools/smoke/release.sh` | the post-deploy smoke |
 | `smoke_scope` | empty | an OAuth scope requested with the smoke token |
 | `build_cli`, `cli_build_cmd` | `false`, empty | also build command-line binaries (the command writes them under `dist/`) and attach them to the release |
@@ -369,7 +372,7 @@ pipeline can `kubectl set image` without reading the manifests.
 
 | Secret | Meaning |
 | --- | --- |
-| `DEPLOY_KUBECONFIG` | the kubeconfig the deploy job applies with; see [Deploy credential](#deploy-credential). Without it the image still builds and publishes, and the deploy job fails naming the secret. |
+| `DEPLOY_KUBECONFIG` | the kubeconfig the deploy applies with; see [Deploy credential](#deploy-credential). Without it the image still builds and publishes, and the deploy fails naming the secret. |
 | `SMOKE_BEARER` | a pre-minted token the smoke presents |
 | `SMOKE_CLIENT_ID`, `SMOKE_CLIENT_SECRET` | a client the smoke mints a short-lived `client_credentials` token with, at `https://auth.latere.ai/token`, with the `service` input as the audience |
 
@@ -404,7 +407,7 @@ passes.
 ### Deploy credential
 
 `secrets: inherit` passes the repository secret `DEPLOY_KUBECONFIG`, the
-kubeconfig the deploy job applies the release with. It belongs to the
+kubeconfig the deploy applies the release with. It belongs to the
 service's own rollout identity: a ServiceAccount in the service's
 namespace, bound to a Role over the kinds `deploy/prod` applies, kept in
 the repository at `deploy/bootstrap/rollout-identity.yaml` and applied by
