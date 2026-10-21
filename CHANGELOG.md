@@ -10,6 +10,23 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- On a self-hosted runner, `lateregate.yml` runs in one job, `all gates
+  passed`: it reads the plan, runs every gate one after another in plan
+  order (`test` too when the plan has no `suite`), then `lateregate
+  contract`, uploads `coverage.out` when `cover` or `suite` ran, and fails
+  when any of them did. The `which gates apply`, `<gate>` and `static gates
+  and wiring` jobs no longer run there, so a push waits for one runner slot
+  instead of three in a row. Each gate still runs whether another failed,
+  has a log group, an annotation when it fails, and a row in the step
+  summary with its result and time. A `test_os` that names a runner other
+  than `runs_on` still gets the probe and the test matrix, and `all gates
+  passed` starts after them. Hosted runners keep one job per gate. The
+  required check keeps its name, `gate / all gates passed`. A cancelled run
+  on the self-hosted runner, pull request runs included, cancels the job,
+  which reports cancelled.
+
 ## v1.25.1 - 2026-10-21
 
 ### Fixed
