@@ -151,7 +151,7 @@ fi
 drop=$(sed -n '/name: Drop the kubeconfig/,/name: Mint smoke token/p' "$WORKFLOW")
 if printf '%s' "$drop" | grep -qF 'if: ${{ always() }}' \
     && printf '%s' "$drop" | grep -qF 'rm -rf "$RUNNER_TEMP/kube"' \
-    && printf '%s' "$drop" | grep -qF 'echo "KUBECONFIG=" >> "$GITHUB_ENV"'; then
+    && printf '%s' "$drop" | grep -qF 'echo "KUBECONFIG=/dev/null" >> "$GITHUB_ENV"'; then
     pass "the kubeconfig is removed after the deploy, whatever its outcome"
 else
     fail "the kubeconfig outlives the deploy steps"

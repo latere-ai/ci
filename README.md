@@ -279,8 +279,9 @@ section by hand and pushes the tag.
 
 In `service-release.yml` publishing is the last step, so when it fails on
 a missing section production is already serving the tag. That is the
-intended order, a release announces what is live, and the fix is to add
-the section and re-run the release rather than re-tag.
+intended order, a release announces what is live. Re-running the release
+repeats the build and the deploy, and is refused once a newer tag exists;
+publishing the section by hand with `gh release create` needs neither.
 
 ## Releasing a service: `service-release.yml`
 
@@ -323,9 +324,14 @@ the kubeconfig. The smoke runs the repository's smoke script against the
 live URL. When `build_cli` is set, command-line binaries build next. The
 last step publishes the GitHub release with the changelog section and the
 smoke evidence. The job runs in the `production` environment, so an
-approval that environment requires comes before the build. The pipeline does not run the test suite: the per-push gate on
-the tagged commit is the verification, and `lateregate release` refuses to
-cut a tag while CI is red.
+approval that environment requires comes before the build. The pipeline
+does not run the test suite: the per-push gate on the tagged commit is the
+verification, and `lateregate release` refuses to cut a tag while CI is
+red.
+
+The first step refuses a tag once a newer `vX.Y.Z` tag exists. A re-run
+repeats the build and the deploy, so re-running an older release would
+push it as `latest` and roll production back to it.
 
 ### What the repository provides
 
@@ -336,7 +342,7 @@ cut a tag while CI is red.
 | `deploy/bootstrap/` | one-time or immutable manifests (the namespace, the rollout identity, a storage class). The pipeline never reads this directory. |
 | `tools/smoke/release.sh` | the post-deploy smoke (`smoke_script` moves it). It reads `BASE_URL`, `EXPECTED_ASSET`, `OUTPUT_MD` and `SERVICE_TOKEN`, exits non-zero when the live surface is wrong, and writes a Markdown evidence block to `OUTPUT_MD`. |
 | probes | the four paths of `latere.ai/x/pkg/health`, served by its handler: `/livez` (liveness; never depends on a dependency), `/readyz` (readiness; the body names the failing check), `/version` (`version`, `commit`, `build_time`), and `/metrics` where the service has any. Manifests probe `/livez` and `/readyz`; the smoke reads all three. |
-| `Dockerfile.ci` | in `split` mode, packages the prebuilt binary `out/<service>` into the runtime image; the build job compiles it (and embeds the frontend) first |
+| `Dockerfile.ci` | in `split` mode, packages the prebuilt binary `out/<service>` into the runtime image; the build step compiles it (and embeds the frontend) first |
 | `frontend/` | for a service with a UI: built with `bun run build` into `frontend/dist/` |
 
 The Deployment and its main container are both named `<service>` in
@@ -368,7 +374,7 @@ pipeline can `kubectl set image` without reading the manifests.
 | `go_version`, `bun_version` | `1.27`, `1.3.14` | toolchains |
 | `kubectl_version`, `gh_version` | `1.35.1`, `2.100.0` | fetched, checksum-verified, when the runner has none |
 | `lateregate_version` | `v0.29.0` | the `ci-gate` release whose `release-notes` reads the changelog |
-| `runs_on` | the [runner policy](#runners) | the runner label for all five jobs |
+| `runs_on` | the [runner policy](#runners) | the runner label for the job |
 
 | Secret | Meaning |
 | --- | --- |
@@ -393,8 +399,8 @@ too, since `inherit` cannot be mixed with explicit secrets.
   responds and serves a single-page app, not that this bundle is live.
 
 Prefer `split` for a service with a frontend when the asset pin matters.
-Both modes publish the image from one job, so no artifact storage is
-needed between jobs; the asset hash reaches the smoke as a job output.
+Both modes build, publish and smoke the image in one job, so no artifact
+storage is needed; the asset hash reaches the smoke as a step output.
 
 ### The "actually live" check
 

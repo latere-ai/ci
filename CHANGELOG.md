@@ -10,6 +10,17 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Fixed
+
+- `service-release.yml` refuses a tag once a newer `vX.Y.Z` tag exists,
+  before anything is built or pushed. Since v1.25.0 a re-run repeats the
+  build and the deploy, so re-running an older release would have pushed
+  it as `latest` and rolled production back to it. Its notes can still be
+  published by hand with `gh release create`.
+- After the deploy steps `KUBECONFIG` names an empty file rather than
+  nothing, so a later `kubectl` cannot fall back to a config in the
+  runner's home directory.
+
 ## v1.25.0 - 2026-10-21
 
 ### Changed
