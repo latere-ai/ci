@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v1.25.0 - 2026-10-21
+
 ### Changed
 
 - `service-release.yml` runs as one job instead of five. On a busy
