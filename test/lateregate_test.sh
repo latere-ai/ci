@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 #
-# Unit tests for lateregate.yml's plan step and fold step.
+# Unit tests for lateregate.yml's plan steps, its gate loop and its result
+# check, and grep assertions on the shape of its jobs.
 #
-# The plan step turns `lateregate list -json` into three outputs: the gates
-# that get jobs of their own, the gates that fold into one job on a
-# self-hosted runner, and the systems the plain test matrix runs on. The fold
-# step runs the folded gates one after another. A step that dropped a gate
-# would skip it silently, which is the vacuous pass the whole design refuses,
-# so both directions are tested against canned plans, for a lateregate with
-# the suite gate and for one that predates it.
+# The probe's plan step turns `lateregate list -json` into two outputs: the
+# gates that get jobs of their own on a hosted runner, and the systems the
+# plain test matrix runs on. On the self-hosted runner the all gates passed
+# job lists the running gates itself and runs them one after another. A step
+# that dropped a gate would skip it silently, which is the vacuous pass the
+# whole design refuses, so both directions are tested against canned plans,
+# for a lateregate with the suite gate and for one that predates it.
 #
 # Kept bash 3.2 compatible so it runs on macOS /bin/bash as well as on the
 # ubuntu-latest runners.
@@ -26,10 +27,15 @@ if ! command -v jq >/dev/null 2>&1; then
     exit 0
 fi
 
+# The expression every job uses to tell a hosted label from a self-hosted one.
+HOSTED_EXPR="startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-')"
+
 # ---------------------------------------------------------------------------
 # The shell under test is the workflow's own: each step's `run: |` block is
 # cut out of lateregate.yml and run against a stub `go`, so nothing here can
-# drift from what the workflow ships.
+# drift from what the workflow ships. It runs under `bash -e`, as a `run:`
+# step with no `shell:` does on a Linux runner, so a failing command the
+# script does not catch stops it here as it would there.
 # ---------------------------------------------------------------------------
 step_script() {
     awk -v name="$1" '
@@ -45,6 +51,7 @@ step_script() {
 }
 
 PLAN_SCRIPT=$(step_script "Read the plan")
+LIST_SCRIPT=$(step_script "List the running gates")
 LOOP_SCRIPT=$(step_script "Run the gates")
 PASSED_SCRIPT=$(step_script "Check every job's result")
 STUB=$(mktemp -d)
@@ -66,20 +73,19 @@ chmod +x "$STUB/go"
 plan_outputs() { # plan hosted runs_on test_os
     out=$(mktemp)
     PLAN="$1" HOSTED="$2" RUNS_ON="$3" TEST_OS="$4" GITHUB_OUTPUT="$out" PATH="$STUB:$PATH" \
-        bash -c "set -euo pipefail; plan=\$(go tool lateregate list -json); $PLAN_SCRIPT" >/dev/null
+        bash -e -c "$PLAN_SCRIPT" >/dev/null
     cat "$out"; rm -f "$out"
 }
 
 run_case() {
-    name="$1"; plan="$2"; hosted="$3"; runs_on="$4"; test_os="$5"; want_gates="$6"; want_fold="$7"; want_tests="$8"
+    name="$1"; plan="$2"; hosted="$3"; runs_on="$4"; test_os="$5"; want_gates="$6"; want_tests="$7"
     got=$(plan_outputs "$plan" "$hosted" "$runs_on" "$test_os")
     got_gates=$(printf '%s\n' "$got" | sed -n 's/^gates=//p')
-    got_fold=$(printf '%s\n' "$got" | sed -n 's/^fold=//p')
     got_tests=$(printf '%s\n' "$got" | sed -n 's/^tests=//p')
-    if [ "$got_gates" = "$want_gates" ] && [ "$got_fold" = "$want_fold" ] && [ "$got_tests" = "$want_tests" ]; then
+    if [ "$got_gates" = "$want_gates" ] && [ "$got_tests" = "$want_tests" ]; then
         pass "$name"
     else
-        fail "$name: gates=$got_gates fold=$got_fold tests=$got_tests, want gates=$want_gates fold=$want_fold tests=$want_tests"
+        fail "$name: gates=$got_gates tests=$got_tests, want gates=$want_gates tests=$want_tests"
     fi
 }
 
@@ -89,100 +95,160 @@ echo "plan step, hosted runner"
 
 run_case "every running gate but test is a matrix entry, in plan order" \
     '[{"name":"fmt-check","status":"run"},{"name":"test","status":"run"},{"name":"cover","status":"run"}]' \
-    true ubuntu-latest "$UB" '["fmt-check","cover"]' '[]' "$UB"
+    true ubuntu-latest "$UB" '["fmt-check","cover"]' "$UB"
 
 run_case "a skipped gate is not a job" \
     '[{"name":"fmt-check","status":"run"},{"name":"spec-lint","status":"skip","reason":"tracks no specs/ files"}]' \
-    true ubuntu-latest "$UB" '["fmt-check"]' '[]' '[]'
+    true ubuntu-latest "$UB" '["fmt-check"]' '[]'
 
 run_case "a waived gate is not a job" \
     '[{"name":"test","status":"run"},{"name":"cover","status":"waived","reason":"later","until":"2026-12-01"}]' \
-    true ubuntu-latest "$UB" '[]' '[]' "$UB"
+    true ubuntu-latest "$UB" '[]' "$UB"
 
 run_case "a waived test skips the OS matrix" \
     '[{"name":"test","status":"waived","reason":"r","until":"2026-12-01"},{"name":"race","status":"run"}]' \
-    true ubuntu-latest "$UB" '["race"]' '[]' '[]'
+    true ubuntu-latest "$UB" '["race"]' '[]'
 
 run_case "an expired waiver runs; the plan carries the note, not the skip" \
     '[{"name":"cover","status":"run","reason":"waiver expired 2026-01-01: later","until":"2026-01-01"}]' \
-    true ubuntu-latest "$UB" '["cover"]' '[]' '[]'
+    true ubuntu-latest "$UB" '["cover"]' '[]'
 
 run_case "both enum gates survive matrix selection" \
     '[{"name":"enum-go","status":"run"},{"name":"test","status":"run"},{"name":"enum-typescript","status":"run"}]' \
-    true ubuntu-latest "$UB" '["enum-go","enum-typescript"]' '[]' "$UB"
+    true ubuntu-latest "$UB" '["enum-go","enum-typescript"]' "$UB"
 
 run_case "a waived TypeScript enum gate does not install frontend tools" \
     '[{"name":"enum-go","status":"run"},{"name":"enum-typescript","status":"waived","reason":"migration","until":"2026-12-01"}]' \
-    true ubuntu-latest "$UB" '["enum-go"]' '[]' '[]'
+    true ubuntu-latest "$UB" '["enum-go"]' '[]'
 
 run_case "suite is a gate job on runs_on, and the matrix keeps the other systems" \
     '[{"name":"fmt-check","status":"run"},{"name":"test","status":"folded","into":"suite"},{"name":"race","status":"folded","into":"suite"},{"name":"suite","status":"run"}]' \
-    true ubuntu-latest '["ubuntu-latest","macos-latest"]' '["fmt-check","suite"]' '[]' '["macos-latest"]'
+    true ubuntu-latest '["ubuntu-latest","macos-latest"]' '["fmt-check","suite"]' '["macos-latest"]'
 
 run_case "folded gates are never jobs, and a lone runs_on leaves no test matrix" \
     '[{"name":"test","status":"folded","into":"suite"},{"name":"cover","status":"folded","into":"suite"},{"name":"suite","status":"run"}]' \
-    true ubuntu-latest "$UB" '["suite"]' '[]' '[]'
+    true ubuntu-latest "$UB" '["suite"]' '[]'
 
 run_case "a waived suite runs no test anywhere" \
     '[{"name":"test","status":"folded","into":"suite"},{"name":"suite","status":"waived","reason":"r","until":"2026-12-01"}]' \
-    true ubuntu-latest "$UB" '[]' '[]' '[]'
+    true ubuntu-latest "$UB" '[]' '[]'
 
 echo "plan step, self-hosted runner"
 
-run_case "the suite gates keep jobs; the rest fold into one" \
+run_case "no gate gets a job; all gates passed runs them" \
     '[{"name":"fmt-check","status":"run"},{"name":"lint","status":"run"},{"name":"test","status":"folded","into":"suite"},{"name":"suite","status":"run"},{"name":"vuln","status":"run"}]' \
-    false linux-vm "$VM" '["suite"]' '["fmt-check","lint","vuln"]' '[]'
+    false linux-vm "$VM" '[]' '[]'
 
-run_case "a lateregate without suite keeps each suite gate as a job" \
+run_case "a lateregate without suite runs test on runs_on in the one job, not the matrix" \
     '[{"name":"fmt-check","status":"run"},{"name":"test","status":"run"},{"name":"race","status":"run"},{"name":"cover","status":"run"},{"name":"tempdir","status":"run"},{"name":"hermetic","status":"run"},{"name":"license","status":"run"}]' \
-    false linux-vm "$VM" '["race","cover","tempdir","hermetic"]' '["fmt-check","license"]' "$VM"
+    false linux-vm "$VM" '[]' '[]'
 
 run_case "a macOS leg beside the runner still runs plain test" \
     '[{"name":"test","status":"folded","into":"suite"},{"name":"suite","status":"run"},{"name":"modernize","status":"run"}]' \
-    false linux-vm '["linux-vm","macos-latest"]' '["suite"]' '["modernize"]' '["macos-latest"]'
+    false linux-vm '["linux-vm","macos-latest"]' '[]' '["macos-latest"]'
 
-run_case "nothing to fold still leaves an empty list, not a missing one" \
-    '[{"name":"test","status":"folded","into":"suite"},{"name":"suite","status":"run"}]' \
-    false linux-vm "$VM" '["suite"]' '[]' '[]'
+run_case "without suite, the macOS leg runs test and runs_on stays in the one job" \
+    '[{"name":"test","status":"run"},{"name":"modernize","status":"run"}]' \
+    false linux-vm '["macos-latest","linux-vm"]' '[]' '["macos-latest"]'
 
-echo "fold step"
+run_case "a waived test runs no macOS leg either" \
+    '[{"name":"test","status":"waived","reason":"r","until":"2026-12-01"},{"name":"modernize","status":"run"}]' \
+    false linux-vm '["macos-latest"]' '[]' '[]'
 
-fold_case() {
-    name="$1"; gates="$2"; fail_gates="$3"; want_calls="$4"; want_status="$5"; want_errors="$6"
-    calls=$(mktemp)
-    out=$(GATES="$gates" FAIL="$fail_gates" CALLS="$calls" RUNNER_TEMP=/runner/temp TMPDIR=/tmp PATH="$STUB:$PATH" \
-        bash -c "set -uo pipefail; $LOOP_SCRIPT" 2>&1)
+echo "gate list step, self-hosted runner"
+
+list_case() {
+    name="$1"; plan="$2"; want="$3"
+    out=$(mktemp)
+    log=$(PLAN="$plan" GITHUB_OUTPUT="$out" PATH="$STUB:$PATH" bash -e -c "$LIST_SCRIPT" 2>&1)
     status=$?
-    got_calls=$(tr '\n' ';' < "$calls"); rm -f "$calls"
-    got_errors=$(printf '%s\n' "$out" | sed -n 's/^::error title=\([^:]*\)::.*/\1/p' | tr '\n' ' ')
-    if [ "$got_calls" = "$want_calls" ] && [ "$status" -eq "$want_status" ] && [ "$got_errors" = "$want_errors" ]; then
+    got=$(sed -n 's/^gates=//p' "$out"); rm -f "$out"
+    if [ "$status" -eq 0 ] && [ "$got" = "$want" ]; then
         pass "$name"
     else
-        fail "$name: calls=$got_calls status=$status errors=[$got_errors], want calls=$want_calls status=$want_status errors=[$want_errors]"
+        fail "$name: status=$status gates=$got, want gates=$want; output: $log"
     fi
 }
 
-fold_case "every gate runs, then the wiring check, and a clean run passes" \
-    '["fmt-check","license"]' "" \
-    "fmt-check TMPDIR=/tmp;license TMPDIR=/tmp;contract TMPDIR=/tmp;" 0 ""
+list_case "every running gate in plan order, suite carrying the folded ones" \
+    '[{"name":"fmt-check","status":"run"},{"name":"spec-lint","status":"skip","reason":"no specs"},{"name":"lint","status":"run"},{"name":"suite","status":"run"},{"name":"test","status":"folded","into":"suite"},{"name":"cover","status":"folded","into":"suite"}]' \
+    '["fmt-check","lint","suite"]'
 
-fold_case "lint alone runs under the runner process's own TMPDIR" \
-    '["lint","vuln"]' "" \
-    "lint TMPDIR=/runner/temp;vuln TMPDIR=/tmp;contract TMPDIR=/tmp;" 0 ""
+list_case "test is listed when it runs, since this job is the test run on runs_on" \
+    '[{"name":"fmt-check","status":"run"},{"name":"test","status":"run"},{"name":"cover","status":"run"}]' \
+    '["fmt-check","test","cover"]'
 
-fold_case "a failed gate does not stop the rest, and each failure is annotated" \
-    '["fmt-check","lint","license"]' "fmt-check license" \
-    "fmt-check TMPDIR=/tmp;lint TMPDIR=/runner/temp;license TMPDIR=/tmp;contract TMPDIR=/tmp;" 1 "fmt-check license "
+list_case "a waived gate is not listed" \
+    '[{"name":"fmt-check","status":"run"},{"name":"enum-typescript","status":"waived","reason":"r","until":"2026-12-01"}]' \
+    '["fmt-check"]'
 
-fold_case "the wiring check runs with no gate to fold and fails the job on its own" \
-    '[]' "contract" \
+list_case "a waived suite lists no test" \
+    '[{"name":"test","status":"folded","into":"suite"},{"name":"suite","status":"waived","reason":"r","until":"2026-12-01"}]' \
+    '[]'
+
+echo "gate loop"
+
+loop_case() {
+    name="$1"; gates="$2"; fail_gates="$3"; enum_setup="$4"; want_calls="$5"; want_status="$6"; want_errors="$7"
+    calls=$(mktemp); summary=$(mktemp)
+    out=$(GATES="$gates" FAIL="$fail_gates" ENUM_SETUP="$enum_setup" CALLS="$calls" GITHUB_STEP_SUMMARY="$summary" \
+        RUNNER_TEMP=/runner/temp TMPDIR=/tmp PATH="$STUB:$PATH" \
+        bash -e -c "$LOOP_SCRIPT" 2>&1)
+    status=$?
+    got_calls=$(tr '\n' ';' < "$calls")
+    got_errors=$(printf '%s\n' "$out" | sed -n 's/^::error title=\([^:]*\)::.*/\1/p' | tr '\n' ' ')
+    # The step summary names the same failures as the annotations, one row
+    # per gate that ran or should have.
+    got_rows=$(sed -n 's/^| \([^ ]*\) | \*\*failed\*\* | [0-9]* |$/\1/p' "$summary" | tr '\n' ' ')
+    rm -f "$calls" "$summary"
+    want_rows=$want_errors
+    [ "$want_errors" = "plan " ] && want_rows=""
+    if [ "$got_calls" = "$want_calls" ] && [ "$status" -eq "$want_status" ] \
+        && [ "$got_errors" = "$want_errors" ] && [ "$got_rows" = "$want_rows" ]; then
+        pass "$name"
+    else
+        fail "$name: calls=$got_calls status=$status errors=[$got_errors] summary=[$got_rows], want calls=$want_calls status=$want_status errors=[$want_errors] summary=[$want_rows]; output: $out"
+    fi
+}
+
+loop_case "every gate runs in plan order, then the wiring check, and a clean run passes" \
+    '["fmt-check","suite","license"]' "" skipped \
+    "fmt-check TMPDIR=/tmp;suite TMPDIR=/tmp;license TMPDIR=/tmp;contract TMPDIR=/tmp;" 0 ""
+
+loop_case "lint alone runs under the runner process's own TMPDIR" \
+    '["lint","vuln","suite"]' "" skipped \
+    "lint TMPDIR=/runner/temp;vuln TMPDIR=/tmp;suite TMPDIR=/tmp;contract TMPDIR=/tmp;" 0 ""
+
+loop_case "a failed gate does not stop the rest, and each failure is annotated and summarized" \
+    '["fmt-check","lint","suite","license"]' "fmt-check suite" skipped \
+    "fmt-check TMPDIR=/tmp;lint TMPDIR=/runner/temp;suite TMPDIR=/tmp;license TMPDIR=/tmp;contract TMPDIR=/tmp;" 1 "fmt-check suite "
+
+loop_case "the wiring check runs with no gate and fails the job on its own" \
+    '[]' "contract" skipped \
     "contract TMPDIR=/tmp;" 1 "contract "
 
-echo "passed step"
+loop_case "a prepared TypeScript setup runs enum-typescript" \
+    '["enum-go","enum-typescript"]' "" success \
+    "enum-go TMPDIR=/tmp;enum-typescript TMPDIR=/tmp;contract TMPDIR=/tmp;" 0 ""
+
+loop_case "a failed TypeScript setup fails enum-typescript unrun, and the rest still run" \
+    '["enum-go","enum-typescript","suite"]' "" skipped \
+    "enum-go TMPDIR=/tmp;suite TMPDIR=/tmp;contract TMPDIR=/tmp;" 1 "enum-typescript "
+
+loop_case "an empty gate list fails before the wiring check could pass alone" \
+    '' "" skipped "" 1 "plan "
+
+loop_case "a gate list that is not a list fails" \
+    '{"gates":["fmt-check"]}' "" skipped "" 1 "plan "
+
+loop_case "a gate list that is not JSON fails" \
+    'fmt-check' "" skipped "" 1 "plan "
+
+echo "result check"
 
 passed_case() {
     name="$1"; needs="$2"; want_status="$3"; want_errors="$4"
-    out=$(NEEDS="$needs" bash -c "set -euo pipefail; $PASSED_SCRIPT" 2>&1)
+    out=$(NEEDS="$needs" bash -e -c "$PASSED_SCRIPT" 2>&1)
     status=$?
     got_errors=$(printf '%s\n' "$out" | sed -n 's/^::error title=\([^:]*\)::.*/\1/p' | tr '\n' ' ')
     if [ "$status" -eq "$want_status" ] && [ "$got_errors" = "$want_errors" ]; then
@@ -193,23 +259,31 @@ passed_case() {
 }
 
 passed_case "every job succeeded" \
-    '{"probe":{"result":"success","outputs":{}},"test":{"result":"success","outputs":{}},"gate":{"result":"success","outputs":{}},"fold":{"result":"skipped","outputs":{}},"contract":{"result":"success","outputs":{}}}' \
+    '{"probe":{"result":"success","outputs":{}},"test":{"result":"success","outputs":{}},"gate":{"result":"success","outputs":{}},"contract":{"result":"success","outputs":{}}}' \
     0 ""
 
 passed_case "a job that did not apply was skipped" \
-    '{"probe":{"result":"success","outputs":{}},"test":{"result":"skipped","outputs":{}},"gate":{"result":"success","outputs":{}},"fold":{"result":"success","outputs":{}},"contract":{"result":"skipped","outputs":{}}}' \
+    '{"probe":{"result":"success","outputs":{}},"test":{"result":"skipped","outputs":{}},"gate":{"result":"success","outputs":{}},"contract":{"result":"skipped","outputs":{}}}' \
+    0 ""
+
+passed_case "on the self-hosted runner every needed job is skipped" \
+    '{"probe":{"result":"skipped","outputs":{}},"test":{"result":"skipped","outputs":{}},"gate":{"result":"skipped","outputs":{}},"contract":{"result":"skipped","outputs":{}}}' \
     0 ""
 
 passed_case "a failed gate fails the check and is named" \
-    '{"probe":{"result":"success","outputs":{}},"test":{"result":"success","outputs":{}},"gate":{"result":"failure","outputs":{}},"fold":{"result":"skipped","outputs":{}},"contract":{"result":"success","outputs":{}}}' \
+    '{"probe":{"result":"success","outputs":{}},"test":{"result":"success","outputs":{}},"gate":{"result":"failure","outputs":{}},"contract":{"result":"success","outputs":{}}}' \
     1 "gate "
 
+passed_case "a failed macOS leg beside the self-hosted runner fails the check and is named" \
+    '{"probe":{"result":"success","outputs":{}},"test":{"result":"failure","outputs":{}},"gate":{"result":"skipped","outputs":{}},"contract":{"result":"skipped","outputs":{}}}' \
+    1 "test "
+
 passed_case "a cancelled job fails the check" \
-    '{"probe":{"result":"success","outputs":{}},"test":{"result":"cancelled","outputs":{}},"gate":{"result":"success","outputs":{}},"fold":{"result":"skipped","outputs":{}},"contract":{"result":"success","outputs":{}}}' \
+    '{"probe":{"result":"success","outputs":{}},"test":{"result":"cancelled","outputs":{}},"gate":{"result":"success","outputs":{}},"contract":{"result":"success","outputs":{}}}' \
     1 "test "
 
 passed_case "a failed probe skips the rest and still fails the check" \
-    '{"probe":{"result":"failure","outputs":{}},"test":{"result":"skipped","outputs":{}},"gate":{"result":"skipped","outputs":{}},"fold":{"result":"skipped","outputs":{}},"contract":{"result":"failure","outputs":{}}}' \
+    '{"probe":{"result":"failure","outputs":{}},"test":{"result":"skipped","outputs":{}},"gate":{"result":"skipped","outputs":{}},"contract":{"result":"failure","outputs":{}}}' \
     1 "probe contract "
 
 # ---------------------------------------------------------------------------
@@ -225,11 +299,27 @@ jobs=$(awk '
     injobs && /^[^[:space:]#]/ { exit }
     injobs && /^  [[:alnum:]_-]+:$/ { sub(/^  /, ""); sub(/:$/, ""); print }
 ' "$WORKFLOW")
-passed_block=$(awk '
-    $0 == "  passed:" { injob = 1; next }
-    injob && /^  [[:alnum:]_-]+:/ { exit }
-    injob { print }
-' "$WORKFLOW")
+
+job_block() {
+    awk -v job="$1" '
+        $0 == "  " job ":" { injob = 1; next }
+        injob && /^  [[:alnum:]_-]+:/ { exit }
+        injob { print }
+    ' "$WORKFLOW"
+}
+
+# Prints the step of a job block that contains a needle, from its `- ` line
+# to the next step.
+job_step() {
+    printf '%s\n' "$1" | awk -v needle="$2" '
+        function emit() { if (index(step, needle)) printf "%s", step }
+        /^      - / { emit(); step = "" }
+        { step = step $0 "\n" }
+        END { emit() }
+    '
+}
+
+passed_block=$(job_block passed)
 
 if [ -n "$passed_block" ]; then
     pass "the workflow has a job with id passed"
@@ -243,10 +333,15 @@ else
     fail "the passed job must be named 'all gates passed', got: $(printf '%s\n' "$passed_block" | sed -n 's/^    name: //p')"
 fi
 
-if printf '%s\n' "$passed_block" | grep -qxF "    if: \${{ github.event_name != 'push' || !cancelled() }}"; then
-    pass "the passed job runs whatever the jobs it needs did, except in a cancelled push run"
+# A cancelled run cancels the job, which reports cancelled, except a pull
+# request run on a hosted label, where the job runs and fails. On the
+# self-hosted runner the job is the gates, and running on after a
+# cancellation would hold a runner slot for the whole bar.
+want_if="    if: \${{ !cancelled() || (github.event_name != 'push' && ($HOSTED_EXPR)) }}"
+if printf '%s\n' "$passed_block" | grep -qxF "$want_if"; then
+    pass "the passed job runs whatever the jobs it needs did, and stops in a cancelled run except a hosted pull request run"
 else
-    fail "the passed job must run with if: \${{ github.event_name != 'push' || !cancelled() }}"
+    fail "the passed job must run with$want_if"
 fi
 
 want_needs=$(printf '%s\n' "$jobs" | grep -vx passed | sort | tr '\n' ' ')
@@ -258,9 +353,106 @@ else
 fi
 
 if printf '%s\n' "$passed_block" | grep -qF 'NEEDS: ${{ toJSON(needs) }}'; then
-    pass "the passed step reads every result from toJSON(needs)"
+    pass "the result check reads every result from toJSON(needs)"
 else
-    fail "the passed step must read NEEDS: \${{ toJSON(needs) }}"
+    fail "the result check must read NEEDS: \${{ toJSON(needs) }}"
+fi
+
+if job_step "$passed_block" "- name: Check every job's result" | grep -qxF '        if: ${{ always() }}'; then
+    pass "the result check runs after a failed gate and in a cancelled hosted pull request run"
+else
+    fail "the result check must run with if: \${{ always() }}"
+fi
+
+# ---------------------------------------------------------------------------
+# One job on the self-hosted runner. Each job a run adds there is one more
+# wait for one of a few runner slots, so on a self-hosted label with the
+# default test_os the run is the passed job alone: the probe, the gate jobs
+# and the hosted wiring check are skipped, and the test matrix, which needs
+# the probe, with them. A new job, or a condition that lets one of these run
+# on the self-hosted runner, is a queue wait added to every private push.
+# ---------------------------------------------------------------------------
+echo "one job on the self-hosted runner"
+
+got_jobs=$(printf '%s\n' "$jobs" | tr '\n' ' ')
+if [ "$got_jobs" = "probe test gate contract passed " ]; then
+    pass "the jobs are probe, test, gate, contract and passed"
+else
+    fail "the jobs are [$got_jobs]; a job added here runs on every self-hosted push unless it is skipped there, so add it to this list with a condition that says so"
+fi
+
+check_if() { # job want-if what
+    if job_block "$1" | grep -qxF "    if: \${{ $2 }}"; then
+        pass "$1: $3"
+    else
+        fail "$1 must run with if: \${{ $2 }} ($3)"
+    fi
+}
+check_if probe "$HOSTED_EXPR || ((inputs.test_os || format('[\"{0}\"]', inputs.runs_on)) != format('[\"{0}\"]', inputs.runs_on))" \
+    "runs on a hosted label, and on the self-hosted runner only when test_os names another system"
+check_if contract "$HOSTED_EXPR" "runs on a hosted label only"
+check_if gate "needs.probe.outputs.gates != '[]'" "runs only for the gates the probe hands out, none on the self-hosted runner"
+check_if test "needs.probe.outputs.tests != '[]'" "runs only for the systems the probe hands out"
+for job in gate test; do
+    if job_block "$job" | grep -qxF '    needs: probe'; then
+        pass "$job needs the probe, so it is skipped with it"
+    else
+        fail "$job must need the probe"
+    fi
+done
+
+if printf '%s\n' "$passed_block" | grep -qxF "      RUN_GATES: \${{ !($HOSTED_EXPR) }}"; then
+    pass "the passed job runs the gates itself on a self-hosted label only"
+else
+    fail "the passed job must set RUN_GATES: \${{ !($HOSTED_EXPR) }}"
+fi
+
+for target in 'uses: actions/checkout@' 'uses: actions/setup-go@' '- name: List the running gates'; do
+    if job_step "$passed_block" "$target" | grep -qxF "        if: \${{ env.RUN_GATES == 'true' }}"; then
+        pass "passed: $target runs only where the job runs the gates"
+    else
+        fail "passed: $target must be conditional on env.RUN_GATES == 'true'"
+    fi
+done
+
+gates_step=$(job_step "$passed_block" '- name: Run the gates')
+if printf '%s\n' "$gates_step" | grep -qxF "        if: \${{ !cancelled() && steps.plan.outcome == 'success' }}" \
+    && printf '%s\n' "$gates_step" | grep -qxF '          GATES: ${{ steps.plan.outputs.gates }}' \
+    && printf '%s\n' "$gates_step" | grep -qxF '          ENUM_SETUP: ${{ steps.prepare.outcome }}'; then
+    pass "the gate loop runs the listed gates after a failed TypeScript setup too"
+else
+    fail "the gate loop must run on !cancelled() && steps.plan.outcome == 'success' with GATES and ENUM_SETUP from its steps"
+fi
+if printf '%s\n' "$gates_step" | grep -q 'continue-on-error'; then
+    fail "the gate loop must fail the job when a gate fails"
+else
+    pass "the gate loop fails the job when a gate fails"
+fi
+
+# Plan, setup, gates, coverage copy, result: in that order, so the TypeScript
+# tools exist before the gates and the result check reads them all.
+order=$(printf '%s\n' "$passed_block" | awk '
+    /uses: actions\/checkout@/ { print "checkout" }
+    /uses: actions\/setup-go@/ { print "setup-go" }
+    /- name: List the running gates$/ { print "list" }
+    /uses: actions\/setup-node@/ { print "setup-node" }
+    /uses: oven-sh\/setup-bun@/ { print "setup-bun" }
+    /run: go tool lateregate enum-typescript-prepare$/ { print "prepare" }
+    /- name: Run the gates$/ { print "gates" }
+    /uses: actions\/upload-artifact@/ { print "upload" }
+    /- name: Check every job.s result$/ { print "check" }
+' | tr '\n' ' ')
+if [ "$order" = "checkout setup-go list setup-node setup-bun prepare gates upload check " ]; then
+    pass "the passed job sets up, lists, prepares, runs the gates, keeps coverage and checks, in that order"
+else
+    fail "the passed job's steps are [$order], want checkout setup-go list setup-node setup-bun prepare gates upload check"
+fi
+
+upload=$(job_step "$passed_block" 'uses: actions/upload-artifact@')
+if printf '%s\n' "$upload" | grep -qxF "        if: \${{ !cancelled() && (contains(fromJSON(steps.plan.outputs.gates || '[]'), 'cover') || contains(fromJSON(steps.plan.outputs.gates || '[]'), 'suite')) }}"; then
+    pass "the passed job keeps coverage.out when cover or suite ran, failed or not"
+else
+    fail "the passed job's upload must run when cover or suite is listed and the run was not cancelled"
 fi
 
 # ---------------------------------------------------------------------------
@@ -271,9 +463,9 @@ echo "workflow"
 for expr in \
     'gate: ${{ fromJSON(needs.probe.outputs.gates) }}' \
     'os: ${{ fromJSON(needs.probe.outputs.tests) }}' \
-    'GATES: ${{ needs.probe.outputs.fold }}' \
-    "needs.probe.outputs.tests != '[]'" \
-    "needs.probe.outputs.gates != '[]'" \
+    'gates: ${{ steps.plan.outputs.gates }}' \
+    'tests: ${{ steps.plan.outputs.tests }}' \
+    'GATES: ${{ steps.plan.outputs.gates }}' \
     "go tool lateregate list -json" \
     "go tool lateregate contract" \
     'go tool lateregate ${{ matrix.gate }}' \
@@ -286,10 +478,19 @@ do
     fi
 done
 
-if [ -n "$PLAN_SCRIPT" ] && [ -n "$LOOP_SCRIPT" ] && [ -n "$PASSED_SCRIPT" ]; then
+if [ -n "$PLAN_SCRIPT" ] && [ -n "$LIST_SCRIPT" ] && [ -n "$LOOP_SCRIPT" ] && [ -n "$PASSED_SCRIPT" ]; then
     pass "every step under test was found in the workflow"
 else
-    fail "a step under test was not found in the workflow (plan=${#PLAN_SCRIPT} loop=${#LOOP_SCRIPT} passed=${#PASSED_SCRIPT})"
+    fail "a step under test was not found in the workflow (plan=${#PLAN_SCRIPT} list=${#LIST_SCRIPT} loop=${#LOOP_SCRIPT} passed=${#PASSED_SCRIPT})"
+fi
+
+# Both plan steps print the plan the same way, so the reason a gate does not
+# run is in the log on either kind of runner.
+print_line=$(printf '%s\n' "$PLAN_SCRIPT" | grep -F "jq -r '.[] |")
+if [ -n "$print_line" ] && printf '%s\n' "$LIST_SCRIPT" | grep -qxF -- "$print_line"; then
+    pass "both plan steps print every gate's status and reason"
+else
+    fail "the gate list step must print the plan as the probe does"
 fi
 
 # Every uses: is SHA-pinned, as in every other workflow here.
@@ -304,17 +505,18 @@ fi
 # A bare ubuntu-latest on a job would pin that job to hosted runners.
 fixed=$(grep -cE '^\s+runs-on: ubuntu-latest$' "$WORKFLOW")
 routed=$(grep -cF 'runs-on: ${{ inputs.runs_on }}' "$WORKFLOW")
-if [ "$fixed" -eq 0 ] && [ "$routed" -eq 5 ]; then
-    pass "probe, gate, fold, contract and passed run on inputs.runs_on"
+if [ "$fixed" -eq 0 ] && [ "$routed" -eq 4 ]; then
+    pass "probe, gate, contract and passed run on inputs.runs_on"
 else
     fail "runs_on does not route every non-matrix job (fixed=$fixed routed=$routed)"
 fi
 
 # setup-go's cache restore is for hosted runners, which start empty. On the
 # self-hosted machine the module cache is already there and the restore
-# fails file by file, so every setup-go step gates it on a hosted label.
+# fails file by file, so every setup-go step gates it on a hosted label, or
+# turns it off where only a self-hosted runner reaches it.
 setups=$(grep -c 'uses: actions/setup-go' "$WORKFLOW")
-gated=$(grep -cE "cache: \\$\\{\\{ startsWith\\((inputs.runs_on|matrix.os), 'ubuntu-'\\)" "$WORKFLOW")
+gated=$(grep -cE "cache: (false|\\$\\{\\{ startsWith\\((inputs.runs_on|matrix.os), 'ubuntu-'\\))" "$WORKFLOW")
 if [ "$setups" -eq "$gated" ]; then
     pass "every setup-go caches only on a hosted runner"
 else
@@ -324,23 +526,6 @@ fi
 # Check the actual step blocks, not independent occurrences: a condition on
 # an adjacent step would still install Node/Bun for every Go gate. Both jobs
 # that can run the TypeScript enum gate set it up, each on its own condition.
-job_block() {
-    awk -v job="$1" '
-        $0 == "  " job ":" { injob = 1; next }
-        injob && /^  [[:alnum:]_-]+:/ { exit }
-        injob { print }
-    ' "$WORKFLOW"
-}
-
-job_step() {
-    printf '%s\n' "$1" | awk -v needle="$2" '
-        function emit() { if (index(step, needle)) printf "%s", step }
-        /^      - / { emit(); step = "" }
-        { step = step $0 "\n" }
-        END { emit() }
-    '
-}
-
 check_enum_setup() { # job condition run-step
     block=$(job_block "$1")
     for target in 'uses: actions/setup-node@' 'uses: oven-sh/setup-bun@' 'run: go tool lateregate enum-typescript-prepare'; do
@@ -360,6 +545,11 @@ check_enum_setup() { # job condition run-step
     else
         fail "$1: the TypeScript enum gate must pin Bun 1.3.14"
     fi
+    if job_step "$block" 'uses: oven-sh/setup-bun@' | grep -qxF '          HOME: ${{ runner.temp }}'; then
+        pass "$1: Bun installs into the job's own temp directory"
+    else
+        fail "$1: Bun must install under HOME: \${{ runner.temp }}"
+    fi
     if printf '%s\n' "$block" | awk -v check="$3" '
         /uses: actions\/setup-node@/ { node = NR }
         /uses: oven-sh\/setup-bun@/ { bun = NR }
@@ -376,13 +566,13 @@ check_enum_setup() { # job condition run-step
 for target in 'uses: actions/setup-node@' 'uses: oven-sh/setup-bun@' 'run: go tool lateregate enum-typescript-prepare'; do
     count=$(grep -cF "$target" "$WORKFLOW")
     if [ "$count" -eq 2 ]; then
-        pass "$target appears in the gate job and the fold job, nowhere else"
+        pass "$target appears in the gate job and the passed job, nowhere else"
     else
         fail "$target appears $count times, want 2"
     fi
 done
 check_enum_setup gate "matrix.gate == 'enum-typescript'" 'run: go tool lateregate ${{ matrix.gate }}'
-check_enum_setup fold "contains(fromJSON(needs.probe.outputs.fold), 'enum-typescript')" '- name: Run the gates'
+check_enum_setup passed "contains(fromJSON(steps.plan.outputs.gates || '[]'), 'enum-typescript')" '- name: Run the gates'
 
 if [ "$FAILURES" -gt 0 ]; then
     echo "$FAILURES failure(s)"

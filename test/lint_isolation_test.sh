@@ -34,4 +34,13 @@ if isolated "$others" || ! printf '%s\n' "$others" | grep -Fq "if: \${{ matrix.g
     exit 1
 fi
 
+# The self-hosted runner's gate loop sets TMPDIR for lint's command alone,
+# not for the step, so every other gate keeps the machine's.
+loop=$(step_for "$workflow" '- name: Run the gates')
+if isolated "$loop" || [ "$(printf '%s\n' "$loop" | grep -c 'TMPDIR=')" -ne 1 ] \
+    || ! printf '%s\n' "$loop" | grep -Fq 'TMPDIR="$RUNNER_TEMP" go tool lateregate lint'; then
+    echo "FAIL: lateregate's gate loop gives a gate other than lint a per-slot TMPDIR, or lint none"
+    exit 1
+fi
+
 echo 'PASS: linter locks are isolated to each runner slot, and only the linter'

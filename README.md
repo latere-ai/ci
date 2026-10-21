@@ -20,7 +20,7 @@ repository, by convention rather than through a long list of inputs.
 
 | Workflow | Runs on | For | Jobs |
 | --- | --- | --- | --- |
-| [`lateregate.yml`](.github/workflows/lateregate.yml) | every push and pull request | a Go repository | the plan, one job per gate, the test matrix, the wiring check |
+| [`lateregate.yml`](.github/workflows/lateregate.yml) | every push and pull request | a Go repository | the plan, the gates (a job each on a hosted runner, one job on the self-hosted one), the test matrix, the wiring check |
 | [`ci-gate-bump.yml`](.github/workflows/ci-gate-bump.yml) | once a day | a Go repository that pins `latere.ai/x/ci-gate` | move the pin to the latest release when the bar passes on it, or open an issue |
 | [`go-verify.yml`](.github/workflows/go-verify.yml) | every push and pull request | a Go repository that has not moved to `lateregate.yml` | Makefile targets, probed |
 | [`service-release.yml`](.github/workflows/service-release.yml) | a `v*` tag | a Kubernetes service | build the image, deploy, smoke the live surface, publish the release |
@@ -102,11 +102,11 @@ jobs:
 ## The per-push gate: `lateregate.yml`
 
 There are no per-gate inputs and no Makefile contract. The pipeline runs
-`go tool lateregate list -json` and builds one job per gate the binary
-says applies. Which gates apply is decided by the binary reading the tree
-(a repository with no `specs/` is not spec-linted), and the only way a
-gate that applies does not run is a dated waiver in the repository's
-`.lateregate.yaml`, which the plan reads and the probe log prints.
+`go tool lateregate list -json` and runs every gate the binary says
+applies. Which gates apply is decided by the binary reading the tree (a
+repository with no `specs/` is not spec-linted), and the only way a gate
+that applies does not run is a dated waiver in the repository's
+`.lateregate.yaml`, which the plan reads and its log prints.
 
 | Input | Default | Meaning |
 | --- | --- | --- |
@@ -118,25 +118,35 @@ golangci-lint's version is pinned in the binary, so there is no input for
 it. A repository that cannot lint waives `lint` with a reason and a date
 rather than turning the job off.
 
+On a hosted runner each gate gets a job:
+
 | Job | Runs |
 | --- | --- |
 | `which gates apply` | `lateregate list -json`; its outputs are the job sets |
 | `test on <os>` | `lateregate test` on each runner in `test_os`, except `runs_on` once the plan has `suite` |
-| `<gate>` | `lateregate <gate>`: one job per running gate on a hosted runner, and only the suite gates on a self-hosted one; `cover` or `suite` uploads `coverage.out` |
-| `static gates and wiring` | self-hosted only: every other running gate, one after another, then `lateregate contract` |
-| `wiring is in shape` | hosted only: `lateregate contract` |
+| `<gate>` | `lateregate <gate>`, one job per running gate; `cover` or `suite` uploads `coverage.out` |
+| `wiring is in shape` | `lateregate contract` |
 | `all gates passed` | after every other job, whatever they did, except in a cancelled push run: passes when each one succeeded or was skipped, and fails on a failure or a cancellation |
+
+On a self-hosted runner one job does all of it:
+
+| Job | Runs |
+| --- | --- |
+| `all gates passed` | `lateregate list -json`, then every running gate one after another in plan order, `test` included when the plan has no `suite`, then `lateregate contract`; uploads `coverage.out` when `cover` or `suite` ran; fails when a gate failed or a job it waits for did, and is cancelled with its run |
+| `which gates apply`, `test on <os>` | only when `test_os` names a runner other than `runs_on`: `lateregate test` on those runners, and `all gates passed` waits for them |
 
 Branch protection requires one check: `all gates passed`. The gate jobs
 are named for the gates the plan picks, so the set changes when a pin adds
 or drops a gate, and a job that did not apply reports as skipped. This
 job is always present under the same name, runs whatever the other jobs
 did, and fails unless each of them succeeded or was skipped. A cancelled
-push run skips it: that run was superseded by a newer push or was a
-duplicate delivery of the same one, its conclusion already says cancelled,
-and branch protection reads the pull request run. GitHub names
-a reusable workflow's check after the caller's job id, so a caller whose
-job is `gate` requires `gate / all gates passed`.
+run cancels it, and it reports cancelled: a push run is cancelled when a
+newer push supersedes it or GitHub delivers the same push twice, and on
+the self-hosted runner, where the job is the gates, a cancelled run of any
+event stops them. A pull request run on a hosted runner is the exception:
+there the job runs after a cancellation and fails. GitHub names a reusable
+workflow's check after the caller's job id, so a caller whose job is
+`gate` requires `gate / all gates passed`.
 
 `suite` runs the test suite once with the race detector, coverage, the
 temporary-directory check and the stripped `PATH` all on, in place of the
@@ -147,11 +157,14 @@ separate `test`, `race`, `cover`, `tempdir` and `hermetic` gates; with a
 ten times a Linux one.
 
 On a self-hosted runner a job is a turn on one of a few runner slots, and
-one job per gate would make the queue out of job setup rather than checks.
-There the gates that take seconds share the `static gates and wiring` job,
-each in a log group of its own, each run whether another failed, and each
-named in an annotation when it fails. A hosted runner keeps one job per
-gate, since its parallelism costs nothing.
+while every slot is busy each job a run adds is one more wait in the
+queue. A probe, then the gate jobs, then the result check made three waits
+a push, so there `all gates passed` reads the plan itself and runs every
+gate in turn: each in a log group of its own, each run whether another
+failed, each a row in the step summary with its result and time, and each
+named in an annotation when it fails. A failed TypeScript setup fails
+`enum-typescript` without running it and leaves the other gates to run. A
+hosted runner keeps one job per gate, since its parallelism costs nothing.
 
 On a self-hosted label every job builds with `GOFLAGS=-trimpath`. Such a
 runner keeps one Go build and test cache for all of its runner processes,

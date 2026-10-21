@@ -10,11 +10,12 @@ name: lateregate
 #
 # Every gate lives in latere-ai/ci-gate, pinned by the consumer's go.mod as a
 # tool dependency, so it runs identically on a laptop. This workflow asks the
-# binary which gates apply (`lateregate list -json`) and runs one job per
-# gate, so a repository adopts a gate by pinning a version that has it, not by
-# editing YAML here or a Makefile there. A waived or inapplicable gate is a
-# skipped job with its reason in the probe log rather than a green step over
-# nothing.
+# binary which gates apply (`lateregate list -json`) and runs exactly those,
+# so a repository adopts a gate by pinning a version that has it, not by
+# editing YAML here or a Makefile there. A hosted runner gives each gate a
+# job of its own; the self-hosted runner runs all of them in one job. A
+# waived or inapplicable gate does not run, and its reason is in the plan's
+# log rather than a green step over nothing.
 #
 # There is no golangci-lint version input: the binary pins it. There is no
 # run_lint input: a repository that cannot lint waives `lint` in its
@@ -44,16 +45,18 @@ permissions:
 
 jobs:
   # The plan. Its outputs are the job sets, so the jobs are exactly the gates
-  # the binary will run.
+  # the binary will run. On a self-hosted runner the all gates passed job
+  # reads the plan itself, and the probe runs only when test_os names a
+  # system other than runs_on, to give the test matrix its legs.
   probe:
     name: which gates apply
+    if: ${{ startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-') || ((inputs.test_os || format('["{0}"]', inputs.runs_on)) != format('["{0}"]', inputs.runs_on)) }}
     runs-on: ${{ inputs.runs_on }}
     env:
       # -trimpath on a self-hosted runner: see the gate job.
       GOFLAGS: ${{ !(startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-')) && '-trimpath' || '' }}
     outputs:
       gates: ${{ steps.plan.outputs.gates }}
-      fold: ${{ steps.plan.outputs.fold }}
       tests: ${{ steps.plan.outputs.tests }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -76,26 +79,23 @@ jobs:
           set -euo pipefail
           plan=$(go tool lateregate list -json)
           printf '%s\n' "$plan" | jq -r '.[] | "\(.status)\t\(.name)\t\(.reason // "")\(.until // "" | if . == "" then "" else " until " + . end)\(.into // "" | if . == "" then "" else "into " + . end)"'
-          # The gates that each run the whole test suite. suite is all of them in
-          # one run; a lateregate that predates it runs them one by one.
-          heavy='["suite","race","cover","tempdir","hermetic"]'
-          running=$(printf '%s\n' "$plan" | jq -c '[.[] | select(.status == "run" and .name != "test") | .name]')
-          # A hosted runner gives every gate a job of its own, side by side. On a
-          # self-hosted runner a job is a turn on one of a few runner slots, so
-          # only the suite gates get jobs and the rest share one.
+          # A hosted runner gives every gate a job of its own, side by side. On
+          # the self-hosted runner a job is a turn on one of a few runner slots,
+          # so the all gates passed job runs every gate itself and none gets a
+          # job here.
           if [ "$HOSTED" = true ]; then
-            gates=$running
-            fold='[]'
+            gates=$(printf '%s\n' "$plan" | jq -c '[.[] | select(.status == "run" and .name != "test") | .name]')
           else
-            gates=$(jq -nc --argjson r "$running" --argjson h "$heavy" '[$r[] | select(IN($h[]))]')
-            fold=$(jq -nc --argjson r "$running" --argjson h "$heavy" '[$r[] | select(IN($h[]) | not)]')
+            gates='[]'
           fi
           # test has its own OS matrix. When suite runs, it carries the test run on
           # runs_on, so the matrix keeps only the other systems, and they run plain
-          # test rather than the instrumented suite.
+          # test rather than the instrumented suite. On the self-hosted runner the
+          # all gates passed job also runs plain test on runs_on when the plan has
+          # it, so there too the matrix keeps only the other systems.
           suite=$(printf '%s\n' "$plan" | jq -r '[.[] | select(.status == "run" and .name == "suite")] | length > 0')
           test=$(printf '%s\n' "$plan" | jq -r '[.[] | select(.status == "run" and .name == "test")] | length > 0')
-          if [ "$suite" = true ]; then
+          if [ "$suite" = true ] || { [ "$HOSTED" != true ] && [ "$test" = true ]; }; then
             tests=$(jq -nc --argjson os "$TEST_OS" --arg on "$RUNS_ON" '[$os[] | select(. != $on)]')
           elif [ "$test" = true ]; then
             tests=$(jq -nc --argjson os "$TEST_OS" '$os')
@@ -104,7 +104,6 @@ jobs:
           fi
           {
             echo "gates=$gates"
-            echo "fold=$fold"
             echo "tests=$tests"
           } >> "$GITHUB_OUTPUT"
 
@@ -131,9 +130,9 @@ jobs:
           cache: ${{ startsWith(matrix.os, 'ubuntu-') || startsWith(matrix.os, 'macos-') || startsWith(matrix.os, 'windows-') }}
       - run: go tool lateregate test
 
-  # One job per gate, named for it, so a failure names itself in the checks
-  # list and the slow gates run beside each other: every gate on a hosted
-  # runner, the suite gates alone on a self-hosted one.
+  # One job per gate on a hosted runner, named for it, so a failure names
+  # itself in the checks list and the slow gates run beside each other. The
+  # probe gives this job no gate on the self-hosted runner.
   gate:
     name: ${{ matrix.gate }}
     needs: probe
@@ -201,74 +200,10 @@ jobs:
           # lectio's hit its quota holding 284 artifacts at the 90-day default.
           retention-days: 7
 
-  # On a self-hosted runner the gates that take seconds share this job, and
-  # the wiring check runs last in it. A job there is a turn on one of a few
-  # runner slots, and with one job per gate the queue was made of job setup
-  # rather than of checks. Each gate still runs whether another failed, has
-  # a group of its own in the log, and is named in an annotation if it fails.
-  fold:
-    name: static gates and wiring
-    needs: probe
-    if: ${{ !(startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-')) }}
-    runs-on: ${{ inputs.runs_on }}
-    env:
-      # -trimpath on a self-hosted runner: see the gate job.
-      GOFLAGS: ${{ !(startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-')) && '-trimpath' || '' }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: ${{ inputs.go_version }}
-          # The module cache is worth restoring on a hosted runner, which
-          # starts empty. A self-hosted runner keeps its own between jobs,
-          # and restoring a tarball over it fails on every file that exists.
-          cache: ${{ startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-') }}
-      # Enum checking resolves each configured project's TypeScript compiler.
-      # Prepare its committed lockfile before checking; Go gates need neither
-      # a JavaScript runtime nor a dependency install.
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        if: ${{ contains(fromJSON(needs.probe.outputs.fold), 'enum-typescript') }}
-        with:
-          node-version: "24"
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        if: ${{ contains(fromJSON(needs.probe.outputs.fold), 'enum-typescript') }}
-        with:
-          bun-version: "1.3.14"
-        # bun goes to $HOME/.bun/bin. Runner slots on one machine share a
-        # HOME, and a job executing bun while another slot extracts it
-        # fails with ETXTBSY, so each job installs into its own temp dir.
-        env:
-          HOME: ${{ runner.temp }}
-      - name: Prepare TypeScript enum projects
-        if: ${{ contains(fromJSON(needs.probe.outputs.fold), 'enum-typescript') }}
-        run: go tool lateregate enum-typescript-prepare
-      # Keep in step with test/lateregate_test.sh, which runs a copy of this
-      # loop against stub gates.
-      - name: Run the gates
-        env:
-          GATES: ${{ needs.probe.outputs.fold }}
-        run: |
-          set -uo pipefail
-          failed=""
-          for gate in $(printf '%s' "$GATES" | jq -r '.[]') contract; do
-            echo "::group::$gate"
-            if [ "$gate" = lint ]; then
-              # golangci-lint locks a file under TMPDIR for the whole machine; the
-              # runner process's own directory keeps two slots apart.
-              TMPDIR="$RUNNER_TEMP" go tool lateregate lint || failed="$failed $gate"
-            else
-              go tool lateregate "$gate" || failed="$failed $gate"
-            fi
-            echo "::endgroup::"
-          done
-          for gate in $failed; do
-            echo "::error title=$gate::go tool lateregate $gate failed; its output is in the $gate group above"
-          done
-          [ -z "$failed" ]
-
   # The wiring check: caller, hook, gitignore, pin, no hand-rolled gate
   # target. It runs whether or not a gate fails, because the two call for
-  # different work. On a self-hosted runner it runs at the end of fold.
+  # different work. On the self-hosted runner it runs last in the all gates
+  # passed job.
   contract:
     name: wiring is in shape
     if: ${{ startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-') }}
@@ -292,20 +227,144 @@ jobs:
   # breaks each time a pin adds or drops a gate; this job is always there
   # under one name. It runs whatever happened above and passes only when
   # every job it needs succeeded or was skipped because it did not apply.
-  # In a cancelled push run it is skipped instead: branch protection reads
-  # the pull request run, and a push run is cancelled when a newer push to
-  # the ref supersedes it through the caller's concurrency group, or when
-  # GitHub delivers one push twice. Running it there would take a runner
-  # slot to report the cancellation the run's own conclusion already holds.
+  #
+  # On the self-hosted runner it is also the whole bar. A job there is a turn
+  # on one of a few runner slots, and with every slot busy each job a run
+  # adds is one more wait in the queue: a probe, then gate jobs, then this
+  # check made three waits per push. So here this job reads the plan itself
+  # and runs every gate one after another, the wiring check last. Each gate
+  # runs whether another failed, has a group of its own in the log, a row in
+  # the step summary, and an annotation if it fails. Only a test_os that
+  # names another system brings back the probe and the test matrix, and this
+  # job then waits for them.
+  #
+  # A cancelled run cancels this job, except a pull request run on a hosted
+  # runner, which branch protection reads: there the job runs and fails. A
+  # push run is cancelled when a newer push to the ref supersedes it through
+  # the caller's concurrency group, or when GitHub delivers one push twice,
+  # and its conclusion already says so. On the self-hosted runner the job is
+  # the gates, and a cancelled one stops them and reports cancelled.
   passed:
     name: all gates passed
-    needs: [probe, test, gate, fold, contract]
-    if: ${{ github.event_name != 'push' || !cancelled() }}
+    needs: [probe, test, gate, contract]
+    if: ${{ !cancelled() || (github.event_name != 'push' && (startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-'))) }}
     runs-on: ${{ inputs.runs_on }}
+    env:
+      # true on a self-hosted runner, where this job runs the gates itself.
+      RUN_GATES: ${{ !(startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-')) }}
+      # -trimpath on a self-hosted runner: see the gate job.
+      GOFLAGS: ${{ !(startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-')) && '-trimpath' || '' }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: ${{ env.RUN_GATES == 'true' }}
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        if: ${{ env.RUN_GATES == 'true' }}
+        with:
+          go-version: ${{ inputs.go_version }}
+          # Only a self-hosted runner gets here, and it keeps its own module
+          # cache between jobs; restoring a tarball over it fails on every
+          # file that exists.
+          cache: false
+      # Keep in step with test/lateregate_test.sh, which unit-tests a copy of
+      # this shell against canned plans.
+      - name: List the running gates
+        id: plan
+        if: ${{ env.RUN_GATES == 'true' }}
+        run: |
+          set -euo pipefail
+          plan=$(go tool lateregate list -json)
+          printf '%s\n' "$plan" | jq -r '.[] | "\(.status)\t\(.name)\t\(.reason // "")\(.until // "" | if . == "" then "" else " until " + . end)\(.into // "" | if . == "" then "" else "into " + . end)"'
+          # Every running gate in plan order, test included: with no suite in
+          # the plan this job is the test run on runs_on, and the matrix keeps
+          # the other systems.
+          gates=$(printf '%s\n' "$plan" | jq -c '[.[] | select(.status == "run") | .name]')
+          echo "gates=$gates" >> "$GITHUB_OUTPUT"
+      # Enum checking resolves each configured project's TypeScript compiler.
+      # Prepare its committed lockfile before checking; Go gates need neither
+      # a JavaScript runtime nor a dependency install.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: ${{ contains(fromJSON(steps.plan.outputs.gates || '[]'), 'enum-typescript') }}
+        with:
+          node-version: "24"
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        if: ${{ contains(fromJSON(steps.plan.outputs.gates || '[]'), 'enum-typescript') }}
+        with:
+          bun-version: "1.3.14"
+        # bun goes to $HOME/.bun/bin. Runner slots on one machine share a
+        # HOME, and a job executing bun while another slot extracts it
+        # fails with ETXTBSY, so each job installs into its own temp dir.
+        env:
+          HOME: ${{ runner.temp }}
+      - name: Prepare TypeScript enum projects
+        id: prepare
+        if: ${{ contains(fromJSON(steps.plan.outputs.gates || '[]'), 'enum-typescript') }}
+        run: go tool lateregate enum-typescript-prepare
       # Keep in step with test/lateregate_test.sh, which runs a copy of this
-      # check against canned results.
+      # loop against stub gates. It runs after a failed TypeScript setup too,
+      # so the other gates still report; enum-typescript then fails unrun.
+      - name: Run the gates
+        id: gates
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' }}
+        env:
+          GATES: ${{ steps.plan.outputs.gates }}
+          ENUM_SETUP: ${{ steps.prepare.outcome }}
+        run: |
+          # A failed gate is caught where it runs and recorded, so the next one
+          # still runs and one push reports every failure.
+          set -euo pipefail
+          # An unreadable list would leave only the wiring check to run.
+          if [ -z "$GATES" ] || ! list=$(printf '%s' "$GATES" | jq -r 'if type == "array" then .[] else error("not a list") end'); then
+            echo "::error title=plan::cannot read the gate list '$GATES'"
+            exit 1
+          fi
+          summary() {
+            printf '%s\n' "$1" >> "$GITHUB_STEP_SUMMARY" || echo "::warning::cannot write the step summary"
+          }
+          summary "| gate | result | seconds |"
+          summary "| --- | --- | --- |"
+          failed=""
+          for gate in $list contract; do
+            echo "::group::$gate"
+            start=$SECONDS
+            status=0
+            if [ "$gate" = enum-typescript ] && [ "$ENUM_SETUP" != success ]; then
+              echo "Node, Bun or the project install ended '$ENUM_SETUP'; the steps above say why"
+              status=1
+            elif [ "$gate" = lint ]; then
+              # golangci-lint locks a file under TMPDIR for the whole machine; the
+              # runner process's own directory keeps two slots apart.
+              TMPDIR="$RUNNER_TEMP" go tool lateregate lint || status=$?
+            else
+              go tool lateregate "$gate" || status=$?
+            fi
+            echo "::endgroup::"
+            if [ "$status" -eq 0 ]; then
+              summary "| $gate | passed | $((SECONDS - start)) |"
+            else
+              summary "| $gate | **failed** | $((SECONDS - start)) |"
+              failed="$failed $gate"
+            fi
+          done
+          for gate in $failed; do
+            echo "::error title=$gate::go tool lateregate $gate failed; its output is in the $gate group of the Run the gates step"
+          done
+          [ -z "$failed" ]
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() && (contains(fromJSON(steps.plan.outputs.gates || '[]'), 'cover') || contains(fromJSON(steps.plan.outputs.gates || '[]'), 'suite')) }}
+        # Coverage remains a required gate; this report copy is optional.
+        continue-on-error: true
+        with:
+          name: coverage
+          path: coverage.out
+          if-no-files-found: warn
+          # 7 days, as in the gate job.
+          retention-days: 7
+      # Keep in step with test/lateregate_test.sh, which runs a copy of this
+      # check against canned results. It runs after a failed gate too, so a
+      # failed test matrix is named beside it; on a hosted runner it is the
+      # job's only step, and it runs in a cancelled pull request run to fail it.
       - name: Check every job's result
+        if: ${{ always() }}
         env:
           NEEDS: ${{ toJSON(needs) }}
         run: |

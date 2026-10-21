@@ -5,7 +5,8 @@
 # replays what another recorded. Every job of lateregate.yml that sets up Go
 # therefore sets GOFLAGS=-trimpath when its runner is not a hosted label, and
 # only then: a hosted runner starts with an empty cache and gains nothing. The
-# aggregate result job runs no Go and needs no flag.
+# all gates passed job sets up Go to run the gates on a self-hosted runner,
+# so it carries the flag too.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
