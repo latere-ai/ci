@@ -57,7 +57,7 @@ there is one working concrete instance to abstract from.
    (default `bun install && bun run build`), and bucket/CDN identifiers. Secrets
    for the frontend-bucket publish credentials from [[cdn-hosting-infra]].
 2. **Contract: build → sync → invalidate.**
-   - Build the frontend (vite-ssg / vite) to `dist/`.
+   - Build the frontend (vite, plus a prerender where the site has one) to `dist/`.
    - Sync `dist/` to `<bucket>/<prefix>/` with correct per-object cache headers:
      hashed assets `immutable`, route HTML short-TTL (matching the `spa.go`
      policy the pilot preserved).
