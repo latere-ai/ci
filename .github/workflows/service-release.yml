@@ -229,9 +229,11 @@ jobs:
       - name: Isolate Docker credentials
         run: echo "DOCKER_CONFIG=$RUNNER_TEMP/docker-config" >> "$GITHUB_ENV"
 
-      # vue-tsc registers .vue files only under real Node; under bun's node
-      # shim it checks none and reports nothing. Hosted runners ship Node,
-      # the self-hosted VM does not.
+      # The frontend build runs its tools (tsc, vite, prerender scripts)
+      # under real Node, the runtime they are built and tested for. Without
+      # it bun stands in a node shim, which is not Node: a type checker
+      # under it has checked no files and reported nothing. Hosted runners
+      # ship Node, the self-hosted VM does not.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         if: ${{ (inputs.build_mode == 'split' && inputs.has_frontend) || inputs.build_cli }}
         with:

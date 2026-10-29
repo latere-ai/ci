@@ -48,8 +48,8 @@ else
     fail "a setup-go step restores its cache unconditionally (setups=$setups gated=$gated)"
 fi
 
-# bun's node shim is not Node: vue-tsc under it checks zero .vue files and
-# says nothing. Every setup-bun is preceded by a real setup-node.
+# bun's node shim is not Node: a frontend tool under it can check nothing
+# and say nothing. Every setup-bun is preceded by a real setup-node.
 buns=$(grep -c 'uses: oven-sh/setup-bun' "$WORKFLOW")
 nodes=$(grep -c 'uses: actions/setup-node' "$WORKFLOW")
 if [ "$buns" -eq "$nodes" ]; then
