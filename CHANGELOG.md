@@ -8,7 +8,7 @@ Pushing a `v1.MAJOR.MINOR` tag also moves the `v1` tag every consumer pins.
 A section says what changed for whoever calls these pipelines, not what was
 committed: the commit log already holds that.
 
-## Unreleased
+## v1.26.0-rc1 - 2026-10-30
 
 ### Added
 
