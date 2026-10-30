@@ -44,13 +44,15 @@ assemble_body() {
 publish_tail() {
     set -euo pipefail
 
-    # CLI binaries (build_cli) are attached to the release.
-    assets=()
+    # The source and image SBOMs are attached to every release, and
+    # CLI binaries (build_cli) beside them.
+    assets=("$RUNNER_TEMP/sbom-source.cdx.json" "$RUNNER_TEMP/sbom-image.cdx.json")
     if [ "$BUILD_CLI" = "true" ]; then
         shopt -s nullglob
-        assets=(dist/*)
+        cli=(dist/*)
         shopt -u nullglob
-        [ ${#assets[@]} -gt 0 ] || { echo "build_cli set but dist/ is empty" >&2; exit 1; }
+        [ ${#cli[@]} -gt 0 ] || { echo "build_cli set but dist/ is empty" >&2; exit 1; }
+        assets+=("${cli[@]}")
     fi
 
     if gh release view "$TAG" >/dev/null 2>&1; then
@@ -73,6 +75,7 @@ test_edit_path_without_cli() {
         BUILD_CLI=false
         TAG=v1.2.3
         TITLE=svc
+        RUNNER_TEMP=/tmp/runner
         prerelease=""
         publish_tail
     ) || rc=$?
@@ -80,6 +83,43 @@ test_edit_path_without_cli() {
         pass "$name"
     else
         fail "$name (exit ${rc}, every stubbed gh call succeeded)"
+    fi
+}
+
+# Both SBOMs reach the release on the create path and on an edit re-run,
+# with or without CLI binaries, and the binaries come after them.
+test_sboms_are_attached() {
+    local name="both SBOMs are attached on create and edit, CLI binaries after them"
+    local dir rc=0
+    dir=$(mktemp -d)
+    (
+        cd "$dir" || exit 1
+        mkdir dist && touch dist/cli-linux-amd64
+        RUNNER_TEMP=/tmp/runner
+        TAG=v1.2.3
+        TITLE=svc
+        prerelease=""
+        sboms="/tmp/runner/sbom-source.cdx.json /tmp/runner/sbom-image.cdx.json"
+
+        # create path: gh release view fails, so the assets go to create.
+        gh() { [ "$1 $2" = "release view" ] && return 1; printf '%s\n' "$*" >> calls; }
+        BUILD_CLI=false publish_tail
+        grep -qxF "release create v1.2.3 --title svc v1.2.3 --notes-file body.md $sboms" calls || exit 1
+        rm calls
+        BUILD_CLI=true publish_tail
+        grep -qxF "release create v1.2.3 --title svc v1.2.3 --notes-file body.md $sboms dist/cli-linux-amd64" calls || exit 1
+        rm calls
+
+        # edit path: gh release view succeeds, so the assets go to upload.
+        gh() { [ "$1 $2" = "release view" ] && return 0; printf '%s\n' "$*" >> calls; }
+        BUILD_CLI=false publish_tail
+        grep -qxF "release upload v1.2.3 $sboms --clobber" calls || exit 1
+    ) || rc=$?
+    rm -rf "$dir"
+    if [ "$rc" -eq 0 ]; then
+        pass "$name"
+    else
+        fail "$name"
     fi
 }
 
@@ -120,6 +160,19 @@ assert_body_line_matches_workflows() {
     fi
 }
 
+assert_assets_line_matches_workflow() {
+    local name="service-release.yml carries the tested assets line and the SBOM outputs it names"
+    local wf="$REPO_ROOT/.github/workflows/service-release.yml"
+    local line='assets=("$RUNNER_TEMP/sbom-source.cdx.json" "$RUNNER_TEMP/sbom-image.cdx.json")'
+    if grep -qF "$line" "$wf" \
+        && grep -qF 'output-file: ${{ runner.temp }}/sbom-source.cdx.json' "$wf" \
+        && grep -qF 'output-file: ${{ runner.temp }}/sbom-image.cdx.json' "$wf"; then
+        pass "$name"
+    else
+        fail "$name"
+    fi
+}
+
 assert_no_bare_upload_conditional() {
     local name="workflows carry no bare '] && gh release upload' conditional"
     local hits
@@ -133,8 +186,10 @@ assert_no_bare_upload_conditional() {
 }
 
 test_edit_path_without_cli
+test_sboms_are_attached
 test_body_is_section_then_evidence
 assert_body_line_matches_workflows
+assert_assets_line_matches_workflow
 assert_no_bare_upload_conditional
 
 if [ "$FAILURES" -gt 0 ]; then

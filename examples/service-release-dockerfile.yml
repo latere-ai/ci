@@ -7,10 +7,14 @@ on:
   push:
     tags: ['v*']
 
+# The pipeline signs the image with this run's OIDC identity and, in a
+# public repository, attests it, so the caller grants both besides write.
 permissions:
   contents: write
   packages: write
   actions: read
+  id-token: write
+  attestations: write
 
 jobs:
   release:

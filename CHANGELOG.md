@@ -10,7 +10,24 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Added
+
+- `service-release.yml` signs the image it pushes, by digest and before
+  the deploy, with keyless cosign: the certificate names the workflow and
+  the caller's repository, tag and commit, and is recorded in the public
+  Sigstore log. Every release carries two CycloneDX 1.6 SBOMs as assets,
+  `sbom-source.cdx.json` (what the checkout's lockfiles pin, development
+  packages included) and `sbom-image.cdx.json` (what the image holds). A
+  public caller also gets GitHub attestations of the image's provenance
+  and SBOM in the registry. New inputs `cosign_version` (`v3.0.6`) and
+  `syft_version` (`v1.51.1`) pin the two tools.
+
 ### Changed
+
+- Callers of `service-release.yml` must grant `id-token: write` and
+  `attestations: write` in their release workflow, beside `contents`,
+  `packages` and `actions`. A caller that grants neither fails at startup,
+  before the build. The examples show the block.
 
 - On a self-hosted runner, `lateregate.yml` runs in one job, `all gates
   passed`: it reads the plan, runs every gate one after another in plan

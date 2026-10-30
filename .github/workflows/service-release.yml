@@ -11,9 +11,10 @@ name: service-release
 #               url: https://platform.latere.ai, title: Latere Platform }
 #       secrets: inherit
 #
-# Flow (one job): build the frontend, the binary and the image -> deploy ->
-# smoke -> release. The release publishes only after the live smoke proves the
-# exact build is serving. See this repo's README for the consumer conventions.
+# Flow (one job): build the frontend, the binary and the image -> sign the
+# image and record its SBOMs -> deploy -> smoke -> release. The release
+# publishes only after the live smoke proves the exact build is serving. See
+# this repo's README for the consumer conventions.
 
 on:
   workflow_call:
@@ -63,6 +64,16 @@ on:
         required: false
         type: string
         default: "2.100.0"
+      cosign_version:
+        description: "cosign release the image is signed with, installed and verified by sigstore/cosign-installer. Explicit so a run cannot pick up a cosign build published after this workflow was reviewed."
+        required: false
+        type: string
+        default: "v3.0.6"
+      syft_version:
+        description: "syft release that writes the source and image SBOMs, installed by anchore/sbom-action through the installer at that release's tag. Explicit for the same reason as cosign_version."
+        required: false
+        type: string
+        default: "v1.51.1"
       build_mode:
         description: "split = build frontend + Go binary in CI, then Dockerfile.ci packages the prebuilt binary (asset-hash pinned smoke). dockerfile = one Dockerfile builds everything (no asset pin; smoke proves liveness only)."
         required: false
@@ -161,6 +172,13 @@ permissions:
   contents: write
   packages: write
   actions: read
+  # Keyless signing: cosign trades this run's OIDC token for a short-lived
+  # certificate that names this workflow and the caller's repository and
+  # tag. attestations is used only in a public repository (the attest steps
+  # below). A caller that grants less fails before the job starts, so the
+  # caller's release.yml grants both.
+  id-token: write
+  attestations: write
 
 jobs:
   release:
@@ -228,6 +246,24 @@ jobs:
 
       - name: Isolate Docker credentials
         run: echo "DOCKER_CONFIG=$RUNNER_TEMP/docker-config" >> "$GITHUB_ENV"
+
+      # Taken from the checkout before anything is installed, so it lists
+      # what the lockfiles (go.sum, bun.lock, uv.lock and the like) pin, not
+      # what an install left on disk. Development packages are included:
+      # they run in this job, which later holds the deploy credential. The
+      # release carries the file as sbom-source.cdx.json. CycloneDX 1.6
+      # rather than syft's newest, for readers that validate the version.
+      - name: SBOM of the source
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+        with:
+          path: .
+          format: cyclonedx-json@1.6
+          output-file: ${{ runner.temp }}/sbom-source.cdx.json
+          syft-version: ${{ inputs.syft_version }}
+          upload-artifact: false
+          upload-release-assets: false
+        env:
+          SYFT_JAVASCRIPT_INCLUDE_DEV_DEPENDENCIES: "true"
 
       # The frontend build runs its tools (tsc, vite, prerender scripts)
       # under real Node, the runtime they are built and tested for. Without
@@ -370,6 +406,7 @@ jobs:
             type=raw,value=latest,enable=${{ steps.tag.outputs.stable }}
 
       - name: Build and push
+        id: build
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
@@ -389,6 +426,58 @@ jobs:
         # other upload here rather than leave one unbounded uploader behind.
         env:
           DOCKER_BUILD_RECORD_RETENTION_DAYS: 7
+
+      # Signed by digest before anything deploys, so every image this
+      # pipeline puts in production carries a signature. The signature and
+      # its certificate (this workflow, the caller's repository, tag and
+      # commit) are recorded in the public Sigstore log. The SBOMs are not
+      # attested in a private repository: an attestation's body goes into
+      # that log too, and would publish the service's dependency list.
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: ${{ inputs.cosign_version }}
+          # Runner slots on one machine share a HOME (see setup-bun above),
+          # so each job installs into its own temp dir.
+          install-dir: ${{ runner.temp }}/cosign
+
+      - name: Sign the image
+        env:
+          IMAGE: ${{ inputs.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+
+      # What the image holds: the Go modules compiled into the binary and
+      # the base image's packages. The release carries it as
+      # sbom-image.cdx.json.
+      - name: SBOM of the image
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+        with:
+          image: ${{ inputs.image }}@${{ steps.build.outputs.digest }}
+          format: cyclonedx-json@1.6
+          output-file: ${{ runner.temp }}/sbom-image.cdx.json
+          syft-version: ${{ inputs.syft_version }}
+          upload-artifact: false
+          upload-release-assets: false
+
+      # GitHub's artifact attestations need GitHub Enterprise Cloud in a
+      # private repository, so only a public caller gets them. A private
+      # caller has the signature above and the SBOMs on its release.
+      - name: Attest the image's SBOM
+        if: ${{ !github.event.repository.private }}
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-name: ${{ inputs.image }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          sbom-path: ${{ runner.temp }}/sbom-image.cdx.json
+          push-to-registry: true
+
+      - name: Attest the image's provenance
+        if: ${{ !github.event.repository.private }}
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ inputs.image }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
 
       # Hosted runners ship kubectl; the self-hosted VM does not. The pinned
       # release is fetched with its published sha256 into a directory that
@@ -638,13 +727,15 @@ jobs:
             prerelease="--prerelease"
           fi
 
-          # CLI binaries (build_cli) are attached to the release.
-          assets=()
+          # The source and image SBOMs are attached to every release, and
+          # CLI binaries (build_cli) beside them.
+          assets=("$RUNNER_TEMP/sbom-source.cdx.json" "$RUNNER_TEMP/sbom-image.cdx.json")
           if [ "$BUILD_CLI" = "true" ]; then
             shopt -s nullglob
-            assets=(dist/*)
+            cli=(dist/*)
             shopt -u nullglob
-            [ ${#assets[@]} -gt 0 ] || { echo "build_cli set but dist/ is empty" >&2; exit 1; }
+            [ ${#cli[@]} -gt 0 ] || { echo "build_cli set but dist/ is empty" >&2; exit 1; }
+            assets+=("${cli[@]}")
           fi
 
           # Keep in step with test/publish_release_test.sh, which unit-tests

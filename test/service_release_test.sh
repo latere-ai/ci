@@ -115,7 +115,7 @@ fi
 # published last, after the smoke and any CLI build.
 prev=0
 order_ok=1
-for step in 'name: Build and push' 'name: Write the kubeconfig' 'name: Apply manifests' 'name: Roll new image' 'name: After the roll' 'name: Drop the kubeconfig' 'name: Smoke production release' 'name: Build CLI binaries' 'name: Publish release with evidence'; do
+for step in 'name: SBOM of the source' 'name: Install' 'name: Build and push' 'name: Sign the image' 'name: SBOM of the image' 'name: Write the kubeconfig' 'name: Apply manifests' 'name: Roll new image' 'name: After the roll' 'name: Drop the kubeconfig' 'name: Smoke production release' 'name: Build CLI binaries' 'name: Publish release with evidence'; do
     line=$(grep -nF "$step" "$WORKFLOW" | head -1 | cut -d: -f1)
     if [ -z "$line" ] || [ "$line" -le "$prev" ]; then
         fail "$step is missing or out of order"
@@ -123,7 +123,57 @@ for step in 'name: Build and push' 'name: Write the kubeconfig' 'name: Apply man
     fi
     prev=${line:-$prev}
 done
-[ "$order_ok" -eq 1 ] && pass "build, deploy, smoke, CLI build and publish run in order"
+[ "$order_ok" -eq 1 ] && pass "source SBOM, build, signing, deploy, smoke, CLI build and publish run in order"
+
+# The image is signed by the digest the push produced, with the pinned
+# cosign, and the job's token can mint the OIDC identity keyless signing
+# trades for a certificate. The workflow-level block is the job's, since
+# the job sets none of its own.
+if grep -A4 'name: Sign the image' "$WORKFLOW" | grep -qF 'DIGEST: ${{ steps.build.outputs.digest }}' \
+    && grep -A4 'name: Sign the image' "$WORKFLOW" | grep -qF 'cosign sign --yes "${IMAGE}@${DIGEST}"' \
+    && grep -A2 'sigstore/cosign-installer@' "$WORKFLOW" | grep -qF 'cosign-release: ${{ inputs.cosign_version }}'; then
+    pass "the image is signed by its pushed digest with the pinned cosign"
+else
+    fail "the signing step does not sign the pushed digest with inputs.cosign_version"
+fi
+perms=$(sed -n '/^permissions:/,/^jobs:/p' "$WORKFLOW")
+if printf '%s\n' "$perms" | grep -qx '  id-token: write' && printf '%s\n' "$perms" | grep -qx '  attestations: write'; then
+    pass "the job may mint an OIDC token and write attestations"
+else
+    fail "id-token or attestations write is missing from the workflow permissions"
+fi
+
+# Every SBOM step runs the pinned syft and keeps its file on the runner for
+# the release, rather than uploading a run artifact of its own.
+sboms=$(grep -cF 'uses: anchore/sbom-action@' "$WORKFLOW")
+pinned=$(grep -A8 'uses: anchore/sbom-action@' "$WORKFLOW" | grep -cF 'syft-version: ${{ inputs.syft_version }}')
+quiet=$(grep -A8 'uses: anchore/sbom-action@' "$WORKFLOW" | grep -cF 'upload-artifact: false')
+if [ "$sboms" -eq 2 ] && [ "$pinned" -eq 2 ] && [ "$quiet" -eq 2 ]; then
+    pass "both SBOM steps run inputs.syft_version and upload no artifact"
+else
+    fail "an SBOM step is missing, unpinned or uploads an artifact (steps=$sboms pinned=$pinned quiet=$quiet)"
+fi
+
+# GitHub's attestations need Enterprise Cloud in a private repository, and
+# an attestation's body goes into the public Sigstore log, so both attest
+# steps run for a public caller only.
+attests=$(grep -cE 'uses: actions/attest-(sbom|build-provenance)@' "$WORKFLOW")
+gated=$(grep -B1 -E 'uses: actions/attest-(sbom|build-provenance)@' "$WORKFLOW" | grep -cF 'if: ${{ !github.event.repository.private }}')
+if [ "$attests" -eq 2 ] && [ "$gated" -eq 2 ]; then
+    pass "attestations run only for a public caller"
+else
+    fail "an attest step runs for a private caller (attests=$attests gated=$gated)"
+fi
+
+# A caller copying an example must grant what the pipeline asks for, or
+# the run fails before the job starts.
+for example in "$REPO_ROOT"/examples/service-release*.yml; do
+    if grep -qx '  id-token: write' "$example" && grep -qx '  attestations: write' "$example"; then
+        pass "$(basename "$example") grants id-token and attestations write"
+    else
+        fail "$(basename "$example") does not grant id-token and attestations write"
+    fi
+done
 
 # The production environment holds the whole job, so an approval it
 # requires comes before anything is built or deployed.

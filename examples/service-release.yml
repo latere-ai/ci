@@ -7,13 +7,16 @@ on:
   push:
     tags: ['v*']
 
-# Required: the pipeline pushes the image and creates the release. A reusable
-# workflow cannot exceed the caller's token permissions, and the org defaults
-# to read-only, so the calling job must grant write here.
+# Required: the pipeline pushes the image, signs it with this run's OIDC
+# identity, attests it in a public repository, and creates the release. A
+# reusable workflow cannot exceed the caller's token permissions, and the org
+# defaults to read-only, so the calling job must grant these here.
 permissions:
   contents: write
   packages: write
   actions: read
+  id-token: write
+  attestations: write
 
 jobs:
   release:

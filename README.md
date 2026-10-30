@@ -308,6 +308,8 @@ permissions:
   contents: write
   packages: write
   actions: read
+  id-token: write
+  attestations: write
 jobs:
   release:
     uses: latere-ai/ci/.github/workflows/service-release.yml@v1
@@ -325,18 +327,23 @@ jobs:
 The `permissions` block is mandatory: a reusable workflow's token cannot
 exceed the calling job's, and the organization defaults to read-only, so
 without it the run fails at startup, with no logs, when the pipeline
-pushes the image or creates the release.
+pushes the image or creates the release. `id-token: write` lets the
+pipeline sign the image with the run's OIDC identity, and
+`attestations: write` lets it attest the image in a public repository; a
+caller that grants neither fails at startup the same way.
 
 The run is one job, so on a busy self-hosted runner a release waits for
 a slot once rather than before every stage. Its steps run in order, and a
 failed step skips the rest. The build pushes the image; in `split` mode it
 first builds the frontend (with a typecheck) and the Go binary (after
-`go vet`) on the runner. The deploy applies `deploy/prod/`, rolls the
+`go vet`) on the runner. The pushed image is then signed and its SBOM
+recorded; see [Signatures and SBOMs](#signatures-and-sboms). The deploy
+applies `deploy/prod/`, rolls the
 Deployment to the new image, runs `after_roll` when it is set, and drops
 the kubeconfig. The smoke runs the repository's smoke script against the
 live URL. When `build_cli` is set, command-line binaries build next. The
-last step publishes the GitHub release with the changelog section and the
-smoke evidence. The job runs in the `production` environment, so an
+last step publishes the GitHub release with the changelog section, the
+smoke evidence and the two SBOMs. The job runs in the `production` environment, so an
 approval that environment requires comes before the build. The pipeline
 does not run the test suite: the per-push gate on the tagged commit is the
 verification, and `lateregate release` refuses to cut a tag while CI is
@@ -386,6 +393,7 @@ pipeline can `kubectl set image` without reading the manifests.
 | `build_cli`, `cli_build_cmd` | `false`, empty | also build command-line binaries (the command writes them under `dist/`) and attach them to the release |
 | `go_version`, `bun_version` | `1.27`, `1.3.14` | toolchains |
 | `kubectl_version`, `gh_version` | `1.35.1`, `2.100.0` | fetched, checksum-verified, when the runner has none |
+| `cosign_version`, `syft_version` | `v3.0.6`, `v1.51.1` | the image signer and the SBOM generator |
 | `lateregate_version` | `v0.29.0` | the `ci-gate` release whose `release-notes` reads the changelog |
 | `runs_on` | the [runner policy](#runners) | the runner label for the job |
 
@@ -422,6 +430,37 @@ Live means this exact build is serving, not merely that something returns
 bundle CI just built, and reads `/version` to compare the served
 `version` with the tag. The release is published only after that smoke
 passes.
+
+### Signatures and SBOMs
+
+The image is signed by digest right after the push, before anything
+deploys. Signing is keyless: cosign trades the run's GitHub OIDC token for
+a short-lived certificate that names this workflow and the caller's
+repository, tag and commit, and stores the signature in the registry
+beside the image. The certificate and the signature are also recorded in
+the public Sigstore transparency log, so a private repository's name and
+its release tags become public there; its code and its dependency list do
+not. To check an image:
+
+```sh
+cosign verify ghcr.io/latere-ai/platformd@sha256:<digest> \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp '^https://github\.com/latere-ai/ci/\.github/workflows/service-release\.yml@' \
+  --certificate-github-workflow-repository latere-ai/platform
+```
+
+Every release carries two CycloneDX 1.6 SBOMs as assets.
+`sbom-source.cdx.json` lists what the lockfiles in the checkout pin,
+development packages included, since they run in the job that holds the
+deploy credential. `sbom-image.cdx.json` lists what the image holds: the
+Go modules compiled into the binary and the base image's packages.
+
+A public caller also gets GitHub artifact attestations of the image's
+provenance and SBOM, pushed to the registry and checked with
+`gh attestation verify oci://<image>@<digest> -R latere-ai/<repo>`. A
+private caller does not: GitHub offers artifact attestations in private
+repositories only on Enterprise Cloud, and an SBOM attested through the
+public log would publish the dependency list.
 
 ### Deploy credential
 
@@ -686,8 +725,8 @@ These workflows run in your repository with `contents: write`,
 mutable, so whoever controls the upstream repository could repoint it and
 run new code with that access in every caller at once. A SHA cannot be
 repointed. For the same reason no step fetches a tool at `latest`: Bun,
-GoReleaser, kubectl, gh and the changelog reader are explicit inputs with
-pinned defaults, and the TypeScript enum gate pins Bun in
+GoReleaser, kubectl, gh, cosign, syft and the changelog reader are
+explicit inputs with pinned defaults, and the TypeScript enum gate pins Bun in
 `lateregate.yml`. The one exception is the release `ci-gate-bump.yml`
 exists to try, the repository's own gate: it is resolved to an exact
 version, verified against the Go checksum database, run with no token in
