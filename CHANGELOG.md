@@ -8,6 +8,17 @@ Pushing a `v1.MAJOR.MINOR` tag also moves the `v1` tag every consumer pins.
 A section says what changed for whoever calls these pipelines, not what was
 committed: the commit log already holds that.
 
+## Unreleased
+
+### Fixed
+
+- `service-release.yml` refuses a tag whose commit is not on the
+  repository's default branch, before anything is built or pushed. A tag
+  pushed from a side branch, or one that went out while its release's
+  push to the branch was rejected, used to build and deploy code the
+  branch never had. The run now fails naming the tag and the branch;
+  delete the tag, land the change on the branch, and tag a commit there.
+
 ## v1.26.0 - 2026-10-31
 
 ### Added
