@@ -349,9 +349,12 @@ does not run the test suite: the per-push gate on the tagged commit is the
 verification, and `lateregate release` refuses to cut a tag while CI is
 red.
 
-The first step refuses a tag once a newer `vX.Y.Z` tag exists. A re-run
-repeats the build and the deploy, so re-running an older release would
-push it as `latest` and roll production back to it.
+The first step refuses a tag whose commit is not on the repository's
+default branch, so a tag pushed from a side branch, or one whose branch
+push was rejected while the tag went out, builds and deploys nothing. The
+next refuses a tag once a newer `vX.Y.Z` tag exists. A re-run repeats the
+build and the deploy, so re-running an older release would push it as
+`latest` and roll production back to it.
 
 ### What the repository provides
 

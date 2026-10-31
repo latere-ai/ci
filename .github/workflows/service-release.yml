@@ -200,6 +200,43 @@ jobs:
           # The CLI build may read the tag history; the rest needs one commit.
           fetch-depth: ${{ inputs.build_cli && '0' || '1' }}
 
+      - name: Refuse a tag that is not on the default branch
+        # A tag releases what the default branch holds. A tag on a commit off
+        # it would build and deploy code the branch never had: a release cut
+        # whose branch push was rejected while its tag still went out, or a
+        # tag pushed from a side branch. The run stops here, before anything
+        # is built or pushed. The checkout above is usually one commit deep,
+        # and that needs no deepening: a fetch into a shallow clone brings
+        # the branch down to the tag's commit when the tag is on it, and the
+        # whole branch when it is not, which is all the ancestry check reads.
+        env:
+          TAG: ${{ github.ref_name }}
+          BRANCH: ${{ github.event.repository.default_branch || 'main' }}
+        run: |
+          set -euo pipefail
+          # Fails unless HEAD, the commit the steps below build, is reachable
+          # from origin's branch $1. Keep in step with
+          # test/tag_on_branch_test.sh, which runs this function from this
+          # file against real clones.
+          on_branch() {
+            local branch=$1 rc=0
+            if ! git fetch --no-tags --quiet origin "+refs/heads/$branch:refs/remotes/origin/$branch"; then
+              echo "::error::cannot fetch $branch to check that $TAG is on it, so nothing was built or deployed"
+              return 1
+            fi
+            git merge-base --is-ancestor HEAD "refs/remotes/origin/$branch" || rc=$?
+            if [ "$rc" -eq 1 ]; then
+              echo "::error::$TAG is not on $branch: its commit $(git rev-parse --short HEAD) is not reachable from origin/$branch, so nothing was built or deployed. Delete the tag with git push origin :refs/tags/$TAG, land the change on $branch, and tag a commit there."
+              return 1
+            fi
+            if [ "$rc" -ne 0 ]; then
+              echo "::error::cannot tell whether $TAG is on $branch: git merge-base exited $rc, so nothing was built or deployed"
+              return 1
+            fi
+          }
+          on_branch "$BRANCH"
+          echo "$TAG is on $BRANCH"
+
       - name: Refuse to roll production back
         # A re-run repeats the whole release, the build and the deploy
         # included. Once a newer version is tagged, re-running this one would
