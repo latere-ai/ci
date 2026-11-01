@@ -39,7 +39,7 @@ on:
         description: "golangci-lint version. Explicit rather than `latest` so a run cannot pick up a build published after this workflow was reviewed."
         required: false
         type: string
-        default: "v2.13.1"
+        default: "v2.15.0"
       test_os:
         description: "JSON array of runners for the test matrix. Empty means the runner runs_on resolves to: every service deploys on Linux, and macOS bills at ten times the Linux rate. A repository with darwin build tags or a macOS artifact adds macos-latest here."
         required: false
