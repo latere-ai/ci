@@ -335,19 +335,27 @@ actionlint 1.7.12 does not know the two properties yet, so
    `sign-image`.
 6. ci `v1.28.0` once two services released on the prerelease.
 
-Each service's `image.images` entry, from the job it replaces. Every runtime
-base but origo's is distroless, so only origo declares a shell. An image
-whose verify job today only builds and checks its version starts with its
-own defaults at adoption, or names in `skip_start` what it needs first.
+Each service's `image.images` entry, as adopted. Every runtime base is
+distroless, so none declares a shell.
 
-| Service | Version check | Cap | Start | Replaces |
-|---|---|---|---|---|
-| pons | `version`, `ponsd ` | 40 MiB | `serve`; `PONS_PUBLIC_URL`, `PONS_OIDC_ISSUERS`; `/livez` on 8080 | the whole `image` job |
-| lectio | `version`, `lectiod ` | 60 MiB | `LECTIO_DEV=true`; `/v1/openapi.yaml` on 8080 | the whole `image` job |
-| sermo | `-version`, `v0.0.0-candidate`, with `build_args: {VERSION: v0.0.0-candidate}` | 40 MiB | `SERMO_OIDC_ISSUERS`; `/livez` on 8080, `wait_seconds: 30` | the whole `image` job |
-| examen | `version`, `examend ` | 40 MiB | `skip_start`: migrate needs Postgres | build, version, size and shell; the migrate and start stay in its job |
-| lux, cella, topos, arca, limen | `-version`, `<binary> ` | none today | measured at adoption | the whole `image` job |
-| origo | as its `build` job checks | none today | measured at adoption; `allow_shell`: git runs hooks through `/bin/sh` | the image steps of `build` |
+| Service | Version check | Cap | Start |
+|---|---|---|---|
+| pons | `version`, `ponsd ` | 40 MiB | `serve`, an issuer never asked, `/livez` |
+| lectio | `version`, `lectiod ` | 60 MiB | `LECTIO_DEV=true`, `/v1/openapi.yaml` |
+| sermo | `-version`, the stamped `v0.0.0-candidate` | 40 MiB | an issuer never asked, `/livez`, 30 seconds |
+| lux | `-version`, `luxd ` | none | `serve` in memory, an issuer never asked, `/livez`, 30 seconds |
+| arca | `-version`, `arcad ` | none | addresses nothing answers, opened lazily, `/livez` |
+| platform | `version`, `platformd ` | none | no environment, `/healthz` |
+| examen | `version`, `examend ` | 40 MiB | `skip_start`: migrate needs Postgres; its `image` job keeps that start |
+| topos | `-version`, `toposd ` | none | `skip_start`: a writable data directory or Postgres, a model gateway and an identity key |
+| cella | `-version`, `cellad ` | none | `skip_start`: an issuer it can reach |
+| limen | `-version`, `limend ` | none | `skip_start`: every route requires a bearer token, so no start answers 2xx |
+
+Three jobs stay on purpose. origo's `build` saves the images its end-to-end
+jobs load and checks the git version inside the image. lectio's `deploy` runs
+tests over the rendered tree, which hold more than the render. auth's
+`docker.yml` publishes branch images for continuous delivery. auth names its
+package in `frontend_browser_package`, since its tests drive Chromium.
 
 ## Acceptance criteria
 
