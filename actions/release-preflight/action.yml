@@ -1,0 +1,34 @@
+name: release-preflight
+description: Check a release tag before anything is built, and give the namespace and build identity the build stamps.
+inputs:
+  namespace:
+    description: "Image namespace. Empty takes the repository owner, lowered, so a fork's tag publishes under the fork."
+    required: false
+    default: ""
+  lateregate_version:
+    description: "ci-gate version whose note reader checks the CHANGELOG.md section. Empty takes the version in actions/lib/versions.sh."
+    required: false
+    default: ""
+outputs:
+  owner:
+    description: "The image namespace, lowercase."
+    value: ${{ steps.check.outputs.owner }}
+  commit:
+    description: "The tagged commit, short."
+    value: ${{ steps.check.outputs.commit }}
+  date:
+    description: "The tagged commit's date, UTC, as 2006-01-02T15:04:05Z."
+    value: ${{ steps.check.outputs.date }}
+  prerelease:
+    description: "true when the tag's version core carries a hyphen."
+    value: ${{ steps.check.outputs.prerelease }}
+runs:
+  using: composite
+  steps:
+    - id: check
+      shell: bash
+      env:
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
+        NAMESPACE_OVERRIDE: ${{ inputs.namespace }}
+        LATEREGATE_VERSION: ${{ inputs.lateregate_version }}
+      run: bash "$GITHUB_ACTION_PATH/run.sh"
