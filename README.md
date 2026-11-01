@@ -22,7 +22,6 @@ repository, by convention rather than through a long list of inputs.
 | --- | --- | --- | --- |
 | [`lateregate.yml`](.github/workflows/lateregate.yml) | every push and pull request | a Go repository | the plan, the gates (a job each on a hosted runner, one job on the self-hosted one), the test matrix, the wiring check |
 | [`ci-gate-bump.yml`](.github/workflows/ci-gate-bump.yml) | once a day | a Go repository that pins `latere.ai/x/ci-gate` | move the pin to the latest release when the bar passes on it, or open an issue |
-| [`go-verify.yml`](.github/workflows/go-verify.yml) | every push and pull request | a Go repository that has not moved to `lateregate.yml` | Makefile targets, probed |
 | [`service-release.yml`](.github/workflows/service-release.yml) | a `v*` tag | a Kubernetes service | build the image, deploy, smoke the live surface, publish the release |
 | [`image-build.yml`](.github/workflows/image-build.yml), [`image-publish.yml`](.github/workflows/image-publish.yml), [`release-verify.yml`](.github/workflows/release-verify.yml) | a `v*` tag | a service that publishes signed images and lets others install them | build and sign the images by digest; then, after the repository's own jobs, tag them and publish the release; then verify what was published |
 | [`cli-release.yml`](.github/workflows/cli-release.yml) | a `v*` tag | a command-line tool | the tagged commit's per-push run passed, tests on the extra runners in `test_os`, GoReleaser |
@@ -255,18 +254,6 @@ process's own `TMPDIR`, and on a self-hosted label every gate builds with
 `GOFLAGS=-trimpath`. The TypeScript enum gate gets Node and Bun as in
 `lateregate.yml`. No credential stays in the checkout while the new release
 and the repository's tests run; only the push step hands git the token.
-
-## The previous per-push gate: `go-verify.yml`
-
-`go-verify.yml` probes the repository's `Makefile` with `make -np` and
-runs the targets it finds. `fmt-check`, `test` and `lint-modernize` are
-required; `test-hermetic`, `test-race`, `cover`, `spec-lint`, `dist`,
-`validate`, `lint-config` and `license` run when present. A missing
-optional target skips its job, which is the gap `lateregate.yml` closes.
-It takes `go_version`, `test_os`, `runs_on`, `golangci_version` (default
-`v2.13.1`) and `run_lint` (default `true`). It stays until the last
-repository that calls it has moved; see
-[`examples/go-verify.yml`](examples/go-verify.yml) for the caller.
 
 ## A tag is a release, and a release has notes
 

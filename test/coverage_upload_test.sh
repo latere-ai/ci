@@ -22,7 +22,7 @@ steps_for() {
     ' "$1"
 }
 
-for name in go-verify lateregate; do
+for name in lateregate; do
     workflow="$REPO_ROOT/.github/workflows/$name.yml"
     uploads=$(steps_for "$workflow" 'uses: actions/upload-artifact@')
     total=$(printf '%s\n' "$uploads" | grep -c 'uses: actions/upload-artifact@' || true)
@@ -31,14 +31,10 @@ for name in go-verify lateregate; do
         echo "FAIL: $name makes coverage depend on artifact storage quota ($optional of $total uploads optional)"
         FAILURES=$((FAILURES + 1))
     fi
-    if [ "$name" = go-verify ]; then
-        commands='run: make cover'
-    else
-        # A hosted runner runs cover or suite in a gate job of its own; the
-        # self-hosted runner runs it in the all gates passed job's loop.
-        commands='run: go -C "$GATE_MODULE" tool lateregate ${{ matrix.gate }} -C "$GITHUB_WORKSPACE"
+    # A hosted runner runs cover or suite in a gate job of its own; the
+    # self-hosted runner runs it in the all gates passed job's loop.
+    commands='run: go -C "$GATE_MODULE" tool lateregate ${{ matrix.gate }} -C "$GITHUB_WORKSPACE"
 - name: Run the gates'
-    fi
     while IFS= read -r command; do
         gate=$(step_for "$workflow" "$command")
         if [ -z "$gate" ] || printf '%s\n' "$gate" | grep -q 'continue-on-error: true' \

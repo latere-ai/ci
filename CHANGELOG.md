@@ -8,7 +8,7 @@ Pushing a `v1.MAJOR.MINOR` tag also moves the `v1` tag every consumer pins.
 A section says what changed for whoever calls these pipelines, not what was
 committed: the commit log already holds that.
 
-## v1.28.0-rc1 - 2026-11-01
+## v1.28.0 - 2026-11-01
 
 ### Added
 
@@ -68,6 +68,13 @@ committed: the commit log already holds that.
   repository that names its Bun packages under `frontend.projects` (from
   ci-gate v0.62.0) gets them installed, type-checked, tested and built on
   every push without a job of its own.
+
+### Removed
+
+- `go-verify.yml`, its example and its tests. Its one caller,
+  managed-agents, pins it by commit and keeps running that copy. A
+  repository still on it moves to `lateregate.yml`; see the README, "The
+  per-push gate".
 
 ## v1.27.0 - 2026-10-31
 

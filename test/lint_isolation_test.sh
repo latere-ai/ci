@@ -16,12 +16,6 @@ step_for() {
 
 isolated() { printf '%s\n' "$1" | grep -Fq 'TMPDIR: ${{ runner.temp }}'; }
 
-step=$(step_for "$REPO_ROOT/.github/workflows/go-verify.yml" 'uses: golangci/golangci-lint-action@')
-if ! isolated "$step"; then
-    echo "FAIL: go-verify shares the linter lock between runner slots"
-    exit 1
-fi
-
 workflow="$REPO_ROOT/.github/workflows/lateregate.yml"
 lint=$(step_for "$workflow" 'run: go -C "$GATE_MODULE" tool lateregate lint -C "$GITHUB_WORKSPACE"')
 if ! isolated "$lint" || ! printf '%s\n' "$lint" | grep -Fq "if: \${{ matrix.gate == 'lint' }}"; then

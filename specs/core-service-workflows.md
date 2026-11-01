@@ -270,13 +270,15 @@ The same blocks take the repeated parts out of ci's own workflows:
   (latere-cli's is `ci.yaml`); `test_os` now lists only the extra runners
   the release tests on, and `golangci/golangci-lint-action` left ci's
   pins. The caller grants `actions: read`.
-- **`go-verify.yml`** has one caller, managed-agents, which pins a commit
-  rather than `@v1`, so removing the file breaks nothing today. It stays
-  until managed-agents moves: the port keeps ci-gate in a nested module
-  (`internal/gate`) so its root module depends on nothing, and
-  `lateregate.yml` runs `go tool lateregate` at the root. Moving needs a
-  module-directory input on `lateregate.yml`; tracked here as the open
-  item below.
+- **`go-verify.yml`** is removed with its example and tests. Its one
+  caller, managed-agents, pins it by commit, so that copy keeps running.
+  The port keeps ci-gate in a nested module (`internal/gate`) so its root
+  module depends on nothing; `lateregate.yml` takes `gate_module` and runs
+  `go -C <module> tool lateregate <gate> -C <root>` in every job. Every
+  gate passes that way on managed-agents, but ci-gate's wiring check
+  (`contract`) still reads the pin from the root `go.mod`, the hooks and
+  Makefile targets in their root form, and the caller at `@v1`, so the
+  move waits on the wiring check reading a nested gate module.
 - **The gate's setup.** `lateregate.yml` (two jobs) and `ci-gate-bump.yml`
   repeat the Node, Bun and TypeScript-enum preparation. It stays inline,
   for the same reason as the Go setup: a `setup-gate` action would put
@@ -289,8 +291,8 @@ The same blocks take the repeated parts out of ci's own workflows:
   that own it, and `publish_release_test.sh` and `tag_on_branch_test.sh`
   are gone, covered by `publish_release_action_test.sh` and
   `release_preflight_test.sh`. The copies that remain test inline shell in
-  `lateregate.yml`, `ci-gate-bump.yml`, `runner-health.yml` and
-  `go-verify.yml`, which the gate-scan reason keeps inline.
+  `lateregate.yml`, `ci-gate-bump.yml` and `runner-health.yml`, which the
+  gate-scan reason keeps inline.
 
 A stage runs the actions from ci at its own commit: it checks out
 `job.workflow_repository` at `job.workflow_sha` into `.latere-ci/` beside the
@@ -321,9 +323,9 @@ actionlint 1.7.12 does not know the two properties yet, so
 3. ci's own rework: `runner.environment` for the Go cache, `ensure-gh`,
    `publish-release` in `notes-release.yml` and `service-release.yml`,
    `release-preflight`, `rollback-guard` and `sign-image` in
-   `service-release.yml`, `cli-release.yml` on `verified-commit`.
-   managed-agents on `lateregate.yml`, then `go-verify.yml` removed, waits
-   on a module-directory input.
+   `service-release.yml`, `cli-release.yml` on `verified-commit`;
+   `gate_module` on `lateregate.yml`, `go-verify.yml` removed (its one
+   caller pins a commit).
 4. ci-gate: the six gates, one release; services drop their own jobs as the
    nightly pin move reaches them.
 5. The other services, smallest first: topos, sermo, limen, examen, lectio;
@@ -370,7 +372,6 @@ actionlint 1.7.12 does not know the two properties yet, so
   hosted runners.
 - Whether topos, lectio and pons publish verify commands too once they sign
   through the stages.
-- managed-agents onto `lateregate.yml`: an input naming the module that
-  pins ci-gate (`internal/gate`), so the workflow runs
-  `go -C <module> tool lateregate` against the root; then `go-verify.yml`,
-  its example and its tests go.
+- managed-agents onto `lateregate.yml`: the wiring check (`contract`) reads
+  the gate module named in the caller's `gate_module`, for the pin, the
+  hooks and the Makefile targets.
