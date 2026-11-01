@@ -37,7 +37,7 @@ on:
         description: "latere-ai/ci-gate version whose `release-notes` reads the CHANGELOG.md section for the tag. Explicit rather than the consumer's tool pin so the reader is the same in every repository, including ones that pin no Go tool."
         required: false
         type: string
-        default: "v0.29.0"
+        default: "v0.61.0"
       gh_version:
         description: "GitHub CLI release fetched for the publish step when the runner has none, verified against its checksums file. Hosted runners ship gh and skip the fetch."
         required: false
