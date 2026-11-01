@@ -2,7 +2,9 @@
 #
 # Tests for actions/image-by-digest/run.sh against a stub `docker` that
 # records its arguments, writes the build metadata a push by digest
-# reports, and answers `docker run` with STUB_VERSION.
+# reports, and answers `docker run` with STUB_VERSION. Like the real one,
+# `docker run` of an image not pulled first prints its pull progress on
+# stderr before the binary's output.
 #
 # Kept bash 3.2 compatible.
 set -uo pipefail
@@ -30,7 +32,14 @@ case "$1" in
             shift
         done
         ;;
-    run) echo "${STUB_VERSION:-}" ;;
+    pull)
+        [ -n "${STUB_PULL_FAIL:-}" ] && exit 1
+        touch "$STUB_DIR/pulled"
+        ;;
+    run)
+        [ -f "$STUB_DIR/pulled" ] || echo "Unable to find image '$3' locally" >&2
+        echo "${STUB_VERSION:-}"
+        ;;
 esac
 STUB
 chmod +x "$TMP/bin/docker"
@@ -39,6 +48,7 @@ chmod +x "$TMP/bin/docker"
 run_case() {
     local name=$1 want=$2 text=$3 out rc
     : > "$TMP/docker.calls"
+    rm -f "$TMP/pulled"
     : > "$TMP/out"
     out=$(PATH="$TMP/bin:$PATH" STUB_DIR=$TMP GITHUB_OUTPUT="$TMP/out" GITHUB_REF_NAME=v1.2.0 \
         OWNER=latere-ai NAME=ponsd COMMIT=abc1234 DATE=2026-11-01T00:00:00Z bash "$SCRIPT" 2>&1)
@@ -71,6 +81,11 @@ if grep -qF -- "--platform linux/amd64,linux/arm64" "$TMP/docker.calls"; then
 else
     fail "both platforms build by default"
 fi
+if grep -qxF "pull --quiet ghcr.io/latere-ai/ponsd@sha256:abc123" "$TMP/docker.calls"; then
+    pass "the version check pulls the pushed digest quietly first"
+else
+    fail "the version check pulls the pushed digest quietly first ($(cat "$TMP/docker.calls"))"
+fi
 if grep -qF "run --rm ghcr.io/latere-ai/ponsd@sha256:abc123 version" "$TMP/docker.calls"; then
     pass "the version check runs the pushed digest"
 else
@@ -94,6 +109,8 @@ if grep -qF -- "--platform linux/amd64 " "$TMP/docker.calls" && grep -qF -- "--b
 else
     fail "extra build args and one platform reach buildx ($(cat "$TMP/docker.calls"))"
 fi
+
+VERSION_ARGS=version STUB_VERSION="ponsd v1.2.0 (abc1234)" STUB_PULL_FAIL=1 run_case "a candidate that cannot be pulled is refused" 1 "could not pull ghcr.io/latere-ai/ponsd@sha256:abc123"
 
 STUB_BUILD_FAIL=1 run_case "a failed build is refused" 1 "the build of ponsd failed"
 STUB_DIGEST="" run_case "a build that reports no digest is refused" 1 "reported no digest"

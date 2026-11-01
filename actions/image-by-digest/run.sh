@@ -50,6 +50,11 @@ if [ -n "${VERSION_ARGS:-}" ]; then
     expect=${VERSION_EXPECT:-"{name} {tag}"}
     expect=${expect//\{name\}/$NAME}
     expect=${expect//\{tag\}/$TAG}
+    # The candidate was pushed by digest and is not on this runner, so pull
+    # it first and quietly: run would print its pull progress on stderr,
+    # which the 2>&1 below keeps for the binary's own errors.
+    docker pull --quiet "${ref}@${digest}" >/dev/null \
+        || die "could not pull ${ref}@${digest} to ask it for its version"
     # The arguments are words, as on a command line.
     # shellcheck disable=SC2086
     got=$(docker run --rm "${ref}@${digest}" $VERSION_ARGS 2>&1) \

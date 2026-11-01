@@ -8,6 +8,15 @@ Pushing a `v1.MAJOR.MINOR` tag also moves the `v1` tag every consumer pins.
 A section says what changed for whoever calls these pipelines, not what was
 committed: the commit log already holds that.
 
+## Unreleased
+
+### Fixed
+
+- `image-build.yml`: the version check pulls the candidate quietly before
+  it runs it. `docker run` printed its pull progress, "Unable to find
+  image … locally", ahead of the binary's output, so every image whose
+  version was checked failed the check.
+
 ## v1.28.0 - 2026-11-01
 
 ### Added
