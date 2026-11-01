@@ -1,0 +1,13 @@
+name: tag-images
+description: Tag each pushed digest with the release tag.
+inputs:
+  images:
+    description: "<registry>/<owner>/<name>@<digest>, one per line."
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        IMAGES: ${{ inputs.images }}
+      run: bash "$GITHUB_ACTION_PATH/run.sh"
