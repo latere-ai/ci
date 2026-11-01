@@ -1,0 +1,8 @@
+# actionlint 1.7.12 does not know the job context's workflow_* properties
+# (job.workflow_repository, job.workflow_sha, job.workflow_ref), which
+# GitHub documents for a job in a reusable workflow and which the stages use
+# to check out ci at their own commit. Only that message is ignored.
+paths:
+  .github/workflows/**/*.yml:
+    ignore:
+      - 'property "workflow_(repository|sha|ref|file_path)" is not defined in object type'

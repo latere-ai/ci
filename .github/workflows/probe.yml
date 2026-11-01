@@ -1,0 +1,10 @@
+name: probe
+on:
+  push:
+    branches: [specs/core-service-workflows]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  call:
+    uses: latere-ai/ci/.github/workflows/probe-called.yml@specs/core-service-workflows

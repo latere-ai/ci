@@ -1,0 +1,7 @@
+name: probe-hello
+description: Throwaway probe that a stage can run an action from ci's own checkout.
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: bash "$GITHUB_ACTION_PATH/hello.sh"
