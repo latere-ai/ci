@@ -24,6 +24,7 @@ repository, by convention rather than through a long list of inputs.
 | [`ci-gate-bump.yml`](.github/workflows/ci-gate-bump.yml) | once a day | a Go repository that pins `latere.ai/x/ci-gate` | move the pin to the latest release when the bar passes on it, or open an issue |
 | [`go-verify.yml`](.github/workflows/go-verify.yml) | every push and pull request | a Go repository that has not moved to `lateregate.yml` | Makefile targets, probed |
 | [`service-release.yml`](.github/workflows/service-release.yml) | a `v*` tag | a Kubernetes service | build the image, deploy, smoke the live surface, publish the release |
+| [`image-build.yml`](.github/workflows/image-build.yml), [`image-publish.yml`](.github/workflows/image-publish.yml), [`release-verify.yml`](.github/workflows/release-verify.yml) | a `v*` tag | a service that publishes signed images and lets others install them | build and sign the images by digest; then, after the repository's own jobs, tag them and publish the release; then verify what was published |
 | [`cli-release.yml`](.github/workflows/cli-release.yml) | a `v*` tag | a command-line tool | lint, test, GoReleaser |
 | [`notes-release.yml`](.github/workflows/notes-release.yml) | a `v*` tag | a module or library that builds nothing on a tag | publish the release |
 
@@ -519,6 +520,123 @@ without changing any, so a Role that misses a kind fails here rather than
 in a release. Rotating the credential is deleting the token Secret,
 re-applying the identity file, and running the same steps.
 
+## Releasing signed images: `image-build.yml`, `image-publish.yml`, `release-verify.yml`
+
+Three stages a repository calls with its own jobs between them, for a
+service that publishes images other people pull and verify: up to three
+images per release, built for linux/amd64 and linux/arm64, signed, with a
+bill of materials each, and archives beside them when the repository builds
+any. [`examples/image-release.yml`](examples/image-release.yml) is the
+whole caller.
+
+```yaml
+jobs:
+  build:
+    uses: latere-ai/ci/.github/workflows/image-build.yml@v1
+    permissions: { contents: read, packages: write, id-token: write, attestations: write }
+    with:
+      image_1: '{"name": "exampled", "version_args": "version"}'
+  conformance:            # the repository's own, against the digests
+    needs: build
+    ...
+  publish:
+    needs: [build, conformance]
+    uses: latere-ai/ci/.github/workflows/image-publish.yml@v1
+    permissions: { contents: write, packages: write, id-token: write }
+    with:
+      images: ${{ needs.build.outputs.images }}
+  verify:
+    needs: publish
+    uses: latere-ai/ci/.github/workflows/release-verify.yml@v1
+    permissions: { contents: read, packages: read, attestations: read }
+    with:
+      images: exampled
+```
+
+**`image-build.yml`**, one job, so a release queues on the self-hosted
+runner once:
+
+1. The tagged commit's `verify.yml` run on its branch push succeeded. A
+   run still going is waited for up to `wait_minutes` (60); `"0"` refuses
+   at once, for a private repository that should not hold a runner slot. A
+   cancelled run refuses, since the commit was never verified. A commit with
+   no run that changes only `skip_paths` (`specs/*` and `*.md`) is read
+   through to its parent.
+2. The tag carries no build metadata, is on the default branch, and has a
+   `CHANGELOG.md` section. The namespace is `namespace`, else the
+   repository variable `RELEASE_IMAGE_NAMESPACE`, else the repository
+   owner, lowered, so a fork's tag publishes under the fork.
+3. `archives_command`, when set, writes the files the release attaches
+   into `dist/`.
+4. Each of `image_1` to `image_3` is built from its JSON (`name`, and
+   optionally `dockerfile`, `context`, `platforms`, `build_args`,
+   `version_args`, `version_expect`, `sbom_format`) with `VERSION`,
+   `COMMIT` and `DATE` as build arguments, pushed by digest under no tag,
+   asked for its version (`version_args`; it must print
+   `version_expect`, default `{name} {tag}`), signed, and given an SPDX bill
+   of materials in `dist/`. A public repository also gets GitHub's SBOM and
+   provenance attestations; a private one does not, since GitHub offers
+   them in private repositories only on Enterprise Cloud.
+5. `after_images_command`, when set, runs with `IMAGE_1` to `IMAGE_3`
+   (`<ref>@<digest>`), for a deploy archive that pins the digests.
+
+Outputs: `owner`, `ref_1` to `ref_3`, `digest_1` to `digest_3`, and
+`images`, every `<ref>@<digest>` one per line.
+
+**`image-publish.yml`** tags each digest with the release tag, writes
+`checksums.txt` over every file in `dist/` (and the run artifacts
+`artifacts` names) and signs it, and publishes the release: the body is the
+tag's `CHANGELOG.md` section with the Markdown files of the `evidence`
+artifacts appended, created as a draft, its files attached, then published.
+A re-run edits the release rather than failing on it.
+
+**`release-verify.yml`** checks the published release with no checkout:
+`checksums.txt` is signed for this repository and the same check naming
+another repository is refused, every asset matches it, each image's tag
+resolves to a signed digest (and attested, in a public repository), and the
+body opens with the `CHANGELOG.md` section.
+
+### Verifying a release
+
+The signatures are keyless and name the stage that made them, as
+`service-release.yml`'s do. Any repository can call a public workflow, so
+the identity names the pipeline, and the repository check binds the
+source:
+
+```sh
+cosign verify ghcr.io/<owner>/<image>@sha256:<digest> \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp '^https://github\.com/latere-ai/ci/\.github/workflows/image-build\.yml@' \
+  --certificate-github-workflow-repository <owner>/<repository>
+
+cosign verify-blob --bundle checksums.txt.sigstore.json \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp '^https://github\.com/latere-ai/ci/\.github/workflows/image-publish\.yml@' \
+  --certificate-github-workflow-repository <owner>/<repository> checksums.txt
+sha256sum -c checksums.txt
+
+gh attestation verify oci://ghcr.io/<owner>/<image>@sha256:<digest> \
+  -R <owner>/<repository> --signer-workflow latere-ai/ci/.github/workflows/image-build.yml
+```
+
+### The shared steps
+
+Each stage checks out this repository at its own commit
+(`job.workflow_sha`) into `.latere-ci/` beside the caller's checkout and
+runs the composite actions under [`actions/`](actions/) from there, so a
+prerelease tag of ci runs its own steps, not `v1`'s. The directory is
+hidden from git (`.git/info/exclude`), so `git describe`, Go's VCS stamp
+and a dirty-tree check see the caller's tree alone. It is part of the
+docker build context; a Dockerfile that copies the whole context can list
+`.latere-ci` in `.dockerignore`.
+
+A repository whose release the stages do not fit calls the actions
+directly, as `latere-ai/ci/actions/<name>@v1`, inside jobs of its own; its
+signatures then name its own workflow. Tool versions (cosign, syft, gh,
+the note reader) are defined once, in
+[`actions/lib/versions.sh`](actions/lib/versions.sh), and every stage takes
+an input to override each.
+
 ## Releasing a command-line tool: `cli-release.yml`
 
 ```yaml
@@ -716,8 +834,9 @@ repository that needs to hold still pins a full version, `@v1.17.0`.
 
 ## Supply chain
 
-Every `uses:` in these workflows is pinned to a full commit SHA, with the
-version it corresponds to in a trailing comment:
+Every `uses:` in these workflows and in the actions under `actions/` is
+pinned to a full commit SHA, with the version it corresponds to in a
+trailing comment:
 
 ```yaml
 - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

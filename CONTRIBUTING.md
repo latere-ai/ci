@@ -24,8 +24,11 @@ is tested against a stub `gh` that serves fixtures and records every
 write, and further assertions hold the supply-chain rules (every `uses:`
 pinned to a SHA).
 
-A new inline script that makes a decision gets a copy and a test in
-`test/`, and `test/run.sh` picks up any `*_test.sh` beside it.
+A decision a pipeline makes belongs in a script under `actions/`, which a
+stage runs from ci at its own commit, and gets a test in `test/` that runs
+that script itself; `test/stub_gh.sh` stubs the GitHub CLI for it. Inline
+shell that stays in a workflow gets a copy and a test, as before.
+`test/run.sh` picks up any `*_test.sh`.
 
 ## How a change reaches callers
 

@@ -8,6 +8,28 @@ Pushing a `v1.MAJOR.MINOR` tag also moves the `v1` tag every consumer pins.
 A section says what changed for whoever calls these pipelines, not what was
 committed: the commit log already holds that.
 
+## Unreleased
+
+### Added
+
+- `image-build.yml`, `image-publish.yml` and `release-verify.yml`: the
+  stages of a signed image release, called with the repository's own jobs
+  (conformance, an install walk, a deploy) between them. The build stage
+  waits for the tagged commit's verify run, checks the tag, builds up to
+  three images by digest under no tag, checks each reports the tag's
+  version, signs it, writes its SPDX bill of materials and, in a public
+  repository, attests it. The publish stage tags the digests, signs
+  `checksums.txt` over the attached files, and publishes the release with
+  its files attached before it is visible. The verify stage checks the
+  published release from a runner with no checkout. See the README,
+  "Releasing signed images", and `examples/image-release.yml`.
+- `actions/`: the composite actions the stages are built from
+  (`verified-commit`, `release-preflight`, `image-by-digest`, `sign-image`,
+  `tag-images`, `signed-checksums`, `publish-release`, `verify-release`,
+  `ensure-gh`), callable on their own as `latere-ai/ci/actions/<name>@v1`.
+  A stage runs them from ci at its own commit, so a prerelease tag tries
+  its own steps.
+
 ## v1.27.0 - 2026-10-31
 
 ### Fixed
