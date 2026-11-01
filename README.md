@@ -282,7 +282,8 @@ write under it as work lands. The section says what changed for whoever
 uses the release, not what was committed.
 
 The reader is `lateregate release-notes` from `latere-ai/ci-gate`, run at
-the version each release pipeline pins in its `lateregate_version` input.
+the version [`actions/lib/versions.sh`](actions/lib/versions.sh) pins, or
+the one a caller passes as `lateregate_version`.
 Pinning it here rather than reading the consumer's tool pin makes the
 reader the same in every repository, including ones that pin no Go tool.
 In a Go repository the same binary runs in the pre-push hook and refuses
@@ -291,11 +292,9 @@ vX.Y.Z` moves the notes under `Unreleased` into the tag's section,
 commits, tags and pushes. A repository without the tool writes the
 section by hand and pushes the tag.
 
-In `service-release.yml` publishing is the last step, so when it fails on
-a missing section production is already serving the tag. That is the
-intended order, a release announces what is live. Re-running the release
-repeats the build and the deploy, and is refused once a newer tag exists;
-publishing the section by hand with `gh release create` needs neither.
+`service-release.yml` checks the section before it builds anything, so a
+tag without one deploys nothing. Publishing is still the last step: a
+release announces what is live.
 
 ## Releasing a service: `service-release.yml`
 
@@ -350,12 +349,16 @@ does not run the test suite: the per-push gate on the tagged commit is the
 verification, and `lateregate release` refuses to cut a tag while CI is
 red.
 
-The first step refuses a tag whose commit is not on the repository's
-default branch, so a tag pushed from a side branch, or one whose branch
-push was rejected while the tag went out, builds and deploys nothing. The
-next refuses a tag once a newer `vX.Y.Z` tag exists. A re-run repeats the
-build and the deploy, so re-running an older release would push it as
-`latest` and roll production back to it.
+Before anything is built, the shared `release-preflight` step refuses a
+tag that carries build metadata (the image is tagged with the git tag, and
+an image tag cannot hold `+`), a tag whose commit is not on the
+repository's default branch (a tag pushed from a side branch, or one whose
+branch push was rejected while the tag went out), and a tag with no
+`CHANGELOG.md` section. Then `rollback-guard` refuses a tag once a newer
+`vX.Y.Z` tag exists. A re-run repeats the build and the deploy, so
+re-running an older release would push it as `latest` and roll production
+back to it; the newer release carries its changes, and its notes can be
+published by hand with `gh release create`.
 
 ### What the repository provides
 
@@ -396,9 +399,10 @@ pipeline can `kubectl set image` without reading the manifests.
 | `smoke_scope` | empty | an OAuth scope requested with the smoke token |
 | `build_cli`, `cli_build_cmd` | `false`, empty | also build command-line binaries (the command writes them under `dist/`) and attach them to the release |
 | `go_version`, `bun_version` | `1.27`, `1.3.14` | toolchains |
-| `kubectl_version`, `gh_version` | `1.35.1`, `2.100.0` | fetched, checksum-verified, when the runner has none |
-| `cosign_version`, `syft_version` | `v3.0.6`, `v1.51.1` | the image signer and the SBOM generator |
-| `lateregate_version` | `v0.29.0` | the `ci-gate` release whose `release-notes` reads the changelog |
+| `kubectl_version` | `1.35.1` | fetched, checksum-verified, when the runner has none |
+| `gh_version` | empty: `versions.sh` | fetched, checksum-verified, when the runner has none |
+| `cosign_version`, `syft_version` | empty: `versions.sh` | the image signer and the SBOM generator |
+| `lateregate_version` | empty: `versions.sh` | the `ci-gate` release whose `release-notes` reads the changelog |
 | `runs_on` | the [runner policy](#runners) | the runner label for the job |
 
 | Secret | Meaning |
@@ -456,8 +460,11 @@ cosign verify ghcr.io/latere-ai/platformd@sha256:<digest> \
 Every release carries two CycloneDX 1.6 SBOMs as assets.
 `sbom-source.cdx.json` lists what the lockfiles in the checkout pin,
 development packages included, since they run in the job that holds the
-deploy credential. `sbom-image.cdx.json` lists what the image holds: the
-Go modules compiled into the binary and the base image's packages.
+deploy credential. `sbom-<image>.cdx.json` (`sbom-platformd.cdx.json` for
+`ghcr.io/latere-ai/platformd`) lists what the image holds: the Go modules
+compiled into the binary and the base image's packages. The signing, the
+image SBOM and the attestations are the shared `sign-image` step, the same
+one `image-build.yml` runs.
 
 A public caller also gets GitHub artifact attestations of the image's
 provenance and SBOM, pushed to the registry and checked with
@@ -649,13 +656,22 @@ jobs:
     secrets: inherit
 ```
 
-`lint`, then `test` on each runner in `test_os`, then `goreleaser`, which
-builds the binaries from the repository's own `.goreleaser.yaml` and
-publishes the release with the changelog section as its body; a tag
-without a section fails before GoReleaser runs. Inputs: `go_version`,
-`golangci_version`, `goreleaser_version` (default `v2.17.1`),
-`lateregate_version`, `run_lint`, `run_tests`, `test_os` and `runs_on`.
-The caller grants `contents: write`.
+`verified` checks that the tagged commit passed its per-push gate on the
+branch push, with the shared `verified-commit` step, then `test` runs on
+each extra runner in `test_os` (macOS, for a darwin binary), then
+`goreleaser` builds the binaries from the repository's own
+`.goreleaser.yaml` and publishes the release with the changelog section as
+its body; a tag without a section fails before GoReleaser runs. Lint and
+the Linux tests ran in `lateregate.yml` on the push, so the release reads
+that run rather than repeating it. The per-push gate is the workflow that
+calls `lateregate.yml`, found in `.github/workflows`, or the file named in
+`verify_workflow`.
+
+Inputs: `go_version`, `goreleaser_version` (default `v2.17.1`),
+`lateregate_version`, `run_tests`, `test_os` (empty: no extra runners),
+`verify_workflow`, `wait_minutes` (default `60`) and `runs_on`.
+`run_lint` and `golangci_version` are accepted and ignored. The caller
+grants `contents: write` and `actions: read`.
 
 | Secret | Meaning |
 | --- | --- |
@@ -679,7 +695,8 @@ jobs:
 Nothing is built. The release body is the changelog section, the title is
 the tag (or `title: Name` for `Name vX.Y.Z`), and a hyphen in the version
 core marks a prerelease. A re-run edits the body rather than failing on an
-existing release.
+existing release. The publish is the shared `publish-release` step, the
+same one `service-release.yml` and `image-publish.yml` run.
 
 ## Runners
 
@@ -692,10 +709,11 @@ applies it as the default of its `runs_on` input:
 | public | `ubuntu-latest` | `linux-vm`, while hosted runners are down, for events only the repository starts |
 
 A caller that passes nothing gets the policy and its fallback. A label
-passed as `runs_on` overrides both. `test_os`, where a pipeline has one,
-defaults to the runner `runs_on` resolves to; in `lateregate.yml` the
-suite already runs there, so a repository that adds macOS passes
-`test_os: '["macos-latest"]'`.
+passed as `runs_on` overrides both. `test_os` in `lateregate.yml`
+defaults to the runner `runs_on` resolves to; the suite already runs
+there, so a repository that adds macOS passes
+`test_os: '["macos-latest"]'`. In `cli-release.yml` it lists only the
+extra runners the release tests on.
 
 The policy is one expression, and a repository's own jobs use it too:
 
@@ -794,8 +812,8 @@ changes.
   explicit mapping), and the runner needs network reach to the cluster and
   to the registry.
 
-`actions/setup-go` restores the module cache only on a hosted label,
-because a self-hosted runner keeps its own between jobs and restoring a
+`actions/setup-go` restores the module cache only on a hosted runner
+(`runner.environment == 'github-hosted'`), because a self-hosted runner keeps its own between jobs and restoring a
 tarball over it fails on every file that already exists.
 
 ## Run artifacts

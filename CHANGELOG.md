@@ -29,6 +29,30 @@ committed: the commit log already holds that.
   `ensure-gh`), callable on their own as `latere-ai/ci/actions/<name>@v1`.
   A stage runs them from ci at its own commit, so a prerelease tag tries
   its own steps.
+- `rollback-guard`, the shared step that refuses a tag once a newer
+  `vX.Y.Z` exists.
+
+### Changed
+
+- `service-release.yml` runs the shared steps: `release-preflight` checks
+  the tag (no build metadata, on the default branch, a `CHANGELOG.md`
+  section) before anything is built, so a tag without notes no longer
+  deploys before it fails; `sign-image` signs the image and writes its
+  SBOM; `publish-release` publishes the release as a draft until its files
+  are attached. The image SBOM asset is now `sbom-<image>.cdx.json`
+  (`sbom-platformd.cdx.json`), not `sbom-image.cdx.json`. Still one job,
+  and the deploy is unchanged.
+- `cli-release.yml` no longer runs lint and the tests again on the tag:
+  it checks that the tagged commit passed its per-push gate (the workflow
+  that calls `lateregate.yml`, or `verify_workflow`), then tests on the
+  extra runners in `test_os` alone. The caller grants `actions: read`
+  beside `contents: write`. `run_lint` and `golangci_version` are accepted
+  and ignored.
+- `notes-release.yml` publishes through `publish-release`.
+- The tool versions (cosign, syft, gh, the note reader) default to
+  `actions/lib/versions.sh` in every pipeline; each input still overrides.
+- `actions/setup-go` restores its cache wherever the runner is hosted, read
+  from `runner.environment` rather than from the runner label.
 
 ## v1.27.0 - 2026-10-31
 

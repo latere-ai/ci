@@ -240,38 +240,56 @@ Each is a gate in ci-gate, applies when its input exists, and is configured in
 
 The same blocks take the repeated parts out of ci's own workflows:
 
-- **Go setup.** 21 `actions/setup-go` steps in ci's workflows carry 29 copies
-  of the expression that tells a hosted runner from the self-hosted one
-  (`startsWith(..., 'ubuntu-') || startsWith(..., 'macos-') || ...`), to choose the
-  module cache and `-trimpath`. A `setup-go` action reads
-  `runner.environment` instead and sets both, and every workflow uses it.
+- **Go setup.** 21 `actions/setup-go` steps in ci's workflows carried 29
+  copies of the expression that tells a hosted runner from the self-hosted
+  one (`startsWith(..., 'ubuntu-') || startsWith(..., 'macos-') || ...`)
+  to choose the module cache. Every step-level choice now reads
+  `runner.environment == 'github-hosted'`. No `setup-go` action wraps it:
+  the gate jobs would need ci's checkout beside the caller's to reach one,
+  and the gates scan the checkout. The label expression stays where no
+  runner exists yet (job `if:`, job `env`, the plan in `lateregate.yml`).
 - **gh on the self-hosted runner.** `notes-release.yml` and
-  `service-release.yml` carry the same 15-line "Ensure gh" step, and examen
-  and limen copy it. It becomes an `ensure-gh` action, used by
-  `verified-commit` and `publish-release`.
-- **Creating a release.** `notes-release.yml` and `service-release.yml` read
-  the CHANGELOG section and publish with near-identical scripts; both call
-  `publish-release`, `service-release.yml` with its evidence files.
-- **`service-release.yml`** keeps its one job and replaces its build-metadata
-  check, signing, bill of materials and attestations with
-  `release-preflight` and `sign-image`.
-- **`cli-release.yml`** runs lint and tests again on the tagged commit,
-  which `lateregate.yml` already ran; latere-cli, its one caller, repeats the
-  tests on macOS at ten times the Linux rate, and its lint runs a
-  golangci-lint version of its own rather than the one ci-gate pins. Both jobs
-  give way to `verified-commit`, and `golangci/golangci-lint-action` leaves
-  ci's pins.
-- **`go-verify.yml`** has one caller, managed-agents, which pins an old
-  commit rather than `@v1`. managed-agents moves to `lateregate.yml`, and
-  `go-verify.yml`, its example and its tests are removed.
+  `service-release.yml` carried the same 15-line "Ensure gh" step, and
+  examen and limen copy it. It is the `ensure-gh` action, used by
+  `verified-commit`, `publish-release` and `verify-release`.
+- **Creating a release.** `notes-release.yml` and `service-release.yml`
+  read the CHANGELOG section and published with near-identical scripts;
+  both call `publish-release`, `service-release.yml` with its smoke
+  evidence and SBOMs.
+- **`service-release.yml`** keeps its one job and its deploy. Its tag
+  checks are `release-preflight` (which now also checks the CHANGELOG
+  section before the build rather than after the deploy), its rollback
+  guard is the `rollback-guard` action, and its signing, image SBOM and
+  attestations are `sign-image` in CycloneDX 1.6. Tool versions come from
+  `actions/lib/versions.sh` unless an input overrides them.
+- **`cli-release.yml`** ran lint and tests again on the tagged commit,
+  which `lateregate.yml` already ran, with a golangci-lint version of its
+  own. Its `verified` job runs `verified-commit`, which with no
+  `verify_workflow` finds the workflow that calls `lateregate.yml`
+  (latere-cli's is `ci.yaml`); `test_os` now lists only the extra runners
+  the release tests on, and `golangci/golangci-lint-action` left ci's
+  pins. The caller grants `actions: read`.
+- **`go-verify.yml`** has one caller, managed-agents, which pins a commit
+  rather than `@v1`, so removing the file breaks nothing today. It stays
+  until managed-agents moves: the port keeps ci-gate in a nested module
+  (`internal/gate`) so its root module depends on nothing, and
+  `lateregate.yml` runs `go tool lateregate` at the root. Moving needs a
+  module-directory input on `lateregate.yml`; tracked here as the open
+  item below.
 - **The gate's setup.** `lateregate.yml` (two jobs) and `ci-gate-bump.yml`
-  repeat the Node, Bun and TypeScript-enum preparation; it becomes one
-  `setup-gate` action.
-- **Tests over copies.** Seven test files in `ci/test/` hold copies of inline
-  workflow shell and assert the copies still match, because a reusable
-  workflow's inline script cannot be run on its own. Once the decisions live
-  in action scripts, the tests run the shipped files and the copies and their
-  match assertions go.
+  repeat the Node, Bun and TypeScript-enum preparation. It stays inline,
+  for the same reason as the Go setup: a `setup-gate` action would put
+  ci's checkout inside the tree the gates scan.
+- **Tests over copies.** Test files in `ci/test/` held copies of inline
+  workflow shell and asserted the copies still matched. The decisions now
+  live in action scripts and the tests run the shipped files:
+  `rollback_guard_test.sh` sources and runs `actions/rollback-guard`,
+  `prerelease_test.sh` checks that classification lives in the two scripts
+  that own it, and `publish_release_test.sh` and `tag_on_branch_test.sh`
+  are gone, covered by `publish_release_action_test.sh` and
+  `release_preflight_test.sh`. The copies that remain test inline shell in
+  `lateregate.yml`, `ci-gate-bump.yml`, `runner-health.yml` and
+  `go-verify.yml`, which the gate-scan reason keeps inline.
 
 A stage runs the actions from ci at its own commit: it checks out
 `job.workflow_repository` at `job.workflow_sha` into `.latere-ci/` beside the
@@ -299,10 +317,12 @@ actionlint 1.7.12 does not know the two properties yet, so
 2. pons end to end on the prerelease (public, one image, nothing between the
    stages): a real tag, then `release-verify` and the new verify commands,
    `gh attestation verify` included, pass against it.
-3. ci's own rework: `setup-go`, `ensure-gh`, `setup-gate`,
+3. ci's own rework: `runner.environment` for the Go cache, `ensure-gh`,
    `publish-release` in `notes-release.yml` and `service-release.yml`,
-   `cli-release.yml` on `verified-commit`; managed-agents on `lateregate.yml`,
-   then `go-verify.yml` removed.
+   `release-preflight`, `rollback-guard` and `sign-image` in
+   `service-release.yml`, `cli-release.yml` on `verified-commit`.
+   managed-agents on `lateregate.yml`, then `go-verify.yml` removed, waits
+   on a module-directory input.
 4. ci-gate: the six gates, one release; services drop their own jobs as the
    nightly pin move reaches them.
 5. The other services, smallest first: topos, sermo, limen, examen, lectio;
@@ -349,3 +369,7 @@ actionlint 1.7.12 does not know the two properties yet, so
   hosted runners.
 - Whether topos, lectio and pons publish verify commands too once they sign
   through the stages.
+- managed-agents onto `lateregate.yml`: an input naming the module that
+  pins ci-gate (`internal/gate`), so the workflow runs
+  `go -C <module> tool lateregate` against the root; then `go-verify.yml`,
+  its example and its tests go.
