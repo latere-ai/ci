@@ -18,7 +18,9 @@
 # repository's own jobs, so this suite holds the README to it too.
 #
 # A matrix job is the exception. `test_os` names its runners; empty means
-# the runner runs_on resolves to.
+# the runner runs_on resolves to. In cli-release.yml it names the systems the
+# release tests on beyond the tagged commit's per-push run, and empty runs
+# none, since that run already tested on runs_on.
 #
 # The cost of following runs_on: actions/setup-go restores the module cache
 # as a tarball, which is right on a hosted runner (it starts empty) and fails
@@ -84,7 +86,16 @@ for f in $files; do
 
     # test_os, where there is one, defaults to empty and is read only through
     # the fallback to runs_on, so the matrix moves with the policy.
-    if grep -q '^      test_os:$' "$f"; then
+    if [ "$name" = cli-release.yml ]; then
+        tdecl=$(awk '/^      test_os:$/ { inblk = 1 } inblk { print } inblk && /^        default:/ { exit }' "$f")
+        if printf '%s\n' "$tdecl" | grep -qxF '        default: ""' \
+            && grep -qF "os: \${{ fromJSON(inputs.test_os || '[]') }}" "$f" \
+            && grep -qF "inputs.test_os != '' && inputs.test_os != '[]'" "$f"; then
+            pass "$name tests on test_os alone, and on nothing when it is empty"
+        else
+            fail "$name reads test_os other than as the extra systems to test on"
+        fi
+    elif grep -q '^      test_os:$' "$f"; then
         tdecl=$(awk '/^      test_os:$/ { inblk = 1 } inblk { print } inblk && /^        default:/ { exit }' "$f")
         uses=$(grep -c 'inputs\.test_os' "$f")
         through=$(grep -cF "$TEST_OS_USE" "$f")
