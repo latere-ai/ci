@@ -68,6 +68,20 @@ runs:
     # Enterprise Cloud, and an attestation's body goes into the public log,
     # so a private repository has the signature and the bill of materials
     # without them.
+    #
+    # actions/attest pushes with the credentials of $HOME/.docker/config.json
+    # and reads no DOCKER_CONFIG, where image-build.yml isolates the job's
+    # login. For the two attestations, HOME is a directory of their own whose
+    # .docker is that login's directory, so they push with the job's login
+    # and no other, and HOME is put back after them.
+    - if: ${{ !github.event.repository.private }}
+      shell: bash
+      run: |
+        home="$RUNNER_TEMP/attest-home"
+        mkdir -p "$home"
+        ln -sfn "${DOCKER_CONFIG:-$HOME/.docker}" "$home/.docker"
+        echo "SIGN_IMAGE_HOME=$HOME" >> "$GITHUB_ENV"
+        echo "HOME=$home" >> "$GITHUB_ENV"
     - if: ${{ !github.event.repository.private }}
       uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
       with:
@@ -81,3 +95,9 @@ runs:
         subject-name: ${{ inputs.ref }}
         subject-digest: ${{ inputs.digest }}
         push-to-registry: true
+    - if: ${{ always() && !github.event.repository.private }}
+      shell: bash
+      run: |
+        if [ -n "${SIGN_IMAGE_HOME:-}" ]; then
+          echo "HOME=$SIGN_IMAGE_HOME" >> "$GITHUB_ENV"
+        fi
