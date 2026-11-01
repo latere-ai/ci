@@ -343,12 +343,12 @@ distroless, so none declares a shell.
 | pons | `version`, `ponsd ` | 40 MiB | `serve`, an issuer never asked, `/livez` |
 | lectio | `version`, `lectiod ` | 60 MiB | `LECTIO_DEV=true`, `/v1/openapi.yaml` |
 | sermo | `-version`, the stamped `v0.0.0-candidate` | 40 MiB | an issuer never asked, `/livez`, 30 seconds |
-| lux | `-version`, `luxd ` | none | `serve` in memory, an issuer never asked, `/livez`, 30 seconds |
 | arca | `-version`, `arcad ` | none | addresses nothing answers, opened lazily, `/livez` |
 | platform | `version`, `platformd ` | none | no environment, `/healthz` |
 | examen | `version`, `examend ` | 40 MiB | `skip_start`: migrate needs Postgres; its `image` job keeps that start |
 | topos | `-version`, `toposd ` | none | `skip_start`: a writable data directory or Postgres, a model gateway and an identity key |
 | cella | `-version`, `cellad ` | none | `skip_start`: an issuer it can reach |
+| lux | `-version`, `luxd ` | none | `skip_start`: an issuer it can reach or a local issuer key |
 | limen | `-version`, `limend ` | none | `skip_start`: every route requires a bearer token, so no start answers 2xx |
 
 Three jobs stay on purpose. origo's `build` saves the images its end-to-end
