@@ -1,0 +1,55 @@
+name: verify-release
+description: Verify a published release from its assets and the registry alone, as someone installing it would.
+inputs:
+  images:
+    description: "Image names, one per line, under <registry>/<owner>/."
+    required: true
+  owner:
+    description: "Image namespace."
+    required: true
+  registry:
+    description: "Registry host."
+    required: false
+    default: ghcr.io
+  signer_repository:
+    description: "Repository holding image-build.yml and image-publish.yml, whose files the signatures name."
+    required: false
+    default: latere-ai/ci
+  cosign_version:
+    description: "cosign release. Empty takes the version in actions/lib/versions.sh."
+    required: false
+    default: ""
+  lateregate_version:
+    description: "ci-gate version whose note reader reads the CHANGELOG section. Empty takes the version in actions/lib/versions.sh."
+    required: false
+    default: ""
+  gh_version:
+    description: "GitHub CLI release fetched where the runner has none. Empty takes the version in actions/lib/versions.sh."
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - id: versions
+      shell: bash
+      env:
+        COSIGN_VERSION: ${{ inputs.cosign_version }}
+      run: bash "$GITHUB_ACTION_PATH/../lib/versions.sh"
+    - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      with:
+        cosign-release: ${{ steps.versions.outputs.cosign }}
+        install-dir: ${{ runner.temp }}/cosign
+    - shell: bash
+      env:
+        GH_VERSION: ${{ inputs.gh_version }}
+      run: bash "$GITHUB_ACTION_PATH/../ensure-gh/run.sh"
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        IMAGES: ${{ inputs.images }}
+        OWNER: ${{ inputs.owner }}
+        REGISTRY: ${{ inputs.registry }}
+        SIGNER_REPOSITORY: ${{ inputs.signer_repository }}
+        PUBLIC: ${{ !github.event.repository.private }}
+        LATEREGATE_VERSION: ${{ inputs.lateregate_version }}
+      run: bash "$GITHUB_ACTION_PATH/run.sh"
