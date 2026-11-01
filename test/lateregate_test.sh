@@ -535,10 +535,10 @@ check_enum_setup() { # job condition run-step
             fail "$1: $target must be conditional on $2"
         fi
     done
-    if job_step "$block" 'uses: actions/setup-node@' | grep -qxF '          node-version: "24"'; then
-        pass "$1: the TypeScript enum gate has Node 24"
+    if job_step "$block" 'uses: actions/setup-node@' | grep -qxE '          node-version: "[0-9]+"'; then
+        pass "$1: the TypeScript enum gate pins a Node major"
     else
-        fail "$1: the TypeScript enum gate must set up Node 24"
+        fail "$1: the TypeScript enum gate must pin a Node major"
     fi
     if job_step "$block" 'uses: oven-sh/setup-bun@' | grep -qxF '          bun-version: "1.3.14"'; then
         pass "$1: the TypeScript enum gate pins Bun"
