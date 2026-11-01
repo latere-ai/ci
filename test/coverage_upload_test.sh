@@ -36,7 +36,7 @@ for name in go-verify lateregate; do
     else
         # A hosted runner runs cover or suite in a gate job of its own; the
         # self-hosted runner runs it in the all gates passed job's loop.
-        commands='run: go tool lateregate ${{ matrix.gate }}
+        commands='run: go -C "$GATE_MODULE" tool lateregate ${{ matrix.gate }} -C "$GITHUB_WORKSPACE"
 - name: Run the gates'
     fi
     while IFS= read -r command; do

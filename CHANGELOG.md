@@ -58,6 +58,11 @@ committed: the commit log already holds that.
   notes it writes are the same).
 - `actions/setup-go` restores its cache wherever the runner is hosted, read
   from `runner.environment` rather than from the runner label.
+- `lateregate.yml` takes `gate_module`, the directory of the module whose
+  `go.mod` pins ci-gate, for a repository that keeps the tool out of its
+  consumers' module graph (managed-agents pins it in `internal/gate`).
+  Every gate runs from that module with `-C` set to the repository root;
+  empty keeps the root.
 - `lateregate.yml` and `ci-gate-bump.yml` set up Node 24 and Bun for
   lateregate's `frontend` gate as they do for `enum-typescript`, so a
   repository that names its Bun packages under `frontend.projects` (from

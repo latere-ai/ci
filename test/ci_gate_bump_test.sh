@@ -509,8 +509,11 @@ awk 'BEGIN { s = "a long gate output line"; for (i = 0; i < 4; i++) s = s s; for
 cp "$logs/suite.log" "$logs/lint.log"
 echo "FAIL suite: the verdict at the end" >> "$logs/suite.log"
 run_step "$ISSUE_SCRIPT" "$TMP" LOGS="$logs" LATEST=v0.50.1 CURRENT=v0.49.0 RUN_URL=u ISSUES_JSON='[]'
-size=$(issue_body | wc -c | tr -d ' ')
-if [ "$(status)" = 0 ] && [ "$size" -lt 65536 ] && issue_body | grep -q 'FAIL suite: the verdict at the end'; then
+# Read once: grep -q exits at its match, and under pipefail the writer's
+# SIGPIPE on a body larger than the pipe buffer would fail the pipeline.
+body=$(issue_body)
+size=$(printf '%s\n' "$body" | wc -c | tr -d ' ')
+if [ "$(status)" = 0 ] && [ "$size" -lt 65536 ] && grep -qF 'FAIL suite: the verdict at the end' <<< "$body"; then
     pass "long logs keep their tails and the body stays under GitHub's limit ($size bytes)"
 else
     fail "status=$(status) body size $size"

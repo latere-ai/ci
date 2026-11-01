@@ -25,7 +25,7 @@ repository, by convention rather than through a long list of inputs.
 | [`go-verify.yml`](.github/workflows/go-verify.yml) | every push and pull request | a Go repository that has not moved to `lateregate.yml` | Makefile targets, probed |
 | [`service-release.yml`](.github/workflows/service-release.yml) | a `v*` tag | a Kubernetes service | build the image, deploy, smoke the live surface, publish the release |
 | [`image-build.yml`](.github/workflows/image-build.yml), [`image-publish.yml`](.github/workflows/image-publish.yml), [`release-verify.yml`](.github/workflows/release-verify.yml) | a `v*` tag | a service that publishes signed images and lets others install them | build and sign the images by digest; then, after the repository's own jobs, tag them and publish the release; then verify what was published |
-| [`cli-release.yml`](.github/workflows/cli-release.yml) | a `v*` tag | a command-line tool | lint, test, GoReleaser |
+| [`cli-release.yml`](.github/workflows/cli-release.yml) | a `v*` tag | a command-line tool | the tagged commit's per-push run passed, tests on the extra runners in `test_os`, GoReleaser |
 | [`notes-release.yml`](.github/workflows/notes-release.yml) | a `v*` tag | a module or library that builds nothing on a tag | publish the release |
 
 Every release pipeline publishes the GitHub release last, with the tag's
@@ -114,6 +114,7 @@ that applies does not run is a dated waiver in the repository's
 | `go_version` | `1.27` | the Go toolchain |
 | `test_os` | empty: the `runs_on` runner | the runners `test` runs on, as a JSON array |
 | `runs_on` | the [runner policy](#runners) | the runner label for every other job |
+| `gate_module` | empty: the root | the directory of the module whose `go.mod` pins ci-gate, for a repository that keeps the tool out of its consumers' module graph; lateregate runs from there and checks the whole repository |
 
 golangci-lint's version is pinned in the binary, so there is no input for
 it. A repository that cannot lint waives `lint` with a reason and a date

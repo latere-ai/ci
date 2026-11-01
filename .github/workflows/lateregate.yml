@@ -39,9 +39,20 @@ on:
         required: false
         type: string
         default: ${{ (github.event.repository.private || contains(fromJSON('["push","schedule","workflow_dispatch","release"]'), github.event_name)) && (vars.CI_RUNNER_PRIVATE || vars.CI_RUNNER_PUBLIC) || 'ubuntu-latest' }}
+      gate_module:
+        description: "Directory of the Go module whose go.mod pins latere.ai/x/ci-gate as a tool, relative to the repository root. Empty is the root. A module that keeps the tool out of its consumers' module graph pins it in a nested module instead (managed-agents: internal/gate); lateregate runs from there and its gates still check the whole repository."
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
+
+# Every job runs lateregate from the module that pins it, pointed at the
+# repository root with -C, so a nested gate module checks the same tree a
+# root pin does.
+env:
+  GATE_MODULE: ${{ inputs.gate_module || '.' }}
 
 jobs:
   # The plan. Its outputs are the job sets, so the jobs are exactly the gates
@@ -77,7 +88,7 @@ jobs:
           TEST_OS: ${{ inputs.test_os || format('["{0}"]', inputs.runs_on) }}
         run: |
           set -euo pipefail
-          plan=$(go tool lateregate list -json)
+          plan=$(go -C "$GATE_MODULE" tool lateregate list -json -C "$GITHUB_WORKSPACE")
           printf '%s\n' "$plan" | jq -r '.[] | "\(.status)\t\(.name)\t\(.reason // "")\(.until // "" | if . == "" then "" else " until " + . end)\(.into // "" | if . == "" then "" else "into " + . end)"'
           # A hosted runner gives every gate a job of its own, side by side. On
           # the self-hosted runner a job is a turn on one of a few runner slots,
@@ -128,7 +139,7 @@ jobs:
           # starts empty. A self-hosted runner keeps its own between jobs,
           # and restoring a tarball over it fails on every file that exists.
           cache: ${{ runner.environment == 'github-hosted' }}
-      - run: go tool lateregate test
+      - run: go -C "$GATE_MODULE" tool lateregate test -C "$GITHUB_WORKSPACE"
 
   # One job per gate on a hosted runner, named for it, so a failure names
   # itself in the checks list and the slow gates run beside each other. The
@@ -176,15 +187,15 @@ jobs:
           HOME: ${{ runner.temp }}
       - name: Prepare TypeScript enum projects
         if: ${{ matrix.gate == 'enum-typescript' }}
-        run: go tool lateregate enum-typescript-prepare
+        run: go -C "$GATE_MODULE" tool lateregate enum-typescript-prepare -C "$GITHUB_WORKSPACE"
       # Every gate but lint keeps the machine's TMPDIR. A cached test result is
       # keyed on the TMPDIR the test read, and a value per runner process
       # would keep each process from replaying what another recorded.
-      - run: go tool lateregate ${{ matrix.gate }}
+      - run: go -C "$GATE_MODULE" tool lateregate ${{ matrix.gate }} -C "$GITHUB_WORKSPACE"
         if: ${{ matrix.gate != 'lint' }}
       # golangci-lint locks a file under TMPDIR for the whole machine, so lint
       # gets the runner process's own directory and two of them do not collide.
-      - run: go tool lateregate lint
+      - run: go -C "$GATE_MODULE" tool lateregate lint -C "$GITHUB_WORKSPACE"
         if: ${{ matrix.gate == 'lint' }}
         env:
           TMPDIR: ${{ runner.temp }}
@@ -221,7 +232,7 @@ jobs:
           # starts empty. A self-hosted runner keeps its own between jobs,
           # and restoring a tarball over it fails on every file that exists.
           cache: ${{ runner.environment == 'github-hosted' }}
-      - run: go tool lateregate contract
+      - run: go -C "$GATE_MODULE" tool lateregate contract -C "$GITHUB_WORKSPACE"
 
   # The one status check branch protection requires. The gate jobs come and
   # go with the plan and are named for gates, so requiring them one by one
@@ -273,7 +284,7 @@ jobs:
         if: ${{ env.RUN_GATES == 'true' }}
         run: |
           set -euo pipefail
-          plan=$(go tool lateregate list -json)
+          plan=$(go -C "$GATE_MODULE" tool lateregate list -json -C "$GITHUB_WORKSPACE")
           printf '%s\n' "$plan" | jq -r '.[] | "\(.status)\t\(.name)\t\(.reason // "")\(.until // "" | if . == "" then "" else " until " + . end)\(.into // "" | if . == "" then "" else "into " + . end)"'
           # Every running gate in plan order, test included: with no suite in
           # the plan this job is the test run on runs_on, and the matrix keeps
@@ -299,7 +310,7 @@ jobs:
       - name: Prepare TypeScript enum projects
         id: prepare
         if: ${{ contains(fromJSON(steps.plan.outputs.gates || '[]'), 'enum-typescript') }}
-        run: go tool lateregate enum-typescript-prepare
+        run: go -C "$GATE_MODULE" tool lateregate enum-typescript-prepare -C "$GITHUB_WORKSPACE"
       # Keep in step with test/lateregate_test.sh, which runs a copy of this
       # loop against stub gates. It runs after a failed TypeScript setup too,
       # so the other gates still report; enum-typescript then fails unrun.
@@ -334,9 +345,9 @@ jobs:
             elif [ "$gate" = lint ]; then
               # golangci-lint locks a file under TMPDIR for the whole machine; the
               # runner process's own directory keeps two slots apart.
-              TMPDIR="$RUNNER_TEMP" go tool lateregate lint || status=$?
+              TMPDIR="$RUNNER_TEMP" go -C "$GATE_MODULE" tool lateregate lint -C "$GITHUB_WORKSPACE" || status=$?
             else
-              go tool lateregate "$gate" || status=$?
+              go -C "$GATE_MODULE" tool lateregate "$gate" -C "$GITHUB_WORKSPACE" || status=$?
             fi
             echo "::endgroup::"
             if [ "$status" -eq 0 ]; then
@@ -347,7 +358,7 @@ jobs:
             fi
           done
           for gate in $failed; do
-            echo "::error title=$gate::go tool lateregate $gate failed; its output is in the $gate group of the Run the gates step"
+            echo "::error title=$gate::lateregate $gate failed; its output is in the $gate group of the Run the gates step"
           done
           [ -z "$failed" ]
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

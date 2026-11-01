@@ -23,12 +23,12 @@ if ! isolated "$step"; then
 fi
 
 workflow="$REPO_ROOT/.github/workflows/lateregate.yml"
-lint=$(step_for "$workflow" 'run: go tool lateregate lint')
+lint=$(step_for "$workflow" 'run: go -C "$GATE_MODULE" tool lateregate lint -C "$GITHUB_WORKSPACE"')
 if ! isolated "$lint" || ! printf '%s\n' "$lint" | grep -Fq "if: \${{ matrix.gate == 'lint' }}"; then
     echo "FAIL: lateregate's lint gate shares the linter lock between runner slots"
     exit 1
 fi
-others=$(step_for "$workflow" 'run: go tool lateregate ${{ matrix.gate }}')
+others=$(step_for "$workflow" 'run: go -C "$GATE_MODULE" tool lateregate ${{ matrix.gate }} -C "$GITHUB_WORKSPACE"')
 if isolated "$others" || ! printf '%s\n' "$others" | grep -Fq "if: \${{ matrix.gate != 'lint' }}"; then
     echo "FAIL: lateregate gives every gate a per-slot TMPDIR, splitting the test cache"
     exit 1
@@ -38,7 +38,7 @@ fi
 # not for the step, so every other gate keeps the machine's.
 loop=$(step_for "$workflow" '- name: Run the gates')
 if isolated "$loop" || [ "$(printf '%s\n' "$loop" | grep -c 'TMPDIR=')" -ne 1 ] \
-    || ! printf '%s\n' "$loop" | grep -Fq 'TMPDIR="$RUNNER_TEMP" go tool lateregate lint'; then
+    || ! printf '%s\n' "$loop" | grep -Fq 'TMPDIR="$RUNNER_TEMP" go -C "$GATE_MODULE" tool lateregate lint -C "$GITHUB_WORKSPACE"'; then
     echo "FAIL: lateregate's gate loop gives a gate other than lint a per-slot TMPDIR, or lint none"
     exit 1
 fi
