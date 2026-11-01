@@ -10,17 +10,12 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
-### Fixed
+### Changed
 
-- `image-build.yml`: the version check pulls the candidate quietly before
-  it runs it. `docker run` printed its pull progress, "Unable to find
-  image … locally", ahead of the binary's output, so every image whose
-  version was checked failed the check.
-- `image-build.yml`, in a public repository: the attestations push to the
-  registry with the job's login. `actions/attest` reads its credentials
-  from `$HOME/.docker/config.json` and not from `DOCKER_CONFIG`, where the
-  build stage isolates the login, so every public release failed at the
-  bill of materials' attestation with "No credentials found for registry".
+- `image-build.yml`, in a public repository: the bill of materials'
+  attestation calls `actions/attest` directly, since
+  `actions/attest-sbom` is deprecated, and neither attestation asks for a
+  storage record, which failed on every release with a warning.
 
 ## v1.28.0 - 2026-11-01
 
@@ -95,6 +90,18 @@ committed: the commit log already holds that.
   managed-agents, pins it by commit and keeps running that copy. A
   repository still on it moves to `lateregate.yml`; see the README, "The
   per-push gate".
+
+### Fixed
+
+- `image-build.yml`: the version check pulls the candidate quietly before
+  it runs it. `docker run` printed its pull progress, "Unable to find
+  image … locally", ahead of the binary's output, so every image whose
+  version was checked failed the check.
+- `image-build.yml`, in a public repository: the attestations push to the
+  registry with the job's login. `actions/attest` reads its credentials
+  from `$HOME/.docker/config.json` and not from `DOCKER_CONFIG`, where the
+  build stage isolates the login, so every public release failed at the
+  bill of materials' attestation with "No credentials found for registry".
 
 ## v1.27.0 - 2026-10-31
 
