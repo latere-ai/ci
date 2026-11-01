@@ -33,12 +33,12 @@ on:
         description: "golangci-lint version."
         required: false
         type: string
-        default: "v2.13.1"
+        default: "v2.15.0"
       goreleaser_version:
         description: "goreleaser version. Explicit rather than `latest` so a run cannot pick up a goreleaser build published after this workflow was reviewed."
         required: false
         type: string
-        default: "v2.17.1"
+        default: "v2.19.0"
       run_lint:
         description: "Run golangci-lint before release."
         required: false

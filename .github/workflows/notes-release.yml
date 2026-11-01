@@ -42,7 +42,7 @@ on:
         description: "GitHub CLI release fetched for the publish step when the runner has none, verified against its checksums file. Hosted runners ship gh and skip the fetch."
         required: false
         type: string
-        default: "2.100.0"
+        default: "2.103.3"
 
 permissions:
   contents: write

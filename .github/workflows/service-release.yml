@@ -63,17 +63,17 @@ on:
         description: "GitHub CLI release fetched for the publish step when the runner has none, verified against the release's checksums file. Hosted runners ship gh and skip the fetch."
         required: false
         type: string
-        default: "2.100.0"
+        default: "2.103.3"
       cosign_version:
         description: "cosign release the image is signed with, installed and verified by sigstore/cosign-installer. Explicit so a run cannot pick up a cosign build published after this workflow was reviewed."
         required: false
         type: string
-        default: "v3.0.6"
+        default: "v3.1.4"
       syft_version:
         description: "syft release that writes the source and image SBOMs, installed by anchore/sbom-action through the installer at that release's tag. Explicit for the same reason as cosign_version."
         required: false
         type: string
-        default: "v1.51.1"
+        default: "v1.55.0"
       build_mode:
         description: "split = build frontend + Go binary in CI, then Dockerfile.ci packages the prebuilt binary (asset-hash pinned smoke). dockerfile = one Dockerfile builds everything (no asset pin; smoke proves liveness only)."
         required: false
