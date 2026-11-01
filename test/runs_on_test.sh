@@ -96,11 +96,12 @@ for f in $files; do
     fi
 
     # The module cache restore is a hosted-runner optimization and a
-    # self-hosted-runner failure.
+    # self-hosted-runner failure. runner.environment names the kind of
+    # runner directly; the older form reads it from the label.
     setups=$(grep -c 'uses: actions/setup-go' "$f")
-    gated=$(grep -cE "cache: (false|\\$\\{\\{ startsWith\\((inputs\\.runs_on|matrix\\.os), 'ubuntu-'\\))" "$f")
+    gated=$(grep -cE "cache: (false|\\$\\{\\{ runner\\.environment == 'github-hosted' \\}\\}|\\$\\{\\{ startsWith\\((inputs\\.runs_on|matrix\\.os), 'ubuntu-'\\))" "$f")
     if [ "$setups" -eq "$gated" ]; then
-        pass "$name gates every setup-go cache on a hosted label ($setups)"
+        pass "$name gates every setup-go cache on a hosted runner ($setups)"
     else
         fail "$name restores a Go cache unconditionally (setup-go=$setups gated=$gated)"
     fi
