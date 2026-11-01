@@ -181,7 +181,7 @@ jobs:
           go-version: ${{ inputs.go_version }}
           cache: ${{ startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-') }}
       - run: make cover
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         # The gate already reports its result in the log. Storage quota must
         # not fail an otherwise successful coverage check.
