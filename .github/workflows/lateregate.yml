@@ -44,6 +44,11 @@ on:
         required: false
         type: string
         default: ""
+      frontend_browser_package:
+        description: "Directory of a Bun package whose tests drive Chromium. Before the frontend gate, the package is installed there and Playwright installs Chromium with its system libraries. Empty installs no browser."
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -185,6 +190,15 @@ jobs:
         # fails with ETXTBSY, so each job installs into its own temp dir.
         env:
           HOME: ${{ runner.temp }}
+      # A failed install is not its own failure: the frontend gate then fails
+      # on the test that needs the browser, and the other gates still report.
+      - name: Install the browser a frontend's tests drive
+        if: ${{ matrix.gate == 'frontend' && inputs.frontend_browser_package != '' }}
+        continue-on-error: true
+        working-directory: ${{ inputs.frontend_browser_package || '.' }}
+        run: |
+          bun install --frozen-lockfile
+          bunx playwright install --with-deps chromium
       - name: Prepare TypeScript enum projects
         if: ${{ matrix.gate == 'enum-typescript' }}
         run: go -C "$GATE_MODULE" tool lateregate enum-typescript-prepare -C "$GITHUB_WORKSPACE"
@@ -307,6 +321,15 @@ jobs:
         # fails with ETXTBSY, so each job installs into its own temp dir.
         env:
           HOME: ${{ runner.temp }}
+      # A failed install is not its own failure: the frontend gate then fails
+      # on the test that needs the browser, and the other gates still report.
+      - name: Install the browser a frontend's tests drive
+        if: ${{ contains(fromJSON(steps.plan.outputs.gates || '[]'), 'frontend') && inputs.frontend_browser_package != '' }}
+        continue-on-error: true
+        working-directory: ${{ inputs.frontend_browser_package || '.' }}
+        run: |
+          bun install --frozen-lockfile
+          bunx playwright install --with-deps chromium
       - name: Prepare TypeScript enum projects
         id: prepare
         if: ${{ contains(fromJSON(steps.plan.outputs.gates || '[]'), 'enum-typescript') }}

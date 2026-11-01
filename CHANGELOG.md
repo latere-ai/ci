@@ -63,6 +63,10 @@ committed: the commit log already holds that.
   consumers' module graph (managed-agents pins it in `internal/gate`).
   Every gate runs from that module with `-C` set to the repository root;
   empty keeps the root.
+- `lateregate.yml` takes `frontend_browser_package`, the Bun package whose
+  tests drive Chromium: Playwright installs the browser before the
+  `frontend` gate, on a hosted runner and on the self-hosted one. Empty
+  installs nothing.
 - `lateregate.yml` and `ci-gate-bump.yml` set up Node 24 and Bun for
   lateregate's `frontend` gate as they do for `enum-typescript`, so a
   repository that names its Bun packages under `frontend.projects` (from

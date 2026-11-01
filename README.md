@@ -114,6 +114,7 @@ that applies does not run is a dated waiver in the repository's
 | `test_os` | empty: the `runs_on` runner | the runners `test` runs on, as a JSON array |
 | `runs_on` | the [runner policy](#runners) | the runner label for every other job |
 | `gate_module` | empty: the root | the directory of the module whose `go.mod` pins ci-gate, for a repository that keeps the tool out of its consumers' module graph; lateregate runs from there and checks the whole repository |
+| `frontend_browser_package` | empty: no browser | the directory of a Bun package whose tests drive Chromium; before the `frontend` gate, the package is installed there and Playwright installs Chromium with its system libraries |
 
 golangci-lint's version is pinned in the binary, so there is no input for
 it. A repository that cannot lint waives `lint` with a reason and a date
