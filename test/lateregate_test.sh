@@ -560,10 +560,10 @@ check_enum_setup() { # job runtime-condition prepare-condition run-step
     else
         fail "$1: the TypeScript enum gate must pin a Node major"
     fi
-    if job_step "$block" 'uses: oven-sh/setup-bun@' | grep -qxF '          bun-version: "1.3.14"'; then
+    if job_step "$block" 'uses: oven-sh/setup-bun@' | grep -qxF '          bun-version: "1.4.4"'; then
         pass "$1: the TypeScript enum gate pins Bun"
     else
-        fail "$1: the TypeScript enum gate must pin Bun 1.3.14"
+        fail "$1: the TypeScript enum gate must pin Bun 1.4.4"
     fi
     if job_step "$block" 'uses: oven-sh/setup-bun@' | grep -qxF '          HOME: ${{ runner.temp }}'; then
         pass "$1: Bun installs into the job's own temp directory"

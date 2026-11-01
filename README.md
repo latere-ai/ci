@@ -182,7 +182,7 @@ own directory, so a path relative to it works on every runner.
 
 The optional `enum-go` and `enum-typescript` gates run when the repository
 declares enum domains in `.lateregate.yaml`. For `enum-typescript` the
-workflow sets up Node 24 and Bun 1.3.14 and runs `go tool lateregate
+workflow sets up Node 26 and Bun 1.4.4 and runs `go tool lateregate
 enum-typescript-prepare` before checking, which installs each configured
 project's dependencies from its committed npm or Bun lockfile. Go gates
 install no JavaScript tooling. Domain configuration is documented in
@@ -388,7 +388,7 @@ pipeline can `kubectl set image` without reading the manifests.
 | `smoke_script` | `tools/smoke/release.sh` | the post-deploy smoke |
 | `smoke_scope` | empty | an OAuth scope requested with the smoke token |
 | `build_cli`, `cli_build_cmd` | `false`, empty | also build command-line binaries (the command writes them under `dist/`) and attach them to the release |
-| `go_version`, `bun_version` | `1.27`, `1.3.14` | toolchains |
+| `go_version`, `bun_version` | `1.27`, `1.4.4` | toolchains |
 | `kubectl_version` | `1.35.1` | fetched, checksum-verified, when the runner has none |
 | `gh_version` | empty: `versions.sh` | fetched, checksum-verified, when the runner has none |
 | `cosign_version`, `syft_version` | empty: `versions.sh` | the image signer and the SBOM generator |

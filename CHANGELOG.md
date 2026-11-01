@@ -72,6 +72,8 @@ committed: the commit log already holds that.
   consumers' module graph (managed-agents pins it in `internal/gate`).
   Every gate runs from that module with `-C` set to the repository root;
   empty keeps the root.
+- Bun moves to 1.4.4 in `lateregate.yml`, `ci-gate-bump.yml` and
+  `service-release.yml`; 1.3 cannot read the lockfile version 1.4 writes.
 - `lateregate.yml` takes `frontend_browser_package`, the Bun package whose
   tests drive Chromium: Playwright installs the browser before the
   `frontend` gate, on a hosted runner and on the self-hosted one. Empty
