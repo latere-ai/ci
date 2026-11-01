@@ -1,0 +1,70 @@
+name: image-by-digest
+description: Build one image, push it by digest under no tag, and check it reports the version the tag pins.
+inputs:
+  owner:
+    description: "Image namespace, from release-preflight."
+    required: true
+  name:
+    description: "Image name; the image is <registry>/<owner>/<name>."
+    required: true
+  registry:
+    description: "Registry host."
+    required: false
+    default: ghcr.io
+  dockerfile:
+    description: "Dockerfile path."
+    required: false
+    default: Dockerfile
+  context:
+    description: "Build context."
+    required: false
+    default: "."
+  platforms:
+    description: "Platforms to build, comma-separated."
+    required: false
+    default: linux/amd64,linux/arm64
+  build_args:
+    description: "Further build arguments, KEY=VALUE per line, beside VERSION, COMMIT and DATE."
+    required: false
+    default: ""
+  version_args:
+    description: "Arguments that make the image print its version, such as `version` or `-version`. Empty skips the check."
+    required: false
+    default: ""
+  version_expect:
+    description: "How that output starts, with {name} and {tag} replaced."
+    required: false
+    default: "{name} {tag}"
+  commit:
+    description: "Short commit, from release-preflight."
+    required: false
+    default: ""
+  date:
+    description: "Commit date, from release-preflight."
+    required: false
+    default: ""
+outputs:
+  ref:
+    description: "<registry>/<owner>/<name>"
+    value: ${{ steps.build.outputs.ref }}
+  digest:
+    description: "The pushed digest, sha256:..."
+    value: ${{ steps.build.outputs.digest }}
+runs:
+  using: composite
+  steps:
+    - id: build
+      shell: bash
+      env:
+        REGISTRY: ${{ inputs.registry }}
+        OWNER: ${{ inputs.owner }}
+        NAME: ${{ inputs.name }}
+        DOCKERFILE: ${{ inputs.dockerfile }}
+        CONTEXT: ${{ inputs.context }}
+        PLATFORMS: ${{ inputs.platforms }}
+        BUILD_ARGS: ${{ inputs.build_args }}
+        VERSION_ARGS: ${{ inputs.version_args }}
+        VERSION_EXPECT: ${{ inputs.version_expect }}
+        COMMIT: ${{ inputs.commit }}
+        DATE: ${{ inputs.date }}
+      run: bash "$GITHUB_ACTION_PATH/run.sh"
