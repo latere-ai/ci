@@ -79,14 +79,20 @@ new_case
 stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs main:null)" 1
 stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs main:null)" 2
 stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs main:success)"
+stub_gh_fixture "$W" "repos/$REPO/commits/$SHA" "{\"parents\":[{\"sha\":\"$PARENT\"}]}"
+stub_gh_fixture "$W" "repos/$REPO/compare/$PARENT...$SHA" '{"files":[{"filename":"main.go"}]}'
 WAIT=60 run_case "a running verify is waited for" 0 "concluded success"
 
 new_case
 stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs main:null)"
+stub_gh_fixture "$W" "repos/$REPO/commits/$SHA" "{\"parents\":[{\"sha\":\"$PARENT\"}]}"
+stub_gh_fixture "$W" "repos/$REPO/compare/$PARENT...$SHA" '{"files":[{"filename":"main.go"}]}'
 WAIT=0 run_case "wait_minutes 0 refuses a running verify with the re-run command" 1 "gh run rerun 42 --failed --repo $REPO"
 
 new_case
 stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs main:cancelled)"
+stub_gh_fixture "$W" "repos/$REPO/commits/$SHA" "{\"parents\":[{\"sha\":\"$PARENT\"}]}"
+stub_gh_fixture "$W" "repos/$REPO/compare/$PARENT...$SHA" '{"files":[{"filename":"main.go"}]}'
 WAIT=60 run_case "a cancelled verify refuses: the commit was never verified" 1 "was cancelled on $SHA"
 
 new_case
@@ -95,7 +101,39 @@ WAIT=60 run_case "a re-run that succeeded after a cancel releases" 0 "concluded 
 
 new_case
 stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs main:cancelled main:null)"
+stub_gh_fixture "$W" "repos/$REPO/commits/$SHA" "{\"parents\":[{\"sha\":\"$PARENT\"}]}"
+stub_gh_fixture "$W" "repos/$REPO/compare/$PARENT...$SHA" '{"files":[{"filename":"main.go"}]}'
 WAIT=0 run_case "a re-run still going after a cancel counts as running" 1 "has not concluded"
+
+# The commit `lateregate release` cuts changes CHANGELOG.md alone and is
+# pushed with its tag, so its own run is still going when the release
+# reads it; it carries its parent's code, and the parent decides.
+docs_only() {
+    stub_gh_fixture "$W" "repos/$REPO/commits/$SHA" "{\"parents\":[{\"sha\":\"$PARENT\"}]}"
+    stub_gh_fixture "$W" "repos/$REPO/compare/$PARENT...$SHA" '{"files":[{"filename":"CHANGELOG.md"}]}'
+}
+new_case
+stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs main:null)"
+docs_only
+stub_gh_fixture "$W" "$(runs_url $PARENT)" "$(runs main:success)"
+WAIT=0 run_case "a release commit whose own run is still going reads its parent" 0 "concluded success on $PARENT"
+
+new_case
+stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs main:cancelled)"
+docs_only
+stub_gh_fixture "$W" "$(runs_url $PARENT)" "$(runs main:success)"
+WAIT=0 run_case "a docs-only commit whose run was cancelled reads its parent" 0 "concluded success on $PARENT"
+
+new_case
+stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs main:null)"
+docs_only
+stub_gh_fixture "$W" "$(runs_url $PARENT)" "$(runs main:failure)"
+WAIT=0 run_case "a release commit on a red parent refuses" 1 "concluded 'failure' on $PARENT"
+
+new_case
+stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs main:failure)"
+docs_only
+WAIT=0 run_case "a run that failed on a docs-only commit still refuses" 1 "concluded 'failure' on $SHA"
 
 new_case
 stub_gh_fixture "$W" "$(runs_url $SHA)" '{"workflow_runs":[]}'

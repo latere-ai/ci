@@ -167,7 +167,8 @@ One job, so a release on the self-hosted runner queues for it once. Steps:
    Inputs `verify_workflow` (default `verify.yml`), `wait_minutes` (default 60;
    0 refuses at once while the run is going, for the self-hosted runner),
    `skip_paths` (default `specs/**` and `*.md`: a commit that changes only
-   these is read through to its parent).
+   these carries its parent's code, so its parent is read where its own
+   run is missing, still going or cancelled).
 2. **`release-preflight`**: namespace (override `vars.RELEASE_IMAGE_NAMESPACE`),
    CHANGELOG section, no build metadata, build identity.
 3. **Archives**, when `archives_command` is set: the service's own script

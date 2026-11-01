@@ -17,14 +17,17 @@
 #                           runs on the other.
 #   cancelled               refused: a newer push superseded the run, so
 #                           the commit itself was never verified.
-#   no run at all           when the commit changes nothing but SKIP_PATHS,
-#                           verify's path filter skipped it and it carries
-#                           its parent's code, so the parent is read
-#                           instead. Otherwise the run may not exist yet,
-#                           because a release pushes the branch and the tag
-#                           together, so it is waited for up to five
-#                           minutes (never longer than WAIT_MINUTES), then
-#                           refused.
+#   no run at all           the run may not exist yet, because a release
+#                           pushes the branch and the tag together, so it
+#                           is waited for up to five minutes (never longer
+#                           than WAIT_MINUTES), then refused.
+#
+# A commit that changes nothing but SKIP_PATHS carries its parent's code,
+# so where its own runs are running, cancelled or missing, the parent is
+# read instead. That is the commit `lateregate release` cuts: it changes
+# CHANGELOG.md alone and is pushed with its tag, so its own verify run has
+# only just started when the release reads it, or the path filter skipped
+# it. A run that concluded on the commit itself still decides.
 #
 # Inputs, from the environment: GITHUB_REPOSITORY, GITHUB_SHA,
 # GITHUB_REF_NAME, GITHUB_RUN_ID, VERIFY_WORKFLOW (the workflow file name;
@@ -114,6 +117,24 @@ read_change() {
     done <<< "$files"
 }
 
+# Moves to the parent when commit $sha changes only skipped paths, saying
+# why with $1, and fails when it changes code. What a commit changes is read
+# once, not on every poll.
+changed_sha=""
+through() {
+    if [ "$changed_sha" != "$sha" ]; then
+        read_change "$sha"
+        changed_sha=$sha
+    fi
+    [ -z "$CODE" ] || return 1
+    walked=$((walked + 1))
+    if [ "$walked" -gt "$MAX_WALK" ]; then
+        die "$VERIFY_WORKFLOW concluded on none of the $MAX_WALK commits up to $GITHUB_SHA"
+    fi
+    echo "$1 on $sha, which changes only skipped paths; reading its parent $PARENT"
+    sha=$PARENT
+}
+
 start=$(date +%s)
 deadline=$((start + WAIT_MINUTES * 60))
 appear=5
@@ -133,9 +154,11 @@ while :; do
             die "$VERIFY_WORKFLOW concluded '$RUNS' on $sha; a release is cut from a green tree"
             ;;
         cancelled)
+            through "$VERIFY_WORKFLOW was cancelled" && continue
             die "$VERIFY_WORKFLOW was cancelled on $sha, superseded by a newer push, so the commit was never verified. Re-run that $VERIFY_WORKFLOW run, or tag a newer commit."
             ;;
         pending)
+            through "$VERIFY_WORKFLOW has not concluded" && continue
             if [ "$(date +%s)" -ge "$deadline" ]; then
                 if [ "$WAIT_MINUTES" -eq 0 ]; then
                     die "$VERIFY_WORKFLOW has not concluded on $sha, and this release does not wait for it. Once it is green: gh run rerun ${GITHUB_RUN_ID:-<this run>} --failed --repo ${GITHUB_REPOSITORY}"
@@ -146,16 +169,7 @@ while :; do
             sleep "$POLL_SECONDS"
             ;;
         none)
-            read_change "$sha"
-            if [ -z "$CODE" ]; then
-                walked=$((walked + 1))
-                if [ "$walked" -gt "$MAX_WALK" ]; then
-                    die "$VERIFY_WORKFLOW ran on none of the $MAX_WALK commits up to $GITHUB_SHA"
-                fi
-                echo "$VERIFY_WORKFLOW skipped $sha, which changes only skipped paths; reading its parent $PARENT"
-                sha=$PARENT
-                continue
-            fi
+            through "$VERIFY_WORKFLOW has no run" && continue
             if [ "$(date +%s)" -ge "$appear_deadline" ]; then
                 die "$VERIFY_WORKFLOW has no run on $sha, which changes $CODE; tag a commit whose $VERIFY_WORKFLOW ran"
             fi

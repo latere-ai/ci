@@ -10,7 +10,7 @@ inputs:
     required: false
     default: "60"
   skip_paths:
-    description: "Shell patterns, one per line, for paths verify's path filter skips. A commit with no verify run that changes only these is read through to its parent."
+    description: "Shell patterns, one per line, for paths that change no code. A commit that changes only these carries its parent's code, so where its own verify run is missing, still going or cancelled, its parent is read instead; a run that concluded on the commit still decides."
     required: false
     default: |
       specs/*

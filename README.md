@@ -567,9 +567,13 @@ runner once:
 1. The tagged commit's `verify.yml` run on its branch push succeeded. A
    run still going is waited for up to `wait_minutes` (60); `"0"` refuses
    at once, for a private repository that should not hold a runner slot. A
-   cancelled run refuses, since the commit was never verified. A commit with
-   no run that changes only `skip_paths` (`specs/*` and `*.md`) is read
-   through to its parent.
+   cancelled run refuses, since the commit was never verified. A commit
+   that changes only `skip_paths` (`specs/*` and `*.md`) carries its
+   parent's code, so where its own run is missing, still going or
+   cancelled, its parent is read instead. That covers the commit
+   `lateregate release` cuts, which changes `CHANGELOG.md` alone and is
+   pushed with its tag, so its own run has only just started. A run that
+   concluded on the commit itself still decides.
 2. The tag carries no build metadata, is on the default branch, and has a
    `CHANGELOG.md` section. The namespace is `namespace`, else the
    repository variable `RELEASE_IMAGE_NAMESPACE`, else the repository

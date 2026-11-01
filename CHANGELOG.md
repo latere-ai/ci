@@ -28,7 +28,10 @@ committed: the commit log already holds that.
   `tag-images`, `signed-checksums`, `publish-release`, `verify-release`,
   `ensure-gh`), callable on their own as `latere-ai/ci/actions/<name>@v1`.
   A stage runs them from ci at its own commit, so a prerelease tag tries
-  its own steps.
+  its own steps. `verified-commit` reads a commit that changes only
+  `skip_paths` (the one `lateregate release` cuts, say) through to its
+  parent while its own run is still going, so a release does not wait for
+  a run over the same code.
 - `rollback-guard`, the shared step that refuses a tag once a newer
   `vX.Y.Z` exists.
 
