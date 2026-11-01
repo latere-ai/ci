@@ -533,7 +533,7 @@ whole caller.
 jobs:
   build:
     uses: latere-ai/ci/.github/workflows/image-build.yml@v1
-    permissions: { contents: read, packages: write, id-token: write, attestations: write }
+    permissions: { contents: read, actions: read, packages: write, id-token: write, attestations: write }
     with:
       image_1: '{"name": "exampled", "version_args": "version"}'
   conformance:            # the repository's own, against the digests
@@ -581,7 +581,10 @@ runner once:
    (`<ref>@<digest>`), for a deploy archive that pins the digests.
 
 Outputs: `owner`, `ref_1` to `ref_3`, `digest_1` to `digest_3`, and
-`images`, every `<ref>@<digest>` one per line.
+`images`, every `<ref>@<digest>` one per line. The calling job grants
+`contents: read`, `actions: read` (the verify runs), `packages: write`,
+`id-token: write` and `attestations: write`; one that grants less fails
+before it starts.
 
 **`image-publish.yml`** tags each digest with the release tag, writes
 `checksums.txt` over every file in `dist/` (and the run artifacts

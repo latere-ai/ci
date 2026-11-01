@@ -136,11 +136,13 @@ on:
         description: "Every image built, <ref>@<digest> one per line, for image-publish.yml."
         value: ${{ jobs.build.outputs.images }}
 
-# Keyless signing needs the job's OIDC token, the attestations need
-# attestations: write, and the pushes packages: write. A caller that grants
-# less fails before the job starts, so the caller's job grants all four.
+# actions: read lists the verify runs of the tagged commit. Keyless signing
+# needs the job's OIDC token, the attestations need attestations: write, and
+# the pushes packages: write. A caller that grants less fails before the job
+# starts, so the caller's job grants all five.
 permissions:
   contents: read
+  actions: read
   packages: write
   id-token: write
   attestations: write

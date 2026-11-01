@@ -8,6 +8,12 @@
 set -euo pipefail
 
 cd "${DIR:?}"
+# A directory here is work an archive script left unpacked; the release
+# attaches files, so it is refused rather than left out of the sums.
+if [ -n "$(find . -mindepth 1 -maxdepth 1 ! -type f)" ]; then
+    echo "::error::$DIR holds something other than files: $(find . -mindepth 1 -maxdepth 1 ! -type f | sed 's|^\./||' | tr '\n' ' ')" >&2
+    exit 1
+fi
 files=()
 while IFS= read -r f; do
     files+=("$f")

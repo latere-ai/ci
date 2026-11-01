@@ -19,10 +19,12 @@ permissions:
 jobs:
   build:
     uses: latere-ai/ci/.github/workflows/image-build.yml@v1
-    # The stage pushes images, signs them with the job's OIDC token and
-    # attests them; a calling job that grants less fails before it starts.
+    # The stage reads the tagged commit's verify runs, pushes images, signs
+    # them with the job's OIDC token and attests them; a calling job that
+    # grants less fails before it starts.
     permissions:
       contents: read
+      actions: read
       packages: write
       id-token: write
       attestations: write

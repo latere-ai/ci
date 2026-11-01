@@ -82,6 +82,15 @@ if DIR="$TMP/dist" bash "$REPO_ROOT/actions/signed-checksums/run.sh" > /dev/null
 else
     fail "signed-checksums runs"
 fi
+mkdir -p "$TMP/dist/unpacked"
+if out=$(DIR="$TMP/dist" bash "$REPO_ROOT/actions/signed-checksums/run.sh" 2>&1); then
+    fail "signed-checksums refuses a directory among the files"
+elif printf '%s' "$out" | grep -qF "holds something other than files: unpacked"; then
+    pass "signed-checksums refuses a directory among the files"
+else
+    fail "signed-checksums refuses a directory among the files ($out)"
+fi
+rmdir "$TMP/dist/unpacked"
 mkdir -p "$TMP/empty"
 if DIR="$TMP/empty" bash "$REPO_ROOT/actions/signed-checksums/run.sh" > /dev/null 2>&1; then
     fail "signed-checksums refuses an empty directory"
