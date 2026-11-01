@@ -45,9 +45,9 @@ new_case() {
 }
 run_case() {
     local name=$1 want=$2 text=$3 out rc
-    out=$(PATH="$W/bin:$PATH" STUB_GH_DIR="$W" GITHUB_REPOSITORY=$REPO GITHUB_SHA=$SHA \
+    out=$(cd "${CHECKOUT:-$W}" && PATH="$W/bin:$PATH" STUB_GH_DIR="$W" GITHUB_REPOSITORY=$REPO GITHUB_SHA=$SHA \
         GITHUB_REF_NAME=$TAG GITHUB_RUN_ID=42 POLL_SECONDS=0 \
-        WAIT_MINUTES=${WAIT:-60} bash "$SCRIPT" 2>&1)
+        VERIFY_WORKFLOW=${VERIFY-verify.yml} WAIT_MINUTES=${WAIT:-60} bash "$SCRIPT" 2>&1)
     rc=$?
     if [ "$rc" -eq "$want" ] && printf '%s' "$out" | grep -qF -- "$text"; then
         pass "$name"
@@ -125,6 +125,33 @@ WAIT=60 run_case "an API error refuses rather than reading as no run" 1 "cannot 
 
 new_case
 WAIT=soon run_case "a wait that is not a number of minutes refuses" 1 "takes a whole number of minutes"
+
+# An empty verify_workflow takes the workflow that calls lateregate.yml.
+gate_checkout() {
+    CHECKOUT=$(mktemp -d)
+    mkdir -p "$CHECKOUT/.github/workflows"
+    printf 'on: push\n' > "$CHECKOUT/.github/workflows/release.yaml"
+    local f
+    for f in "$@"; do
+        printf 'jobs:\n  verify:\n    uses: latere-ai/ci/.github/workflows/lateregate.yml@v1\n' > "$CHECKOUT/.github/workflows/$f"
+    done
+}
+new_case
+gate_checkout ci.yaml
+stub_gh_fixture "$W" "repos/$REPO/actions/workflows/ci.yaml/runs?head_sha=$SHA&event=push&per_page=20" "$(runs main:success)"
+VERIFY="" run_case "an empty verify_workflow takes the workflow that runs the gate" 0 "ci.yaml concluded success"
+rm -rf "$CHECKOUT"
+
+new_case
+gate_checkout
+VERIFY="" run_case "no workflow running the gate refuses" 1 "no workflow in .github/workflows calls"
+rm -rf "$CHECKOUT"
+
+new_case
+gate_checkout ci.yml verify.yml
+VERIFY="" run_case "two workflows running the gate refuse" 1 "more than one workflow"
+rm -rf "$CHECKOUT"
+unset CHECKOUT
 
 if [ "$FAILURES" -gt 0 ]; then
     printf "\n%d failure(s)\n" "$FAILURES"

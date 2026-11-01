@@ -27,14 +27,15 @@
 #                           refused.
 #
 # Inputs, from the environment: GITHUB_REPOSITORY, GITHUB_SHA,
-# GITHUB_REF_NAME, GITHUB_RUN_ID, VERIFY_WORKFLOW (the workflow file name),
-# WAIT_MINUTES, SKIP_PATHS (one shell pattern per line, matched against
+# GITHUB_REF_NAME, GITHUB_RUN_ID, VERIFY_WORKFLOW (the workflow file name;
+# empty takes the one workflow in the checkout's .github/workflows that
+# calls latere-ai/ci's lateregate.yml, the per-push gate), WAIT_MINUTES, SKIP_PATHS (one shell pattern per line, matched against
 # each changed path; * matches across directories), POLL_SECONDS (30;
 # the tests set 0).
 set -euo pipefail
 
 : "${GITHUB_REPOSITORY:?}" "${GITHUB_SHA:?}" "${GITHUB_REF_NAME:?}"
-VERIFY_WORKFLOW=${VERIFY_WORKFLOW:-verify.yml}
+VERIFY_WORKFLOW=${VERIFY_WORKFLOW-verify.yml}
 WAIT_MINUTES=${WAIT_MINUTES:-60}
 POLL_SECONDS=${POLL_SECONDS:-30}
 SKIP_PATHS=${SKIP_PATHS-$'specs/*\n*.md'}
@@ -50,6 +51,18 @@ die() {
     echo "::error::$*" >&2
     exit 1
 }
+
+# The per-push gate is whichever workflow calls lateregate.yml; a
+# repository names it ci.yaml or verify.yml as it pleases.
+if [ -z "$VERIFY_WORKFLOW" ]; then
+    gates=$(grep -El 'uses:[[:space:]]*latere-ai/ci/\.github/workflows/lateregate\.yml@' .github/workflows/*.yml .github/workflows/*.yaml 2> /dev/null || true)
+    case "$(printf '%s' "$gates" | grep -c .)" in
+        1) VERIFY_WORKFLOW=$(basename "$gates") ;;
+        0) die "no workflow in .github/workflows calls latere-ai/ci's lateregate.yml; name the per-push workflow in verify_workflow" ;;
+        *) die "more than one workflow calls latere-ai/ci's lateregate.yml ($(printf '%s' "$gates" | xargs -n1 basename | tr '\n' ' ')); name the per-push one in verify_workflow" ;;
+    esac
+    echo "the per-push gate is $VERIFY_WORKFLOW"
+fi
 
 # Sets VERDICT to success, failure, pending, cancelled or none for the verify
 # runs of commit $1, and RUNS to their conclusions.

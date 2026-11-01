@@ -2,7 +2,7 @@ name: verified-commit
 description: Refuse to release unless the tagged commit passed the repository's verify workflow on its branch push.
 inputs:
   verify_workflow:
-    description: "File name of the per-push workflow whose run on the tagged commit must have succeeded."
+    description: "File name of the per-push workflow whose run on the tagged commit must have succeeded. Empty takes the one workflow in .github/workflows that calls lateregate.yml."
     required: false
     default: verify.yml
   wait_minutes:
