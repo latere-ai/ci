@@ -21,6 +21,9 @@ set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORKFLOWS="$REPO_ROOT/.github/workflows"
+# The composite actions run in a caller's job with that job's permissions,
+# so their `uses:` lines are held to the same rules as the workflows'.
+SCANNED=("$WORKFLOWS" "$REPO_ROOT/actions")
 FAILURES=0
 
 pass() { printf "  \033[32mPASS\033[0m %s\n" "$1"; }
@@ -33,7 +36,7 @@ assert_all_actions_sha_pinned() {
     local refs unpinned
     # Anchored so the `uses:` lines inside each workflow's header comment
     # (which document how a consumer calls it, at @v1) are not scanned.
-    refs=$(grep -rhoE '^ *-? *uses: +[A-Za-z0-9._-]+/[A-Za-z0-9._/-]+@[^ ]+' "$WORKFLOWS" \
+    refs=$(grep -rhoE '^ *-? *uses: +[A-Za-z0-9._-]+/[A-Za-z0-9._/-]+@[^ ]+' "${SCANNED[@]}" \
         | sed -E 's/^ *-? *uses: +//' | sort -u)
     if [ -z "$refs" ]; then
         fail "$name (no action references found at all)"
@@ -54,7 +57,7 @@ assert_no_latest_tool_versions() {
     local hits
     # Any `*version:` key, not a whitelist of the ones in use today, so a
     # future `node-version: latest` cannot slip past this.
-    hits=$(grep -rnE '^ *[a-z_-]*version: +.?latest' "$WORKFLOWS" || true)
+    hits=$(grep -rnE '^ *[a-z_-]*version: +.?latest' "${SCANNED[@]}" || true)
     if [ -z "$hits" ]; then
         pass "$name"
     else
@@ -68,7 +71,7 @@ assert_no_latest_tool_versions() {
 assert_pins_are_annotated() {
     local name="every SHA pin carries a '# vX' version comment"
     local bare
-    bare=$(grep -rnE '^ *-? *uses: +[A-Za-z0-9._-]+/[A-Za-z0-9._/-]+@[0-9a-f]{40} *$' "$WORKFLOWS" || true)
+    bare=$(grep -rnE '^ *-? *uses: +[A-Za-z0-9._-]+/[A-Za-z0-9._/-]+@[0-9a-f]{40} *$' "${SCANNED[@]}" || true)
     if [ -z "$bare" ]; then
         pass "$name"
     else
@@ -81,10 +84,10 @@ assert_pins_are_annotated() {
 assert_dependabot_watches_actions() {
     local name="dependabot keeps the action pins current"
     local cfg="$REPO_ROOT/.github/dependabot.yml"
-    if [ -f "$cfg" ] && grep -q 'github-actions' "$cfg"; then
+    if [ -f "$cfg" ] && grep -q 'github-actions' "$cfg" && grep -qF '"/actions/*"' "$cfg"; then
         pass "$name"
     else
-        fail "$name (no .github/dependabot.yml with a github-actions ecosystem)"
+        fail "$name (no .github/dependabot.yml with a github-actions ecosystem over / and /actions/*)"
     fi
 }
 
