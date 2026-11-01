@@ -49,8 +49,10 @@ committed: the commit log already holds that.
   beside `contents: write`. `run_lint` and `golangci_version` are accepted
   and ignored.
 - `notes-release.yml` publishes through `publish-release`.
-- The tool versions (cosign, syft, gh, the note reader) default to
-  `actions/lib/versions.sh` in every pipeline; each input still overrides.
+- The tool versions default to `actions/lib/versions.sh` in every
+  pipeline, and each input still overrides: cosign v3.1.4, syft v1.55.0,
+  gh 2.103.3, and the note reader at ci-gate v0.61.0 (was v0.29.0; the
+  notes it writes are the same).
 - `actions/setup-go` restores its cache wherever the runner is hosted, read
   from `runner.environment` rather than from the runner label.
 - `lateregate.yml` and `ci-gate-bump.yml` set up Node 24 and Bun for
