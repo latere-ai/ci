@@ -67,6 +67,41 @@ if [ "$count" -ge 1 ]; then
     fi
 fi
 
+printf "\033[1mcli-release gate\033[0m\n"
+
+# The release is cut only from a commit its per-push gate passed: the
+# verified job runs verified-commit, goreleaser needs it to have succeeded,
+# and a failed extra-system test stops it too. Lint is lateregate's, so ci
+# pins no golangci-lint action of its own.
+verified=$(sed -n '/^  verified:$/,/^  [a-z_-]*:$/p' "$WORKFLOW")
+if printf '%s\n' "$verified" | grep -qF 'uses: ./.latere-ci/actions/verified-commit'; then
+    pass "the verified job runs verified-commit"
+else
+    fail "the verified job does not run verified-commit"
+fi
+if grep -qF "needs: [verified, test]" "$WORKFLOW" \
+    && grep -qF "needs.verified.result == 'success' && needs.test.result != 'failure'" "$WORKFLOW"; then
+    pass "goreleaser runs only on a verified commit whose extra tests did not fail"
+else
+    fail "goreleaser can run without a verified commit"
+fi
+if grep -qF 'golangci/golangci-lint-action@' "$WORKFLOW"; then
+    fail "cli-release still runs golangci-lint itself"
+else
+    pass "cli-release leaves lint to lateregate"
+fi
+perms=$(sed -n '/^permissions:/,/^jobs:/p' "$WORKFLOW")
+if printf '%s\n' "$perms" | grep -qx '  actions: read' && printf '%s\n' "$perms" | grep -qx '  contents: write'; then
+    pass "the workflow may read the per-push runs and publish"
+else
+    fail "actions: read or contents: write is missing from the workflow permissions"
+fi
+if grep -qx '  actions: read' "$REPO_ROOT/examples/cli-release.yml"; then
+    pass "the example grants actions: read"
+else
+    fail "the example does not grant actions: read"
+fi
+
 if [ "$FAILURES" -gt 0 ]; then
     printf "\n%d check(s) failed\n" "$FAILURES"
     exit 1

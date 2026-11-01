@@ -1,0 +1,142 @@
+name: image-publish
+
+# Reusable publish stage of a signed image release, called after
+# image-build.yml and whatever the consumer runs between the two:
+#
+#   publish:
+#     needs: [build, conformance]
+#     uses: latere-ai/ci/.github/workflows/image-publish.yml@v1
+#     with:
+#       images: ${{ needs.build.outputs.images }}
+#
+# Flow (one job): each digest gets the release tag -> checksums.txt over
+# every file the release attaches, signed -> the GitHub release, its body the
+# tag's CHANGELOG section with any evidence appended, created as a draft,
+# its files attached, then published.
+#
+# A signature made here names this file: verify checksums.txt with
+#   cosign verify-blob --bundle checksums.txt.sigstore.json \
+#     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+#     --certificate-identity-regexp '^https://github\.com/latere-ai/ci/\.github/workflows/image-publish\.yml@' \
+#     --certificate-github-workflow-repository <owner>/<repository> checksums.txt
+
+on:
+  workflow_call:
+    inputs:
+      images:
+        description: "<ref>@<digest> one per line: image-build.yml's images output."
+        required: true
+        type: string
+      title:
+        description: "Release title prefix: Lux titles the release 'Lux v1.2.3'. Empty titles it with the tag alone."
+        required: false
+        type: string
+        default: ""
+      artifacts:
+        description: "Pattern of further run artifacts the release attaches, downloaded beside image-build's files and summed with them (a conformance fixture, for one). Empty attaches none."
+        required: false
+        type: string
+        default: ""
+      evidence:
+        description: "Pattern of run artifacts holding Markdown evidence; every .md file in them is appended to the release body. Empty appends none."
+        required: false
+        type: string
+        default: ""
+      go_version:
+        description: "Go toolchain version, for the note reader. Empty reads go.mod."
+        required: false
+        type: string
+        default: ""
+      runs_on:
+        description: "Runner label. By default the organization's runner policy picks it (README, Runners)."
+        required: false
+        type: string
+        default: ${{ (github.event.repository.private || contains(fromJSON('["push","schedule","workflow_dispatch","release"]'), github.event_name)) && (vars.CI_RUNNER_PRIVATE || vars.CI_RUNNER_PUBLIC) || 'ubuntu-latest' }}
+      cosign_version:
+        description: "cosign release. Empty takes the version in actions/lib/versions.sh."
+        required: false
+        type: string
+        default: ""
+      lateregate_version:
+        description: "ci-gate version whose note reader reads the CHANGELOG section. Empty takes the version in actions/lib/versions.sh."
+        required: false
+        type: string
+        default: ""
+      gh_version:
+        description: "GitHub CLI release fetched where the runner has none. Empty takes the version in actions/lib/versions.sh."
+        required: false
+        type: string
+        default: ""
+
+# contents: write creates the release, packages: write tags the images, and
+# id-token: write signs checksums.txt.
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+jobs:
+  publish:
+    name: tag the digests and publish the release
+    runs-on: ${{ inputs.runs_on }}
+    timeout-minutes: 30
+    steps:
+      # The CHANGELOG at the tag is the release body.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: The shared steps, at this workflow's own commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .latere-ci
+          sparse-checkout: actions
+          persist-credentials: false
+      - name: Keep the shared steps out of git status
+        run: echo '/.latere-ci/' >> .git/info/exclude
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ inputs.go_version }}
+          go-version-file: ${{ inputs.go_version == '' && 'go.mod' || '' }}
+          cache: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-dist
+          path: dist
+      - if: ${{ inputs.artifacts != '' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: ${{ inputs.artifacts }}
+          path: dist
+          merge-multiple: true
+      - if: ${{ inputs.evidence != '' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: ${{ inputs.evidence }}
+          path: ${{ runner.temp }}/evidence
+          merge-multiple: true
+
+      - name: Isolate Docker credentials
+        run: echo "DOCKER_CONFIG=$RUNNER_TEMP/docker-config" >> "$GITHUB_ENV"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - uses: ./.latere-ci/actions/tag-images
+        with:
+          images: ${{ inputs.images }}
+      - uses: ./.latere-ci/actions/signed-checksums
+        with:
+          dir: dist
+          cosign_version: ${{ inputs.cosign_version }}
+      - uses: ./.latere-ci/actions/publish-release
+        with:
+          title: ${{ inputs.title }}
+          files: dist/*
+          evidence: ${{ inputs.evidence != '' && format('{0}/evidence/*.md', runner.temp) || '' }}
+          lateregate_version: ${{ inputs.lateregate_version }}
+          gh_version: ${{ inputs.gh_version }}

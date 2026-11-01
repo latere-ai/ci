@@ -9,12 +9,18 @@ name: cli-release
 #       uses: latere-ai/ci/.github/workflows/cli-release.yml@v1
 #       secrets: inherit
 #
-# Flow: lint -> test -> goreleaser. goreleaser builds the cross-platform
-# binaries, driven by the consumer repo's .goreleaser.yaml, and publishes the
-# GitHub release whose body is the tag's CHANGELOG.md section; a tag without
-# one fails before goreleaser runs. A consumer whose .goreleaser.yaml signs
-# its release reads the key from RELEASE_SIGNING_KEY in goreleaser's
-# environment.
+# Flow: the tagged commit passed its per-push gate -> tests on the extra
+# systems test_os lists, if any -> goreleaser. Lint and the Linux tests ran
+# in lateregate.yml on the branch push, so the release reads that run's
+# verdict rather than running them again. goreleaser builds the
+# cross-platform binaries, driven by the consumer repo's .goreleaser.yaml,
+# and publishes the GitHub release whose body is the tag's CHANGELOG.md
+# section; a tag without one fails before goreleaser runs. A consumer whose
+# .goreleaser.yaml signs its release reads the key from RELEASE_SIGNING_KEY
+# in goreleaser's environment.
+#
+# The caller grants actions: read beside contents: write, so the release can
+# read the per-push run.
 
 on:
   workflow_call:
@@ -30,47 +36,87 @@ on:
         type: string
         default: "1.27"
       golangci_version:
-        description: "golangci-lint version."
+        description: "Ignored: lint runs in lateregate.yml on every push, with the golangci-lint version ci-gate pins. Kept so a caller that passes it still runs."
         required: false
         type: string
-        default: "v2.15.0"
+        default: ""
       goreleaser_version:
         description: "goreleaser version. Explicit rather than `latest` so a run cannot pick up a goreleaser build published after this workflow was reviewed."
         required: false
         type: string
         default: "v2.19.0"
       run_lint:
-        description: "Run golangci-lint before release."
+        description: "Ignored: lint runs in lateregate.yml on every push, and the release reads that run's verdict. Kept so a caller that passes it still runs."
         required: false
         type: boolean
-        default: true
+        default: false
       run_tests:
-        description: "Run go vet + race tests before release."
+        description: "Run go vet and the race tests on the systems test_os lists before the release. false skips them."
         required: false
         type: boolean
         default: true
       test_os:
-        description: "JSON array of runners for the test job; empty means the runner runs_on resolves to. A CLI that ships a darwin binary lists macos-latest here so the release, not every push, pays for the macOS run."
+        description: "JSON array of runners the release tests on before it builds, beyond the push's own run. Empty runs none: the tagged commit already passed its per-push tests. A CLI that ships a darwin binary lists macos-latest here so the release, not every push, pays for the macOS run."
         required: false
         type: string
         default: ""
-      lateregate_version:
-        description: "latere-ai/ci-gate version whose `release-notes` reads the CHANGELOG.md section for the tag. Explicit rather than the consumer's tool pin so the reader is the same in every repository, including ones that pin no Go tool."
+      verify_workflow:
+        description: "File name of the per-push workflow whose run on the tagged commit must have passed. Empty takes the one workflow in .github/workflows that calls lateregate.yml."
         required: false
         type: string
-        default: "v0.61.0"
+        default: ""
+      wait_minutes:
+        description: "How long the release waits for a per-push run that is still going."
+        required: false
+        type: string
+        default: "60"
+      lateregate_version:
+        description: "latere-ai/ci-gate version whose `release-notes` reads the CHANGELOG.md section for the tag, rather than the consumer's tool pin, so the reader is the same in every repository, including ones that pin no Go tool. Empty takes the version in actions/lib/versions.sh."
+        required: false
+        type: string
+        default: ""
     secrets:
       RELEASE_SIGNING_KEY:
         description: "The private key a consumer's .goreleaser.yaml `signs` entry signs the release with, in whatever encoding its signer reads. A repository secret of this name reaches the pipeline through 'secrets: inherit', and only the goreleaser step sees it. Optional: a consumer that signs nothing has none, and the variable is empty."
         required: false
 
+# contents: write publishes the release; actions: read reads the per-push
+# run on the tagged commit.
 permissions:
   contents: write
+  actions: read
 
 jobs:
-  lint:
-    if: ${{ inputs.run_lint }}
+  # The tagged commit passed lateregate.yml on its branch push, lint and the
+  # tests on runs_on included.
+  verified:
     runs-on: ${{ inputs.runs_on }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/workflows
+      - name: The shared steps, at this workflow's own commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .latere-ci
+          sparse-checkout: actions
+          persist-credentials: false
+      - uses: ./.latere-ci/actions/verified-commit
+        with:
+          verify_workflow: ${{ inputs.verify_workflow }}
+          wait_minutes: ${{ inputs.wait_minutes }}
+
+  # The systems the push does not test on, macOS for a darwin binary.
+  test:
+    if: ${{ inputs.run_tests && inputs.test_os != '' && inputs.test_os != '[]' }}
+    needs: verified
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(inputs.test_os || '[]') }}
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -80,34 +126,15 @@ jobs:
           # The module cache is worth restoring on a hosted runner, which
           # starts empty. A self-hosted runner keeps its own between jobs,
           # and restoring a tarball over it fails on every file that exists.
-          cache: ${{ startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-') }}
-      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
-        with:
-          version: ${{ inputs.golangci_version }}
-          args: --timeout=3m
-
-  test:
-    if: ${{ inputs.run_tests }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: ${{ fromJSON(inputs.test_os || format('["{0}"]', inputs.runs_on)) }}
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: ${{ inputs.go_version }}
-          check-latest: true
-          cache: ${{ startsWith(matrix.os, 'ubuntu-') || startsWith(matrix.os, 'macos-') || startsWith(matrix.os, 'windows-') }}
+          cache: ${{ runner.environment == 'github-hosted' }}
       - run: go vet ./...
       - run: go test -race -timeout 10m ./...
 
   goreleaser:
-    # Gate the release on lint + test. Both are optional jobs; `needs` on a
-    # skipped job is satisfied, so disabling either still lets the release run.
-    needs: [lint, test]
-    if: ${{ always() && !cancelled() && !contains(needs.*.result, 'failure') }}
+    # A skipped test job (no test_os) satisfies `needs`; a failed one, or
+    # an unverified commit, stops the release.
+    needs: [verified, test]
+    if: ${{ always() && !cancelled() && needs.verified.result == 'success' && needs.test.result != 'failure' }}
     runs-on: ${{ inputs.runs_on }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -117,7 +144,25 @@ jobs:
         with:
           go-version: ${{ inputs.go_version }}
           check-latest: true
-          cache: ${{ startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-') }}
+          cache: ${{ runner.environment == 'github-hosted' }}
+
+      # goreleaser refuses to publish from a tree with an untracked file in
+      # it, so the shared steps' checkout is hidden from git status.
+      - name: The shared steps, at this workflow's own commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .latere-ci
+          sparse-checkout: actions
+          persist-credentials: false
+      - name: Keep the shared steps out of git status
+        run: echo '/.latere-ci/' >> .git/info/exclude
+      - name: Tool versions
+        id: versions
+        env:
+          LATEREGATE_VERSION: ${{ inputs.lateregate_version }}
+        run: bash .latere-ci/actions/lib/versions.sh
 
       - name: Read the release note for this tag
         # A tag is a release, and a release has notes. The section for this
@@ -128,6 +173,7 @@ jobs:
         # refuses to publish from a tree with an untracked file in it.
         env:
           TAG: ${{ github.ref_name }}
+          LATEREGATE_VERSION: ${{ steps.versions.outputs.lateregate }}
         run: |
           set -euo pipefail
           # Gate schemas evolve independently of this pinned note reader.
@@ -135,7 +181,7 @@ jobs:
           notes_root=$(mktemp -d)
           trap 'rm -rf "$notes_root"' EXIT
           cp CHANGELOG.md "$notes_root/CHANGELOG.md"
-          go run latere.ai/x/ci-gate/cmd/lateregate@${{ inputs.lateregate_version }} release-notes -C "$notes_root" "$TAG" > "$RUNNER_TEMP/notes.md"
+          go run "latere.ai/x/ci-gate/cmd/lateregate@${LATEREGATE_VERSION:?}" release-notes -C "$notes_root" "$TAG" > "$RUNNER_TEMP/notes.md"
 
       - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
@@ -145,7 +191,7 @@ jobs:
           args: release --clean --release-notes ${{ runner.temp }}/notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Only this step holds the signing key. The lint and test jobs run
-          # the consumer's linters and tests, which have no use for it, and
-          # every step that does not hold it is one fewer place it can leak.
+          # Only this step holds the signing key. The test job runs the
+          # consumer's tests, which have no use for it, and every step that
+          # does not hold it is one fewer place it can leak.
           RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}

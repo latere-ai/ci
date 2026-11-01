@@ -22,9 +22,9 @@ repository, by convention rather than through a long list of inputs.
 | --- | --- | --- | --- |
 | [`lateregate.yml`](.github/workflows/lateregate.yml) | every push and pull request | a Go repository | the plan, the gates (a job each on a hosted runner, one job on the self-hosted one), the test matrix, the wiring check |
 | [`ci-gate-bump.yml`](.github/workflows/ci-gate-bump.yml) | once a day | a Go repository that pins `latere.ai/x/ci-gate` | move the pin to the latest release when the bar passes on it, or open an issue |
-| [`go-verify.yml`](.github/workflows/go-verify.yml) | every push and pull request | a Go repository that has not moved to `lateregate.yml` | Makefile targets, probed |
 | [`service-release.yml`](.github/workflows/service-release.yml) | a `v*` tag | a Kubernetes service | build the image, deploy, smoke the live surface, publish the release |
-| [`cli-release.yml`](.github/workflows/cli-release.yml) | a `v*` tag | a command-line tool | lint, test, GoReleaser |
+| [`image-build.yml`](.github/workflows/image-build.yml), [`image-publish.yml`](.github/workflows/image-publish.yml), [`release-verify.yml`](.github/workflows/release-verify.yml) | a `v*` tag | a service that publishes signed images and lets others install them | build and sign the images by digest; then, after the repository's own jobs, tag them and publish the release; then verify what was published |
+| [`cli-release.yml`](.github/workflows/cli-release.yml) | a `v*` tag | a command-line tool | the tagged commit's per-push run passed, tests on the extra runners in `test_os`, GoReleaser |
 | [`notes-release.yml`](.github/workflows/notes-release.yml) | a `v*` tag | a module or library that builds nothing on a tag | publish the release |
 
 Every release pipeline publishes the GitHub release last, with the tag's
@@ -113,6 +113,8 @@ that applies does not run is a dated waiver in the repository's
 | `go_version` | `1.27` | the Go toolchain |
 | `test_os` | empty: the `runs_on` runner | the runners `test` runs on, as a JSON array |
 | `runs_on` | the [runner policy](#runners) | the runner label for every other job |
+| `gate_module` | empty: the root | the directory of the module whose `go.mod` pins ci-gate, for a repository that keeps the tool out of its consumers' module graph; lateregate runs from there and checks the whole repository |
+| `frontend_browser_package` | empty: no browser | the directory of a Bun package whose tests drive Chromium; before the `frontend` gate, the package is installed there and Playwright installs Chromium with its system libraries |
 
 golangci-lint's version is pinned in the binary, so there is no input for
 it. A repository that cannot lint waives `lint` with a reason and a date
@@ -165,6 +167,7 @@ failed, each a row in the step summary with its result and time, and each
 named in an annotation when it fails. A failed TypeScript setup fails
 `enum-typescript` without running it and leaves the other gates to run. A
 hosted runner keeps one job per gate, since its parallelism costs nothing.
+Node and Bun are set up only when `enum-typescript` or `frontend` runs.
 
 On a self-hosted label every job builds with `GOFLAGS=-trimpath`. Such a
 runner keeps one Go build and test cache for all of its runner processes,
@@ -179,7 +182,7 @@ own directory, so a path relative to it works on every runner.
 
 The optional `enum-go` and `enum-typescript` gates run when the repository
 declares enum domains in `.lateregate.yaml`. For `enum-typescript` the
-workflow sets up Node 24 and Bun 1.3.14 and runs `go tool lateregate
+workflow sets up Node 26 and Bun 1.4.4 and runs `go tool lateregate
 enum-typescript-prepare` before checking, which installs each configured
 project's dependencies from its committed npm or Bun lockfile. Go gates
 install no JavaScript tooling. Domain configuration is documented in
@@ -253,18 +256,6 @@ process's own `TMPDIR`, and on a self-hosted label every gate builds with
 `lateregate.yml`. No credential stays in the checkout while the new release
 and the repository's tests run; only the push step hands git the token.
 
-## The previous per-push gate: `go-verify.yml`
-
-`go-verify.yml` probes the repository's `Makefile` with `make -np` and
-runs the targets it finds. `fmt-check`, `test` and `lint-modernize` are
-required; `test-hermetic`, `test-race`, `cover`, `spec-lint`, `dist`,
-`validate`, `lint-config` and `license` run when present. A missing
-optional target skips its job, which is the gap `lateregate.yml` closes.
-It takes `go_version`, `test_os`, `runs_on`, `golangci_version` (default
-`v2.13.1`) and `run_lint` (default `true`). It stays until the last
-repository that calls it has moved; see
-[`examples/go-verify.yml`](examples/go-verify.yml) for the caller.
-
 ## A tag is a release, and a release has notes
 
 Every release pipeline here reads the tag's section from the consuming
@@ -281,7 +272,8 @@ write under it as work lands. The section says what changed for whoever
 uses the release, not what was committed.
 
 The reader is `lateregate release-notes` from `latere-ai/ci-gate`, run at
-the version each release pipeline pins in its `lateregate_version` input.
+the version [`actions/lib/versions.sh`](actions/lib/versions.sh) pins, or
+the one a caller passes as `lateregate_version`.
 Pinning it here rather than reading the consumer's tool pin makes the
 reader the same in every repository, including ones that pin no Go tool.
 In a Go repository the same binary runs in the pre-push hook and refuses
@@ -290,11 +282,9 @@ vX.Y.Z` moves the notes under `Unreleased` into the tag's section,
 commits, tags and pushes. A repository without the tool writes the
 section by hand and pushes the tag.
 
-In `service-release.yml` publishing is the last step, so when it fails on
-a missing section production is already serving the tag. That is the
-intended order, a release announces what is live. Re-running the release
-repeats the build and the deploy, and is refused once a newer tag exists;
-publishing the section by hand with `gh release create` needs neither.
+`service-release.yml` checks the section before it builds anything, so a
+tag without one deploys nothing. Publishing is still the last step: a
+release announces what is live.
 
 ## Releasing a service: `service-release.yml`
 
@@ -349,12 +339,16 @@ does not run the test suite: the per-push gate on the tagged commit is the
 verification, and `lateregate release` refuses to cut a tag while CI is
 red.
 
-The first step refuses a tag whose commit is not on the repository's
-default branch, so a tag pushed from a side branch, or one whose branch
-push was rejected while the tag went out, builds and deploys nothing. The
-next refuses a tag once a newer `vX.Y.Z` tag exists. A re-run repeats the
-build and the deploy, so re-running an older release would push it as
-`latest` and roll production back to it.
+Before anything is built, the shared `release-preflight` step refuses a
+tag that carries build metadata (the image is tagged with the git tag, and
+an image tag cannot hold `+`), a tag whose commit is not on the
+repository's default branch (a tag pushed from a side branch, or one whose
+branch push was rejected while the tag went out), and a tag with no
+`CHANGELOG.md` section. Then `rollback-guard` refuses a tag once a newer
+`vX.Y.Z` tag exists. A re-run repeats the build and the deploy, so
+re-running an older release would push it as `latest` and roll production
+back to it; the newer release carries its changes, and its notes can be
+published by hand with `gh release create`.
 
 ### What the repository provides
 
@@ -394,10 +388,11 @@ pipeline can `kubectl set image` without reading the manifests.
 | `smoke_script` | `tools/smoke/release.sh` | the post-deploy smoke |
 | `smoke_scope` | empty | an OAuth scope requested with the smoke token |
 | `build_cli`, `cli_build_cmd` | `false`, empty | also build command-line binaries (the command writes them under `dist/`) and attach them to the release |
-| `go_version`, `bun_version` | `1.27`, `1.3.14` | toolchains |
-| `kubectl_version`, `gh_version` | `1.35.1`, `2.100.0` | fetched, checksum-verified, when the runner has none |
-| `cosign_version`, `syft_version` | `v3.0.6`, `v1.51.1` | the image signer and the SBOM generator |
-| `lateregate_version` | `v0.29.0` | the `ci-gate` release whose `release-notes` reads the changelog |
+| `go_version`, `bun_version` | `1.27`, `1.4.4` | toolchains |
+| `kubectl_version` | `1.35.1` | fetched, checksum-verified, when the runner has none |
+| `gh_version` | empty: `versions.sh` | fetched, checksum-verified, when the runner has none |
+| `cosign_version`, `syft_version` | empty: `versions.sh` | the image signer and the SBOM generator |
+| `lateregate_version` | empty: `versions.sh` | the `ci-gate` release whose `release-notes` reads the changelog |
 | `runs_on` | the [runner policy](#runners) | the runner label for the job |
 
 | Secret | Meaning |
@@ -455,8 +450,11 @@ cosign verify ghcr.io/latere-ai/platformd@sha256:<digest> \
 Every release carries two CycloneDX 1.6 SBOMs as assets.
 `sbom-source.cdx.json` lists what the lockfiles in the checkout pin,
 development packages included, since they run in the job that holds the
-deploy credential. `sbom-image.cdx.json` lists what the image holds: the
-Go modules compiled into the binary and the base image's packages.
+deploy credential. `sbom-<image>.cdx.json` (`sbom-platformd.cdx.json` for
+`ghcr.io/latere-ai/platformd`) lists what the image holds: the Go modules
+compiled into the binary and the base image's packages. The signing, the
+image SBOM and the attestations are the shared `sign-image` step, the same
+one `image-build.yml` runs.
 
 A public caller also gets GitHub artifact attestations of the image's
 provenance and SBOM, pushed to the registry and checked with
@@ -519,6 +517,130 @@ without changing any, so a Role that misses a kind fails here rather than
 in a release. Rotating the credential is deleting the token Secret,
 re-applying the identity file, and running the same steps.
 
+## Releasing signed images: `image-build.yml`, `image-publish.yml`, `release-verify.yml`
+
+Three stages a repository calls with its own jobs between them, for a
+service that publishes images other people pull and verify: up to three
+images per release, built for linux/amd64 and linux/arm64, signed, with a
+bill of materials each, and archives beside them when the repository builds
+any. [`examples/image-release.yml`](examples/image-release.yml) is the
+whole caller.
+
+```yaml
+jobs:
+  build:
+    uses: latere-ai/ci/.github/workflows/image-build.yml@v1
+    permissions: { contents: read, actions: read, packages: write, id-token: write, attestations: write }
+    with:
+      image_1: '{"name": "exampled", "version_args": "version"}'
+  conformance:            # the repository's own, against the digests
+    needs: build
+    ...
+  publish:
+    needs: [build, conformance]
+    uses: latere-ai/ci/.github/workflows/image-publish.yml@v1
+    permissions: { contents: write, packages: write, id-token: write }
+    with:
+      images: ${{ needs.build.outputs.images }}
+  verify:
+    needs: publish
+    uses: latere-ai/ci/.github/workflows/release-verify.yml@v1
+    permissions: { contents: read, packages: read, attestations: read }
+    with:
+      images: exampled
+```
+
+**`image-build.yml`**, one job, so a release queues on the self-hosted
+runner once:
+
+1. The tagged commit's `verify.yml` run on its branch push succeeded. A
+   run still going is waited for up to `wait_minutes` (60); `"0"` refuses
+   at once, for a private repository that should not hold a runner slot. A
+   cancelled run refuses, since the commit was never verified. A commit
+   that changes only `skip_paths` (`specs/*` and `*.md`) carries its
+   parent's code, so where its own run is missing, still going or
+   cancelled, its parent is read instead. That covers the commit
+   `lateregate release` cuts, which changes `CHANGELOG.md` alone and is
+   pushed with its tag, so its own run has only just started. A run that
+   concluded on the commit itself still decides.
+2. The tag carries no build metadata, is on the default branch, and has a
+   `CHANGELOG.md` section. The namespace is `namespace`, else the
+   repository variable `RELEASE_IMAGE_NAMESPACE`, else the repository
+   owner, lowered, so a fork's tag publishes under the fork.
+3. `archives_command`, when set, writes the files the release attaches
+   into `dist/`.
+4. Each of `image_1` to `image_3` is built from its JSON (`name`, and
+   optionally `dockerfile`, `context`, `platforms`, `build_args`,
+   `version_args`, `version_expect`, `sbom_format`) with `VERSION`,
+   `COMMIT` and `DATE` as build arguments, pushed by digest under no tag,
+   asked for its version (`version_args`; it must print
+   `version_expect`, default `{name} {tag}`), signed, and given an SPDX bill
+   of materials in `dist/`. A public repository also gets GitHub's SBOM and
+   provenance attestations; a private one does not, since GitHub offers
+   them in private repositories only on Enterprise Cloud.
+5. `after_images_command`, when set, runs with `IMAGE_1` to `IMAGE_3`
+   (`<ref>@<digest>`), for a deploy archive that pins the digests.
+
+Outputs: `owner`, `ref_1` to `ref_3`, `digest_1` to `digest_3`, and
+`images`, every `<ref>@<digest>` one per line. The calling job grants
+`contents: read`, `actions: read` (the verify runs), `packages: write`,
+`id-token: write` and `attestations: write`; one that grants less fails
+before it starts.
+
+**`image-publish.yml`** tags each digest with the release tag, writes
+`checksums.txt` over every file in `dist/` (and the run artifacts
+`artifacts` names) and signs it, and publishes the release: the body is the
+tag's `CHANGELOG.md` section with the Markdown files of the `evidence`
+artifacts appended, created as a draft, its files attached, then published.
+A re-run edits the release rather than failing on it.
+
+**`release-verify.yml`** checks the published release with no checkout:
+`checksums.txt` is signed for this repository and the same check naming
+another repository is refused, every asset matches it, each image's tag
+resolves to a signed digest (and attested, in a public repository), and the
+body opens with the `CHANGELOG.md` section.
+
+### Verifying a release
+
+The signatures are keyless and name the stage that made them, as
+`service-release.yml`'s do. Any repository can call a public workflow, so
+the identity names the pipeline, and the repository check binds the
+source:
+
+```sh
+cosign verify ghcr.io/<owner>/<image>@sha256:<digest> \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp '^https://github\.com/latere-ai/ci/\.github/workflows/image-build\.yml@' \
+  --certificate-github-workflow-repository <owner>/<repository>
+
+cosign verify-blob --bundle checksums.txt.sigstore.json \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp '^https://github\.com/latere-ai/ci/\.github/workflows/image-publish\.yml@' \
+  --certificate-github-workflow-repository <owner>/<repository> checksums.txt
+sha256sum -c checksums.txt
+
+gh attestation verify oci://ghcr.io/<owner>/<image>@sha256:<digest> \
+  -R <owner>/<repository> --signer-workflow latere-ai/ci/.github/workflows/image-build.yml
+```
+
+### The shared steps
+
+Each stage checks out this repository at its own commit
+(`job.workflow_sha`) into `.latere-ci/` beside the caller's checkout and
+runs the composite actions under [`actions/`](actions/) from there, so a
+prerelease tag of ci runs its own steps, not `v1`'s. The directory is
+hidden from git (`.git/info/exclude`), so `git describe`, Go's VCS stamp
+and a dirty-tree check see the caller's tree alone. It is part of the
+docker build context; a Dockerfile that copies the whole context can list
+`.latere-ci` in `.dockerignore`.
+
+A repository whose release the stages do not fit calls the actions
+directly, as `latere-ai/ci/actions/<name>@v1`, inside jobs of its own; its
+signatures then name its own workflow. Tool versions (cosign, syft, gh,
+the note reader) are defined once, in
+[`actions/lib/versions.sh`](actions/lib/versions.sh), and every stage takes
+an input to override each.
+
 ## Releasing a command-line tool: `cli-release.yml`
 
 ```yaml
@@ -528,13 +650,22 @@ jobs:
     secrets: inherit
 ```
 
-`lint`, then `test` on each runner in `test_os`, then `goreleaser`, which
-builds the binaries from the repository's own `.goreleaser.yaml` and
-publishes the release with the changelog section as its body; a tag
-without a section fails before GoReleaser runs. Inputs: `go_version`,
-`golangci_version`, `goreleaser_version` (default `v2.17.1`),
-`lateregate_version`, `run_lint`, `run_tests`, `test_os` and `runs_on`.
-The caller grants `contents: write`.
+`verified` checks that the tagged commit passed its per-push gate on the
+branch push, with the shared `verified-commit` step, then `test` runs on
+each extra runner in `test_os` (macOS, for a darwin binary), then
+`goreleaser` builds the binaries from the repository's own
+`.goreleaser.yaml` and publishes the release with the changelog section as
+its body; a tag without a section fails before GoReleaser runs. Lint and
+the Linux tests ran in `lateregate.yml` on the push, so the release reads
+that run rather than repeating it. The per-push gate is the workflow that
+calls `lateregate.yml`, found in `.github/workflows`, or the file named in
+`verify_workflow`.
+
+Inputs: `go_version`, `goreleaser_version` (default `v2.17.1`),
+`lateregate_version`, `run_tests`, `test_os` (empty: no extra runners),
+`verify_workflow`, `wait_minutes` (default `60`) and `runs_on`.
+`run_lint` and `golangci_version` are accepted and ignored. The caller
+grants `contents: write` and `actions: read`.
 
 | Secret | Meaning |
 | --- | --- |
@@ -558,7 +689,8 @@ jobs:
 Nothing is built. The release body is the changelog section, the title is
 the tag (or `title: Name` for `Name vX.Y.Z`), and a hyphen in the version
 core marks a prerelease. A re-run edits the body rather than failing on an
-existing release.
+existing release. The publish is the shared `publish-release` step, the
+same one `service-release.yml` and `image-publish.yml` run.
 
 ## Runners
 
@@ -571,10 +703,11 @@ applies it as the default of its `runs_on` input:
 | public | `ubuntu-latest` | `linux-vm`, while hosted runners are down, for events only the repository starts |
 
 A caller that passes nothing gets the policy and its fallback. A label
-passed as `runs_on` overrides both. `test_os`, where a pipeline has one,
-defaults to the runner `runs_on` resolves to; in `lateregate.yml` the
-suite already runs there, so a repository that adds macOS passes
-`test_os: '["macos-latest"]'`.
+passed as `runs_on` overrides both. `test_os` in `lateregate.yml`
+defaults to the runner `runs_on` resolves to; the suite already runs
+there, so a repository that adds macOS passes
+`test_os: '["macos-latest"]'`. In `cli-release.yml` it lists only the
+extra runners the release tests on.
 
 The policy is one expression, and a repository's own jobs use it too:
 
@@ -673,8 +806,8 @@ changes.
   explicit mapping), and the runner needs network reach to the cluster and
   to the registry.
 
-`actions/setup-go` restores the module cache only on a hosted label,
-because a self-hosted runner keeps its own between jobs and restoring a
+`actions/setup-go` restores the module cache only on a hosted runner
+(`runner.environment == 'github-hosted'`), because a self-hosted runner keeps its own between jobs and restoring a
 tarball over it fails on every file that already exists.
 
 ## Run artifacts
@@ -716,8 +849,9 @@ repository that needs to hold still pins a full version, `@v1.17.0`.
 
 ## Supply chain
 
-Every `uses:` in these workflows is pinned to a full commit SHA, with the
-version it corresponds to in a trailing comment:
+Every `uses:` in these workflows and in the actions under `actions/` is
+pinned to a full commit SHA, with the version it corresponds to in a
+trailing comment:
 
 ```yaml
 - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

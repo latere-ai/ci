@@ -1,0 +1,104 @@
+name: release-verify
+
+# Reusable check of a published image release, from a runner with no
+# checkout of the repository, the way someone installing it would verify it.
+# A consumer calls it after image-publish.yml:
+#
+#   verify:
+#     needs: publish
+#     uses: latere-ai/ci/.github/workflows/release-verify.yml@v1
+#     with:
+#       images: ponsd
+#
+# It checks that checksums.txt is signed by image-publish.yml run for this
+# repository and that the same check naming another repository is refused,
+# that every asset matches checksums.txt, that each image's tag resolves to a
+# digest signed by image-build.yml run for this repository (with GitHub's
+# attestations when the repository is public), and that the release body
+# opens with the tag's CHANGELOG section.
+
+on:
+  workflow_call:
+    inputs:
+      images:
+        description: "Image names, one per line, under ghcr.io/<namespace>/."
+        required: true
+        type: string
+      namespace:
+        description: "Image namespace. Empty takes the repository variable RELEASE_IMAGE_NAMESPACE, else the repository owner, lowered."
+        required: false
+        type: string
+        default: ""
+      go_version:
+        description: "Go toolchain version, for the note reader."
+        required: false
+        type: string
+        default: "1.27"
+      runs_on:
+        description: "Runner label. By default the organization's runner policy picks it (README, Runners)."
+        required: false
+        type: string
+        default: ${{ (github.event.repository.private || contains(fromJSON('["push","schedule","workflow_dispatch","release"]'), github.event_name)) && (vars.CI_RUNNER_PRIVATE || vars.CI_RUNNER_PUBLIC) || 'ubuntu-latest' }}
+      cosign_version:
+        description: "cosign release. Empty takes the version in actions/lib/versions.sh."
+        required: false
+        type: string
+        default: ""
+      lateregate_version:
+        description: "ci-gate version whose note reader reads the CHANGELOG section. Empty takes the version in actions/lib/versions.sh."
+        required: false
+        type: string
+        default: ""
+      gh_version:
+        description: "GitHub CLI release fetched where the runner has none. Empty takes the version in actions/lib/versions.sh."
+        required: false
+        type: string
+        default: ""
+
+# Reads only: the release, the packages (a private repository's are not
+# public), and the attestations.
+permissions:
+  contents: read
+  packages: read
+  attestations: read
+
+jobs:
+  verify:
+    name: verify the release from a clean runner
+    runs-on: ${{ inputs.runs_on }}
+    timeout-minutes: 20
+    steps:
+      # The shared steps alone: nothing of the repository is checked out.
+      - name: The shared steps, at this workflow's own commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .latere-ci
+          sparse-checkout: actions
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ inputs.go_version }}
+          cache: false
+      - id: namespace
+        name: The image namespace
+        env:
+          NAMESPACE: ${{ inputs.namespace || vars.RELEASE_IMAGE_NAMESPACE || github.repository_owner }}
+        run: echo "owner=$(printf '%s' "$NAMESPACE" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+      - name: Isolate Docker credentials
+        run: echo "DOCKER_CONFIG=$RUNNER_TEMP/docker-config" >> "$GITHUB_ENV"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - uses: ./.latere-ci/actions/verify-release
+        with:
+          images: ${{ inputs.images }}
+          owner: ${{ steps.namespace.outputs.owner }}
+          signer_repository: ${{ job.workflow_repository }}
+          cosign_version: ${{ inputs.cosign_version }}
+          lateregate_version: ${{ inputs.lateregate_version }}
+          gh_version: ${{ inputs.gh_version }}

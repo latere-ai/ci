@@ -8,6 +8,94 @@ Pushing a `v1.MAJOR.MINOR` tag also moves the `v1` tag every consumer pins.
 A section says what changed for whoever calls these pipelines, not what was
 committed: the commit log already holds that.
 
+## Unreleased
+
+### Fixed
+
+- `image-build.yml`: the version check pulls the candidate quietly before
+  it runs it. `docker run` printed its pull progress, "Unable to find
+  image … locally", ahead of the binary's output, so every image whose
+  version was checked failed the check.
+- `image-build.yml`, in a public repository: the attestations push to the
+  registry with the job's login. `actions/attest` reads its credentials
+  from `$HOME/.docker/config.json` and not from `DOCKER_CONFIG`, where the
+  build stage isolates the login, so every public release failed at the
+  bill of materials' attestation with "No credentials found for registry".
+
+## v1.28.0 - 2026-11-01
+
+### Added
+
+- `image-build.yml`, `image-publish.yml` and `release-verify.yml`: the
+  stages of a signed image release, called with the repository's own jobs
+  (conformance, an install walk, a deploy) between them. The build stage
+  waits for the tagged commit's verify run, checks the tag, builds up to
+  three images by digest under no tag, checks each reports the tag's
+  version, signs it, writes its SPDX bill of materials and, in a public
+  repository, attests it. The publish stage tags the digests, signs
+  `checksums.txt` over the attached files, and publishes the release with
+  its files attached before it is visible. The verify stage checks the
+  published release from a runner with no checkout. See the README,
+  "Releasing signed images", and `examples/image-release.yml`.
+- `actions/`: the composite actions the stages are built from
+  (`verified-commit`, `release-preflight`, `image-by-digest`, `sign-image`,
+  `tag-images`, `signed-checksums`, `publish-release`, `verify-release`,
+  `ensure-gh`), callable on their own as `latere-ai/ci/actions/<name>@v1`.
+  A stage runs them from ci at its own commit, so a prerelease tag tries
+  its own steps. `verified-commit` reads a commit that changes only
+  `skip_paths` (the one `lateregate release` cuts, say) through to its
+  parent while its own run is still going, so a release does not wait for
+  a run over the same code.
+- `rollback-guard`, the shared step that refuses a tag once a newer
+  `vX.Y.Z` exists.
+
+### Changed
+
+- `service-release.yml` runs the shared steps: `release-preflight` checks
+  the tag (no build metadata, on the default branch, a `CHANGELOG.md`
+  section) before anything is built, so a tag without notes no longer
+  deploys before it fails; `sign-image` signs the image and writes its
+  SBOM; `publish-release` publishes the release as a draft until its files
+  are attached. The image SBOM asset is now `sbom-<image>.cdx.json`
+  (`sbom-platformd.cdx.json`), not `sbom-image.cdx.json`. Still one job,
+  and the deploy is unchanged.
+- `cli-release.yml` no longer runs lint and the tests again on the tag:
+  it checks that the tagged commit passed its per-push gate (the workflow
+  that calls `lateregate.yml`, or `verify_workflow`), then tests on the
+  extra runners in `test_os` alone. The caller grants `actions: read`
+  beside `contents: write`. `run_lint` and `golangci_version` are accepted
+  and ignored.
+- `notes-release.yml` publishes through `publish-release`.
+- The tool versions default to `actions/lib/versions.sh` in every
+  pipeline, and each input still overrides: cosign v3.1.4, syft v1.55.0,
+  gh 2.103.3, and the note reader at ci-gate v0.61.0 (was v0.29.0; the
+  notes it writes are the same).
+- `actions/setup-go` restores its cache wherever the runner is hosted, read
+  from `runner.environment` rather than from the runner label.
+- `lateregate.yml` takes `gate_module`, the directory of the module whose
+  `go.mod` pins ci-gate, for a repository that keeps the tool out of its
+  consumers' module graph (managed-agents pins it in `internal/gate`).
+  Every gate runs from that module with `-C` set to the repository root;
+  empty keeps the root.
+- Bun moves to 1.4.4 in `lateregate.yml`, `ci-gate-bump.yml` and
+  `service-release.yml`; 1.3 cannot read the lockfile version 1.4 writes.
+- `lateregate.yml` takes `frontend_browser_package`, the Bun package whose
+  tests drive Chromium: Playwright installs the browser before the
+  `frontend` gate, on a hosted runner and on the self-hosted one. Empty
+  installs nothing.
+- `lateregate.yml` and `ci-gate-bump.yml` set up Node 24 and Bun for
+  lateregate's `frontend` gate as they do for `enum-typescript`, so a
+  repository that names its Bun packages under `frontend.projects` (from
+  ci-gate v0.62.0) gets them installed, type-checked, tested and built on
+  every push without a job of its own.
+
+### Removed
+
+- `go-verify.yml`, its example and its tests. Its one caller,
+  managed-agents, pins it by commit and keeps running that copy. A
+  repository still on it moves to `lateregate.yml`; see the README, "The
+  per-push gate".
+
 ## v1.27.0 - 2026-10-31
 
 ### Fixed

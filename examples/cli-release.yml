@@ -1,16 +1,19 @@
 # Copy to a CLI repo as .github/workflows/release.yml. Requires a .goreleaser.yaml
-# in the repo. Pushing a vX.Y.Z tag lints, tests, and publishes the release with
-# cross-platform binaries.
+# in the repo. Pushing a vX.Y.Z tag checks that the tagged commit passed its
+# per-push gate (the workflow that calls lateregate.yml), then publishes the
+# release with cross-platform binaries.
 name: Release
 
 on:
   push:
     tags: ['v*']
 
-# Required: goreleaser creates the release. The org defaults to a read-only
-# token, so the calling job must grant contents: write.
+# Required: goreleaser creates the release, and the release reads the per-push
+# run on the tagged commit. The org defaults to a read-only token, so the
+# calling job grants contents: write and actions: read.
 permissions:
   contents: write
+  actions: read
 
 jobs:
   release:

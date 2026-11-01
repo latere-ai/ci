@@ -8,7 +8,10 @@ version: 2
 # comment.
 updates:
   - package-ecosystem: github-actions
-    directory: /
+    # The workflows, and each composite action under actions/.
+    directories:
+      - "/"
+      - "/actions/*"
     schedule:
       interval: weekly
     commit-message:

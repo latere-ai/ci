@@ -1,6 +1,6 @@
 ---
 title: One per-push quality bar for every Go repo — ci owns the workflow, ci-gate owns the checks
-status: partial
+status: superseded
 depends_on: []
 affects:
   - ci-gate/ (new repo: latere-ai/ci-gate, module latere.ai/x/ci-gate)
@@ -13,12 +13,17 @@ affects:
 effort: large
 trigger: three CI failures in one day in fornax, all from tests that depended on the machine running them; the fix was built in fornax and should not be built again per repo
 created: 2026-08-29
-updated: 2026-08-29
+updated: 2026-11-01
 author: changkun
 dispatched_task_id: null
 ---
 
 # One per-push quality bar for every Go repo
+
+> Superseded. The checks moved into ci-gate's `lateregate` binary and the
+> workflow into `lateregate.yml`, which asks the binary which gates apply.
+> `go-verify.yml`, its example and its tests are removed; managed-agents,
+> its one caller, pins it by commit.
 
 ## Context for whoever picks this up
 

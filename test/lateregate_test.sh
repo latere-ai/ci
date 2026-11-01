@@ -56,12 +56,17 @@ LOOP_SCRIPT=$(step_script "Run the gates")
 PASSED_SCRIPT=$(step_script "Check every job's result")
 STUB=$(mktemp -d)
 trap 'rm -rf "$STUB"' EXIT
+# The workflow's env sets GATE_MODULE and the runner GITHUB_WORKSPACE for
+# every step; the steps read both under set -u.
+export GATE_MODULE=. GITHUB_WORKSPACE=/workspace
 
 # The stub go answers `go tool lateregate list -json` with $PLAN, records
 # every other gate it is asked to run with the TMPDIR it saw, and fails the
 # gates named in $FAIL.
 cat > "$STUB/go" <<'EOF'
 #!/usr/bin/env bash
+# go -C <gate module> tool lateregate <gate> -C <root>
+[ "$1" = -C ] && shift 2
 shift 2
 if [ "$1" = list ]; then printf '%s\n' "$PLAN"; exit 0; fi
 echo "$1 TMPDIR=${TMPDIR:-}" >> "$CALLS"
@@ -437,7 +442,7 @@ order=$(printf '%s\n' "$passed_block" | awk '
     /- name: List the running gates$/ { print "list" }
     /uses: actions\/setup-node@/ { print "setup-node" }
     /uses: oven-sh\/setup-bun@/ { print "setup-bun" }
-    /run: go tool lateregate enum-typescript-prepare$/ { print "prepare" }
+    /tool lateregate enum-typescript-prepare -C/ { print "prepare" }
     /- name: Run the gates$/ { print "gates" }
     /uses: actions\/upload-artifact@/ { print "upload" }
     /- name: Check every job.s result$/ { print "check" }
@@ -460,16 +465,25 @@ fi
 # ---------------------------------------------------------------------------
 echo "workflow"
 
+# A call that skipped the gate module would run a root pin that a nested
+# gate module does not have, or none at all.
+if bare=$(grep -n 'go tool lateregate' "$WORKFLOW"); then
+    fail "every lateregate call runs from the gate module; these do not: $bare"
+else
+    pass "every lateregate call runs from the gate module against the root"
+fi
+
 for expr in \
     'gate: ${{ fromJSON(needs.probe.outputs.gates) }}' \
     'os: ${{ fromJSON(needs.probe.outputs.tests) }}' \
     'gates: ${{ steps.plan.outputs.gates }}' \
     'tests: ${{ steps.plan.outputs.tests }}' \
     'GATES: ${{ steps.plan.outputs.gates }}' \
-    "go tool lateregate list -json" \
-    "go tool lateregate contract" \
-    'go tool lateregate ${{ matrix.gate }}' \
-    "go tool lateregate test"
+    'go -C "$GATE_MODULE" tool lateregate list -json -C "$GITHUB_WORKSPACE"' \
+    'go -C "$GATE_MODULE" tool lateregate contract -C "$GITHUB_WORKSPACE"' \
+    'go -C "$GATE_MODULE" tool lateregate ${{ matrix.gate }} -C "$GITHUB_WORKSPACE"' \
+    'go -C "$GATE_MODULE" tool lateregate test -C "$GITHUB_WORKSPACE"' \
+    "GATE_MODULE: \${{ inputs.gate_module || '.' }}"
 do
     if grep -qF -- "$expr" "$WORKFLOW"; then
         pass "workflow carries: $expr"
@@ -516,7 +530,7 @@ fi
 # fails file by file, so every setup-go step gates it on a hosted label, or
 # turns it off where only a self-hosted runner reaches it.
 setups=$(grep -c 'uses: actions/setup-go' "$WORKFLOW")
-gated=$(grep -cE "cache: (false|\\$\\{\\{ startsWith\\((inputs.runs_on|matrix.os), 'ubuntu-'\\))" "$WORKFLOW")
+gated=$(grep -cE "cache: (false|\\$\\{\\{ runner\\.environment == 'github-hosted' \\}\\})" "$WORKFLOW")
 if [ "$setups" -eq "$gated" ]; then
     pass "every setup-go caches only on a hosted runner"
 else
@@ -525,35 +539,41 @@ fi
 
 # Check the actual step blocks, not independent occurrences: a condition on
 # an adjacent step would still install Node/Bun for every Go gate. Both jobs
-# that can run the TypeScript enum gate set it up, each on its own condition.
-check_enum_setup() { # job condition run-step
+# that can run the TypeScript enum or frontend gate set up the runtimes for
+# either, and prepare enum projects only for the enum gate.
+check_enum_setup() { # job runtime-condition prepare-condition run-step
     block=$(job_block "$1")
-    for target in 'uses: actions/setup-node@' 'uses: oven-sh/setup-bun@' 'run: go tool lateregate enum-typescript-prepare'; do
+    for target in 'uses: actions/setup-node@' 'uses: oven-sh/setup-bun@'; do
         if job_step "$block" "$target" | grep -qxF "        if: \${{ $2 }}"; then
-            pass "$1: $target runs only for the TypeScript enum gate"
+            pass "$1: $target runs only for the TypeScript enum and frontend gates"
         else
             fail "$1: $target must be conditional on $2"
         fi
     done
+    if job_step "$block" 'run: go -C "$GATE_MODULE" tool lateregate enum-typescript-prepare -C "$GITHUB_WORKSPACE"' | grep -qxF "        if: \${{ $3 }}"; then
+        pass "$1: enum projects are prepared only for the TypeScript enum gate"
+    else
+        fail "$1: enum-typescript-prepare must be conditional on $3"
+    fi
     if job_step "$block" 'uses: actions/setup-node@' | grep -qxE '          node-version: "[0-9]+"'; then
         pass "$1: the TypeScript enum gate pins a Node major"
     else
         fail "$1: the TypeScript enum gate must pin a Node major"
     fi
-    if job_step "$block" 'uses: oven-sh/setup-bun@' | grep -qxF '          bun-version: "1.3.14"'; then
+    if job_step "$block" 'uses: oven-sh/setup-bun@' | grep -qxF '          bun-version: "1.4.4"'; then
         pass "$1: the TypeScript enum gate pins Bun"
     else
-        fail "$1: the TypeScript enum gate must pin Bun 1.3.14"
+        fail "$1: the TypeScript enum gate must pin Bun 1.4.4"
     fi
     if job_step "$block" 'uses: oven-sh/setup-bun@' | grep -qxF '          HOME: ${{ runner.temp }}'; then
         pass "$1: Bun installs into the job's own temp directory"
     else
         fail "$1: Bun must install under HOME: \${{ runner.temp }}"
     fi
-    if printf '%s\n' "$block" | awk -v check="$3" '
+    if printf '%s\n' "$block" | awk -v check="$4" '
         /uses: actions\/setup-node@/ { node = NR }
         /uses: oven-sh\/setup-bun@/ { bun = NR }
-        /run: go tool lateregate enum-typescript-prepare$/ { prepare = NR }
+        /tool lateregate enum-typescript-prepare -C/ { prepare = NR }
         index($0, check) { run = NR }
         END { exit !(node && bun && prepare && run && node < prepare && bun < prepare && prepare < run) }
     '; then
@@ -563,7 +583,7 @@ check_enum_setup() { # job condition run-step
     fi
 }
 
-for target in 'uses: actions/setup-node@' 'uses: oven-sh/setup-bun@' 'run: go tool lateregate enum-typescript-prepare'; do
+for target in 'uses: actions/setup-node@' 'uses: oven-sh/setup-bun@' 'run: go -C "$GATE_MODULE" tool lateregate enum-typescript-prepare -C "$GITHUB_WORKSPACE"'; do
     count=$(grep -cF "$target" "$WORKFLOW")
     if [ "$count" -eq 2 ]; then
         pass "$target appears in the gate job and the passed job, nowhere else"
@@ -571,8 +591,11 @@ for target in 'uses: actions/setup-node@' 'uses: oven-sh/setup-bun@' 'run: go to
         fail "$target appears $count times, want 2"
     fi
 done
-check_enum_setup gate "matrix.gate == 'enum-typescript'" 'run: go tool lateregate ${{ matrix.gate }}'
-check_enum_setup passed "contains(fromJSON(steps.plan.outputs.gates || '[]'), 'enum-typescript')" '- name: Run the gates'
+check_enum_setup gate "matrix.gate == 'enum-typescript' || matrix.gate == 'frontend'" \
+    "matrix.gate == 'enum-typescript'" 'tool lateregate ${{ matrix.gate }} -C'
+check_enum_setup passed \
+    "contains(fromJSON(steps.plan.outputs.gates || '[]'), 'enum-typescript') || contains(fromJSON(steps.plan.outputs.gates || '[]'), 'frontend')" \
+    "contains(fromJSON(steps.plan.outputs.gates || '[]'), 'enum-typescript')" '- name: Run the gates'
 
 if [ "$FAILURES" -gt 0 ]; then
     echo "$FAILURES failure(s)"

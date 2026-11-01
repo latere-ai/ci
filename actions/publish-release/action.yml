@@ -1,0 +1,38 @@
+name: publish-release
+description: Publish the tag's GitHub release with its CHANGELOG section as the body, evidence appended, and files attached before it is visible.
+inputs:
+  title:
+    description: "Title prefix: Lux titles the release 'Lux v1.2.3'. Empty titles it with the tag alone."
+    required: false
+    default: ""
+  files:
+    description: "Files to attach, one path or shell pattern per line. A pattern that matches nothing fails."
+    required: false
+    default: ""
+  evidence:
+    description: "Markdown files appended to the body after the CHANGELOG section, one path or pattern per line."
+    required: false
+    default: ""
+  lateregate_version:
+    description: "ci-gate version whose note reader reads the CHANGELOG.md section. Empty takes the version in actions/lib/versions.sh."
+    required: false
+    default: ""
+  gh_version:
+    description: "GitHub CLI release fetched where the runner has none. Empty takes the version in actions/lib/versions.sh."
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GH_VERSION: ${{ inputs.gh_version }}
+      run: bash "$GITHUB_ACTION_PATH/../ensure-gh/run.sh"
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        TITLE: ${{ inputs.title }}
+        FILES: ${{ inputs.files }}
+        EVIDENCE: ${{ inputs.evidence }}
+        LATEREGATE_VERSION: ${{ inputs.lateregate_version }}
+      run: bash "$GITHUB_ACTION_PATH/run.sh"

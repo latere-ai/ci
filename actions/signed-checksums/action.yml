@@ -1,0 +1,27 @@
+name: signed-checksums
+description: Write checksums.txt over every file in a directory and sign it with the workflow's identity.
+inputs:
+  dir:
+    description: "Directory whose files are summed; checksums.txt and its bundle land beside them."
+    required: false
+    default: dist
+  cosign_version:
+    description: "cosign release. Empty takes the version in actions/lib/versions.sh."
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - id: versions
+      shell: bash
+      env:
+        COSIGN_VERSION: ${{ inputs.cosign_version }}
+      run: bash "$GITHUB_ACTION_PATH/../lib/versions.sh"
+    - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      with:
+        cosign-release: ${{ steps.versions.outputs.cosign }}
+        install-dir: ${{ runner.temp }}/cosign
+    - shell: bash
+      env:
+        DIR: ${{ inputs.dir }}
+      run: bash "$GITHUB_ACTION_PATH/run.sh"

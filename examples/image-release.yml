@@ -1,0 +1,69 @@
+# Copy to a service that publishes signed images as .github/workflows/release.yml.
+# Pushing a vX.Y.Z tag whose commit passed verify.yml builds the images and
+# pushes them by digest under no tag, signs them, writes their bills of
+# materials and, in a public repository, attests them. Anything that must pass
+# before the release is published runs between the build and the publish
+# jobs, reading the digests the build outputs. The publish job tags the
+# digests, signs checksums.txt over the attached files, and publishes the
+# GitHub release whose body is the tag's CHANGELOG.md section. The verify job
+# then checks the published release from a runner with no checkout.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    uses: latere-ai/ci/.github/workflows/image-build.yml@v1
+    # The stage reads the tagged commit's verify runs, pushes images, signs
+    # them with the job's OIDC token and attests them; a calling job that
+    # grants less fails before it starts.
+    permissions:
+      contents: read
+      actions: read
+      packages: write
+      id-token: write
+      attestations: write
+    with:
+      # One image per slot, up to three. version_args is what makes the
+      # image print "<name> <tag> ..."; leave it out to skip the check.
+      image_1: '{"name": "exampled", "version_args": "version"}'
+      # A second image built for one platform, such as test stubs:
+      # image_2: '{"name": "example-stubs", "dockerfile": "Dockerfile.stubs", "platforms": "linux/amd64"}'
+      # Files the release attaches beside the bills of materials:
+      # archives_command: tools/release/build.sh "$TAG" dist
+      # A private repository on the self-hosted runner refuses at once
+      # while verify is still running rather than hold a slot:
+      # wait_minutes: "0"
+
+  # Whatever must pass before the release is published, against the digests.
+  # conformance:
+  #   needs: build
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - run: ./test/conformance.sh "${{ needs.build.outputs.ref_1 }}@${{ needs.build.outputs.digest_1 }}"
+
+  publish:
+    needs: build
+    uses: latere-ai/ci/.github/workflows/image-publish.yml@v1
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+    with:
+      images: ${{ needs.build.outputs.images }}
+      # title: Example
+
+  verify:
+    needs: publish
+    uses: latere-ai/ci/.github/workflows/release-verify.yml@v1
+    permissions:
+      contents: read
+      packages: read
+      attestations: read
+    with:
+      images: exampled

@@ -14,9 +14,14 @@ FAILURES=0
 pass() { printf "  \033[32mPASS\033[0m %s\n" "$1"; }
 fail() { printf "  \033[31mFAIL\033[0m %s\n" "$1"; FAILURES=$((FAILURES + 1)); }
 
-# The reader, up to the redirect; where the notes go is the job's choice,
-# and a goreleaser job's choice is held by the test further down.
-READER='go run latere.ai/x/ci-gate/cmd/lateregate@${{ inputs.lateregate_version }} release-notes -C "$notes_root" "$TAG" > '
+# The reader runs in one of two places: the shared publish-release step,
+# whose script reads the section and publishes from it, or inline in a
+# goreleaser job, which hands goreleaser the notes file. Either way it runs
+# at the version actions/lib/versions.sh pins, unless a caller passes
+# lateregate_version.
+PUBLISH="$REPO_ROOT/actions/publish-release/run.sh"
+VERSIONS="$REPO_ROOT/actions/lib/versions.sh"
+INLINE_READER='go run "latere.ai/x/ci-gate/cmd/lateregate@${LATEREGATE_VERSION:?}" release-notes -C "$notes_root" "$TAG" > '
 
 release_workflows() {
     ls "$REPO_ROOT"/.github/workflows/*-release.yml
@@ -26,10 +31,16 @@ test_every_release_workflow_reads_the_section() {
     local name="every *-release.yml reads the changelog section with the pinned reader"
     local missing=""
     for wf in $(release_workflows); do
-        if ! grep -qF "$READER" "$wf"; then
+        if ! grep -qF 'uses: ./.latere-ci/actions/publish-release' "$wf" && ! grep -qF "$INLINE_READER" "$wf"; then
             missing="${missing} $(basename "$wf")"
         fi
     done
+    if grep -qF 'go run "latere.ai/x/ci-gate/cmd/lateregate@${LATEREGATE_VERSION}" release-notes -C "$work/notes" "$TAG" > "$work/body.md"' "$PUBLISH" \
+        && grep -qF '. "$(dirname "${BASH_SOURCE[0]}")/../lib/versions.sh"' "$PUBLISH"; then
+        :
+    else
+        missing="${missing} actions/publish-release/run.sh"
+    fi
     if [ -z "$missing" ]; then
         pass "$name"
     else
@@ -38,13 +49,19 @@ test_every_release_workflow_reads_the_section() {
 }
 
 test_every_release_workflow_declares_the_version_input() {
-    local name="every *-release.yml declares lateregate_version with a vX.Y.Z default"
+    local name="every *-release.yml takes lateregate_version, and versions.sh pins a vX.Y.Z"
     local missing=""
     for wf in $(release_workflows); do
-        if ! grep -A4 '^      lateregate_version:' "$wf" | grep -qE 'default: "v[0-9]+\.[0-9]+\.[0-9]+"'; then
+        if ! grep -A4 '^      lateregate_version:' "$wf" | grep -qF 'default: ""'; then
+            missing="${missing} $(basename "$wf")"
+        elif ! grep -qF 'lateregate_version: ${{ ' "$wf" \
+            && ! grep -qF 'LATEREGATE_VERSION: ${{ inputs.lateregate_version }}' "$wf"; then
             missing="${missing} $(basename "$wf")"
         fi
     done
+    if ! grep -qE '^LATEREGATE_VERSION=\$\{LATEREGATE_VERSION:-v[0-9]+\.[0-9]+\.[0-9]+\}$' "$VERSIONS"; then
+        missing="${missing} actions/lib/versions.sh"
+    fi
     if [ -z "$missing" ]; then
         pass "$name"
     else
@@ -65,13 +82,17 @@ test_no_workflow_generates_notes() {
 }
 
 test_every_release_workflow_publishes_notes() {
-    local name="every *-release.yml publishes from notes.md (gh --notes-file or goreleaser --release-notes)"
+    local name="every release publishes from the section (publish-release's body or goreleaser --release-notes)"
     local missing=""
     for wf in $(release_workflows); do
-        if ! grep -qE -- '--notes-file (body|notes)\.md|--release-notes \$\{\{ runner\.temp \}\}/notes\.md' "$wf"; then
+        if ! grep -qF 'uses: ./.latere-ci/actions/publish-release' "$wf" \
+            && ! grep -qE -- '--release-notes \$\{\{ runner\.temp \}\}/notes\.md' "$wf"; then
             missing="${missing} $(basename "$wf")"
         fi
     done
+    if ! grep -qF -- '--notes-file "$work/body.md"' "$PUBLISH"; then
+        missing="${missing} actions/publish-release/run.sh"
+    fi
     if [ -z "$missing" ]; then
         pass "$name"
     else
@@ -97,11 +118,14 @@ test_three_release_workflows_exist() {
 test_reader_is_independent_of_consumer_config() {
     local wf missing=""
     for wf in $(release_workflows); do
-        if ! grep -qF 'cp CHANGELOG.md "$notes_root/CHANGELOG.md"' "$wf" \
-            || ! grep -qF 'release-notes -C "$notes_root" "$TAG" > ' "$wf"; then
+        grep -qF "$INLINE_READER" "$wf" || continue
+        if ! grep -qF 'cp CHANGELOG.md "$notes_root/CHANGELOG.md"' "$wf"; then
             missing="${missing} $(basename "$wf")"
         fi
     done
+    if ! grep -qF 'cp CHANGELOG.md "$work/notes/CHANGELOG.md"' "$PUBLISH"; then
+        missing="${missing} actions/publish-release/run.sh"
+    fi
     if [ -z "$missing" ]; then
         pass "release notes do not parse the consumer gate configuration"
     else

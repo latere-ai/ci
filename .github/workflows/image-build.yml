@@ -1,0 +1,335 @@
+name: image-build
+
+# Reusable build stage of a signed image release, on a version tag. A
+# consumer calls it, runs whatever must pass between build and publish
+# (conformance, an install walk, a deploy), then calls image-publish.yml:
+#
+#   on: { push: { tags: ['v*'] } }
+#   jobs:
+#     build:
+#       uses: latere-ai/ci/.github/workflows/image-build.yml@v1
+#       with:
+#         image_1: '{"name": "ponsd", "version_args": "version"}'
+#     publish:
+#       needs: build
+#       uses: latere-ai/ci/.github/workflows/image-publish.yml@v1
+#       with:
+#         images: ${{ needs.build.outputs.ref_1 }}@${{ needs.build.outputs.digest_1 }}
+#
+# Flow (one job, so a release queues on the self-hosted runner once): the
+# tagged commit passed verify -> the tag, its CHANGELOG section and the
+# namespace check out -> the repository's archives, when it builds any ->
+# each image built and pushed by digest under no tag, its version checked,
+# signed, given a bill of materials and, in a public repository, SBOM and
+# provenance attestations -> the files the release attaches, uploaded for
+# the publish stage. Nothing gets a tag here.
+#
+# The shared steps run from ci at this workflow's own commit
+# (job.workflow_sha), checked out into .latere-ci/ beside the caller's
+# checkout and hidden from git, so a prerelease of ci runs its own steps.
+# The directory is part of the docker build context; a Dockerfile that
+# copies the whole context can list it in .dockerignore.
+#
+# A signature made here names this file: verify an image with
+#   cosign verify <image>@<digest> \
+#     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+#     --certificate-identity-regexp '^https://github\.com/latere-ai/ci/\.github/workflows/image-build\.yml@' \
+#     --certificate-github-workflow-repository <owner>/<repository>
+
+on:
+  workflow_call:
+    inputs:
+      image_1:
+        description: "The first image, as JSON: name (required), dockerfile (Dockerfile), context (.), platforms (linux/amd64,linux/arm64), build_args (KEY=VALUE lines), version_args (empty skips the version check), version_expect ({name} {tag}), sbom_format (spdx-json)."
+        required: true
+        type: string
+      image_2:
+        description: "A second image, as image_1. Empty builds none."
+        required: false
+        type: string
+        default: ""
+      image_3:
+        description: "A third image, as image_1. Empty builds none."
+        required: false
+        type: string
+        default: ""
+      archives_command:
+        description: "Shell command run before the images are built, in the checkout, that writes the files the release attaches into dist/ (binaries, archives). TAG holds the tag. Empty builds none."
+        required: false
+        type: string
+        default: ""
+      after_images_command:
+        description: "Shell command run after every image is pushed and signed, that writes further files into dist/, such as a deploy archive that pins the images by digest. IMAGE_1 to IMAGE_3 hold <ref>@<digest>, OWNER the namespace, TAG the tag. Empty runs none."
+        required: false
+        type: string
+        default: ""
+      verify_workflow:
+        description: "File name of the per-push workflow whose run on the tagged commit must have succeeded."
+        required: false
+        type: string
+        default: verify.yml
+      wait_minutes:
+        description: "How long to wait for that run while it is still going. 0 refuses at once, so a release on the self-hosted runner does not hold a slot while verify runs."
+        required: false
+        type: string
+        default: "60"
+      skip_paths:
+        description: "Shell patterns, one per line, for paths that change no code. A commit that changes only these carries its parent's code, so where its own verify run is missing, still going or cancelled, its parent is read instead; a run that concluded on the commit still decides."
+        required: false
+        type: string
+        default: |
+          specs/*
+          *.md
+      namespace:
+        description: "Image namespace. Empty takes the repository variable RELEASE_IMAGE_NAMESPACE, else the repository owner, lowered, so a fork's tag publishes under the fork."
+        required: false
+        type: string
+        default: ""
+      go_version:
+        description: "Go toolchain version. Empty reads go.mod."
+        required: false
+        type: string
+        default: ""
+      runs_on:
+        description: "Runner label. By default the organization's runner policy picks it (README, Runners)."
+        required: false
+        type: string
+        default: ${{ (github.event.repository.private || contains(fromJSON('["push","schedule","workflow_dispatch","release"]'), github.event_name)) && (vars.CI_RUNNER_PRIVATE || vars.CI_RUNNER_PUBLIC) || 'ubuntu-latest' }}
+      cosign_version:
+        description: "cosign release. Empty takes the version in actions/lib/versions.sh."
+        required: false
+        type: string
+        default: ""
+      syft_version:
+        description: "syft release. Empty takes the version in actions/lib/versions.sh."
+        required: false
+        type: string
+        default: ""
+      lateregate_version:
+        description: "ci-gate version whose note reader checks the CHANGELOG section. Empty takes the version in actions/lib/versions.sh."
+        required: false
+        type: string
+        default: ""
+    outputs:
+      owner:
+        description: "The image namespace."
+        value: ${{ jobs.build.outputs.owner }}
+      ref_1:
+        description: "<registry>/<owner>/<name> of image_1."
+        value: ${{ jobs.build.outputs.ref_1 }}
+      digest_1:
+        description: "The digest image_1 was pushed at."
+        value: ${{ jobs.build.outputs.digest_1 }}
+      ref_2:
+        description: "As ref_1, for image_2."
+        value: ${{ jobs.build.outputs.ref_2 }}
+      digest_2:
+        description: "As digest_1, for image_2."
+        value: ${{ jobs.build.outputs.digest_2 }}
+      ref_3:
+        description: "As ref_1, for image_3."
+        value: ${{ jobs.build.outputs.ref_3 }}
+      digest_3:
+        description: "As digest_1, for image_3."
+        value: ${{ jobs.build.outputs.digest_3 }}
+      images:
+        description: "Every image built, <ref>@<digest> one per line, for image-publish.yml."
+        value: ${{ jobs.build.outputs.images }}
+
+# actions: read lists the verify runs of the tagged commit. Keyless signing
+# needs the job's OIDC token, the attestations need attestations: write, and
+# the pushes packages: write. A caller that grants less fails before the job
+# starts, so the caller's job grants all five.
+permissions:
+  contents: read
+  actions: read
+  packages: write
+  id-token: write
+  attestations: write
+
+jobs:
+  build:
+    name: the images by digest
+    runs-on: ${{ inputs.runs_on }}
+    timeout-minutes: 90
+    outputs:
+      owner: ${{ steps.preflight.outputs.owner }}
+      ref_1: ${{ steps.image_1.outputs.ref }}
+      digest_1: ${{ steps.image_1.outputs.digest }}
+      ref_2: ${{ steps.image_2.outputs.ref }}
+      digest_2: ${{ steps.image_2.outputs.digest }}
+      ref_3: ${{ steps.image_3.outputs.ref }}
+      digest_3: ${{ steps.image_3.outputs.digest }}
+      images: ${{ steps.images.outputs.images }}
+    steps:
+      # Archive scripts read the tag history.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      # After the caller's checkout, which would otherwise clean it away.
+      - name: The shared steps, at this workflow's own commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .latere-ci
+          sparse-checkout: actions
+          persist-credentials: false
+      # Hidden from git, so git describe, Go's VCS stamp and a dirty-tree
+      # check see the caller's tree alone.
+      - name: Keep the shared steps out of git status
+        run: echo '/.latere-ci/' >> .git/info/exclude
+
+      - uses: ./.latere-ci/actions/verified-commit
+        with:
+          verify_workflow: ${{ inputs.verify_workflow }}
+          wait_minutes: ${{ inputs.wait_minutes }}
+          skip_paths: ${{ inputs.skip_paths }}
+
+      # The note reader and the archive scripts need Go. The module cache is
+      # worth restoring on a hosted runner, which starts empty; a
+      # self-hosted runner keeps its own, and restoring over it fails.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ inputs.go_version }}
+          go-version-file: ${{ inputs.go_version == '' && 'go.mod' || '' }}
+          cache: ${{ runner.environment == 'github-hosted' }}
+
+      - id: preflight
+        uses: ./.latere-ci/actions/release-preflight
+        with:
+          namespace: ${{ inputs.namespace || vars.RELEASE_IMAGE_NAMESPACE }}
+          lateregate_version: ${{ inputs.lateregate_version }}
+
+      - name: Archives
+        if: ${{ inputs.archives_command != '' }}
+        env:
+          TAG: ${{ github.ref_name }}
+          ARCHIVES_COMMAND: ${{ inputs.archives_command }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          eval "$ARCHIVES_COMMAND"
+
+      # Runner slots on one machine share a HOME; the login below writes
+      # its credential into this job's own directory instead.
+      - name: Isolate Docker credentials
+        run: echo "DOCKER_CONFIG=$RUNNER_TEMP/docker-config" >> "$GITHUB_ENV"
+      # For a Dockerfile whose stages run on the target platform; one that
+      # cross-compiles and only copies into the final stage never uses it.
+      - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      # Three fixed slots: an attestation step takes one image, and a job
+      # cannot loop over steps. A matrix job per image would queue once per
+      # image on the self-hosted runner and could not output a digest per
+      # image.
+      - id: image_1
+        uses: ./.latere-ci/actions/image-by-digest
+        with:
+          owner: ${{ steps.preflight.outputs.owner }}
+          name: ${{ fromJSON(inputs.image_1).name }}
+          dockerfile: ${{ fromJSON(inputs.image_1).dockerfile }}
+          context: ${{ fromJSON(inputs.image_1).context }}
+          platforms: ${{ fromJSON(inputs.image_1).platforms }}
+          build_args: ${{ fromJSON(inputs.image_1).build_args }}
+          version_args: ${{ fromJSON(inputs.image_1).version_args }}
+          version_expect: ${{ fromJSON(inputs.image_1).version_expect }}
+          commit: ${{ steps.preflight.outputs.commit }}
+          date: ${{ steps.preflight.outputs.date }}
+      - uses: ./.latere-ci/actions/sign-image
+        with:
+          ref: ${{ steps.image_1.outputs.ref }}
+          digest: ${{ steps.image_1.outputs.digest }}
+          sbom_format: ${{ fromJSON(inputs.image_1).sbom_format || 'spdx-json' }}
+          cosign_version: ${{ inputs.cosign_version }}
+          syft_version: ${{ inputs.syft_version }}
+
+      - id: image_2
+        if: ${{ inputs.image_2 != '' }}
+        uses: ./.latere-ci/actions/image-by-digest
+        with:
+          owner: ${{ steps.preflight.outputs.owner }}
+          name: ${{ fromJSON(inputs.image_2 || '{}').name }}
+          dockerfile: ${{ fromJSON(inputs.image_2 || '{}').dockerfile }}
+          context: ${{ fromJSON(inputs.image_2 || '{}').context }}
+          platforms: ${{ fromJSON(inputs.image_2 || '{}').platforms }}
+          build_args: ${{ fromJSON(inputs.image_2 || '{}').build_args }}
+          version_args: ${{ fromJSON(inputs.image_2 || '{}').version_args }}
+          version_expect: ${{ fromJSON(inputs.image_2 || '{}').version_expect }}
+          commit: ${{ steps.preflight.outputs.commit }}
+          date: ${{ steps.preflight.outputs.date }}
+      - if: ${{ inputs.image_2 != '' }}
+        uses: ./.latere-ci/actions/sign-image
+        with:
+          ref: ${{ steps.image_2.outputs.ref }}
+          digest: ${{ steps.image_2.outputs.digest }}
+          sbom_format: ${{ fromJSON(inputs.image_2 || '{}').sbom_format || 'spdx-json' }}
+          cosign_version: ${{ inputs.cosign_version }}
+          syft_version: ${{ inputs.syft_version }}
+
+      - id: image_3
+        if: ${{ inputs.image_3 != '' }}
+        uses: ./.latere-ci/actions/image-by-digest
+        with:
+          owner: ${{ steps.preflight.outputs.owner }}
+          name: ${{ fromJSON(inputs.image_3 || '{}').name }}
+          dockerfile: ${{ fromJSON(inputs.image_3 || '{}').dockerfile }}
+          context: ${{ fromJSON(inputs.image_3 || '{}').context }}
+          platforms: ${{ fromJSON(inputs.image_3 || '{}').platforms }}
+          build_args: ${{ fromJSON(inputs.image_3 || '{}').build_args }}
+          version_args: ${{ fromJSON(inputs.image_3 || '{}').version_args }}
+          version_expect: ${{ fromJSON(inputs.image_3 || '{}').version_expect }}
+          commit: ${{ steps.preflight.outputs.commit }}
+          date: ${{ steps.preflight.outputs.date }}
+      - if: ${{ inputs.image_3 != '' }}
+        uses: ./.latere-ci/actions/sign-image
+        with:
+          ref: ${{ steps.image_3.outputs.ref }}
+          digest: ${{ steps.image_3.outputs.digest }}
+          sbom_format: ${{ fromJSON(inputs.image_3 || '{}').sbom_format || 'spdx-json' }}
+          cosign_version: ${{ inputs.cosign_version }}
+          syft_version: ${{ inputs.syft_version }}
+
+      - id: images
+        name: Every image built
+        env:
+          IMAGE_1: ${{ steps.image_1.outputs.ref }}@${{ steps.image_1.outputs.digest }}
+          IMAGE_2: ${{ steps.image_2.outputs.ref && format('{0}@{1}', steps.image_2.outputs.ref, steps.image_2.outputs.digest) || '' }}
+          IMAGE_3: ${{ steps.image_3.outputs.ref && format('{0}@{1}', steps.image_3.outputs.ref, steps.image_3.outputs.digest) || '' }}
+        run: |
+          set -euo pipefail
+          {
+            echo 'images<<CI_EOF'
+            for image in "$IMAGE_1" "$IMAGE_2" "$IMAGE_3"; do
+              [ -n "$image" ] && echo "$image"
+            done
+            echo CI_EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - name: After the images
+        if: ${{ inputs.after_images_command != '' }}
+        env:
+          TAG: ${{ github.ref_name }}
+          OWNER: ${{ steps.preflight.outputs.owner }}
+          IMAGE_1: ${{ steps.image_1.outputs.ref }}@${{ steps.image_1.outputs.digest }}
+          IMAGE_2: ${{ steps.image_2.outputs.ref && format('{0}@{1}', steps.image_2.outputs.ref, steps.image_2.outputs.digest) || '' }}
+          IMAGE_3: ${{ steps.image_3.outputs.ref && format('{0}@{1}', steps.image_3.outputs.ref, steps.image_3.outputs.digest) || '' }}
+          AFTER_IMAGES_COMMAND: ${{ inputs.after_images_command }}
+        run: |
+          set -euo pipefail
+          eval "$AFTER_IMAGES_COMMAND"
+
+      # 7 days: long enough to re-run a failed publish, short enough that
+      # the artifact store does not fill.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
