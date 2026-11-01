@@ -207,7 +207,8 @@ archive's binary, and checks the body equals the CHANGELOG section.
 ### Composite actions
 
 `verified-commit`, `release-preflight`, `image-by-digest`, `sign-image`,
-`tag-images`, `signed-checksums`, `publish-release`. Each keeps its decisions
+`tag-images`, `signed-checksums`, `publish-release`, `verify-release` (the
+body of `release-verify.yml`) and `ensure-gh`. Each keeps its decisions
 in a script beside its `action.yml` (`ci/actions/<name>/run.sh`), so the tests
 run the shipped file rather than a copy. Every third-party action inside is
 pinned by commit, and every tool version (cosign, syft, gh) is an input whose
@@ -272,10 +273,14 @@ The same blocks take the repeated parts out of ci's own workflows:
   in action scripts, the tests run the shipped files and the copies and their
   match assertions go.
 
-A reusable workflow cannot name its own ref for an action it calls, so the
-stages call `latere-ai/ci/actions/<name>@v1`. A prerelease of ci that changes
-an action is tried by calling the action at the prerelease tag from a
-service's own job; the stages pick the change up when `v1` moves.
+A stage runs the actions from ci at its own commit: it checks out
+`job.workflow_repository` at `job.workflow_sha` into `.latere-ci/` beside the
+caller's checkout, hides the directory from git through `.git/info/exclude`,
+and calls `./.latere-ci/actions/<name>`. A prerelease tag of ci therefore
+runs its own steps, not `v1`'s. A probe on 2026-11-01 confirmed both context
+values are set inside a called workflow and the local action resolves.
+actionlint 1.7.12 does not know the two properties yet, so
+`.github/actionlint.yaml` ignores that one message.
 
 ## What stays with each service
 
