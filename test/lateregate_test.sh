@@ -525,16 +525,22 @@ fi
 
 # Check the actual step blocks, not independent occurrences: a condition on
 # an adjacent step would still install Node/Bun for every Go gate. Both jobs
-# that can run the TypeScript enum gate set it up, each on its own condition.
-check_enum_setup() { # job condition run-step
+# that can run the TypeScript enum or frontend gate set up the runtimes for
+# either, and prepare enum projects only for the enum gate.
+check_enum_setup() { # job runtime-condition prepare-condition run-step
     block=$(job_block "$1")
-    for target in 'uses: actions/setup-node@' 'uses: oven-sh/setup-bun@' 'run: go tool lateregate enum-typescript-prepare'; do
+    for target in 'uses: actions/setup-node@' 'uses: oven-sh/setup-bun@'; do
         if job_step "$block" "$target" | grep -qxF "        if: \${{ $2 }}"; then
-            pass "$1: $target runs only for the TypeScript enum gate"
+            pass "$1: $target runs only for the TypeScript enum and frontend gates"
         else
             fail "$1: $target must be conditional on $2"
         fi
     done
+    if job_step "$block" 'run: go tool lateregate enum-typescript-prepare' | grep -qxF "        if: \${{ $3 }}"; then
+        pass "$1: enum projects are prepared only for the TypeScript enum gate"
+    else
+        fail "$1: enum-typescript-prepare must be conditional on $3"
+    fi
     if job_step "$block" 'uses: actions/setup-node@' | grep -qxF '          node-version: "24"'; then
         pass "$1: the TypeScript enum gate has Node 24"
     else
@@ -550,7 +556,7 @@ check_enum_setup() { # job condition run-step
     else
         fail "$1: Bun must install under HOME: \${{ runner.temp }}"
     fi
-    if printf '%s\n' "$block" | awk -v check="$3" '
+    if printf '%s\n' "$block" | awk -v check="$4" '
         /uses: actions\/setup-node@/ { node = NR }
         /uses: oven-sh\/setup-bun@/ { bun = NR }
         /run: go tool lateregate enum-typescript-prepare$/ { prepare = NR }
@@ -571,8 +577,11 @@ for target in 'uses: actions/setup-node@' 'uses: oven-sh/setup-bun@' 'run: go to
         fail "$target appears $count times, want 2"
     fi
 done
-check_enum_setup gate "matrix.gate == 'enum-typescript'" 'run: go tool lateregate ${{ matrix.gate }}'
-check_enum_setup passed "contains(fromJSON(steps.plan.outputs.gates || '[]'), 'enum-typescript')" '- name: Run the gates'
+check_enum_setup gate "matrix.gate == 'enum-typescript' || matrix.gate == 'frontend'" \
+    "matrix.gate == 'enum-typescript'" 'run: go tool lateregate ${{ matrix.gate }}'
+check_enum_setup passed \
+    "contains(fromJSON(steps.plan.outputs.gates || '[]'), 'enum-typescript') || contains(fromJSON(steps.plan.outputs.gates || '[]'), 'frontend')" \
+    "contains(fromJSON(steps.plan.outputs.gates || '[]'), 'enum-typescript')" '- name: Run the gates'
 
 if [ "$FAILURES" -gt 0 ]; then
     echo "$FAILURES failure(s)"

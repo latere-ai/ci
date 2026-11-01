@@ -265,14 +265,15 @@ fi
 # ---------------------------------------------------------------------------
 echo "read the plan"
 
-plan_case() { # name plan plan_fail want_gates want_enum want_failed
+plan_case() { # name plan plan_fail want_gates want_enum want_failed want_javascript
     rm -rf "$logs"; mkdir -p "$logs"
     run_step "$PLAN_SCRIPT" "$TMP" LOGS="$logs" PLAN="$2" PLAN_FAIL="$3"
     got_failed=$(cat "$logs/failed" 2>/dev/null)
-    if [ "$(status)" = 0 ] && [ "$(output gates)" = "$4" ] && [ "$(output enum_typescript)" = "$5" ] && [ "$got_failed" = "$6" ]; then
+    if [ "$(status)" = 0 ] && [ "$(output gates)" = "$4" ] && [ "$(output enum_typescript)" = "$5" ] && [ "$got_failed" = "$6" ] \
+        && [ "$(output javascript)" = "${7:-$5}" ]; then
         pass "$1"
     else
-        fail "$1: status=$(status) gates=$(output gates) enum=$(output enum_typescript) failed=$got_failed, want gates=$4 enum=$5 failed=$6"
+        fail "$1: status=$(status) gates=$(output gates) enum=$(output enum_typescript) js=$(output javascript) failed=$got_failed, want gates=$4 enum=$5 js=${7:-$5} failed=$6"
     fi
 }
 
@@ -285,6 +286,12 @@ plan_case "a running TypeScript enum gate asks for its runtimes" \
 plan_case "a waived TypeScript enum gate installs nothing" \
     '[{"name":"enum-typescript","status":"waived","reason":"r","until":"2026-12-01"}]' \
     "" '[]' false ""
+plan_case "a running frontend gate asks for the runtimes and prepares no enum project" \
+    '[{"name":"fmt-check","status":"run"},{"name":"frontend","status":"run"}]' \
+    "" '["fmt-check","frontend"]' false "" true
+plan_case "a skipped frontend gate installs nothing" \
+    '[{"name":"frontend","status":"skip","reason":"no frontend package changed"}]' \
+    "" '[]' false "" false
 plan_case "a release that cannot read the repository's configuration is a finding" \
     '[]' "unknown key waive.foo" "" "" plan
 

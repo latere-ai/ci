@@ -53,6 +53,11 @@ committed: the commit log already holds that.
   `actions/lib/versions.sh` in every pipeline; each input still overrides.
 - `actions/setup-go` restores its cache wherever the runner is hosted, read
   from `runner.environment` rather than from the runner label.
+- `lateregate.yml` and `ci-gate-bump.yml` set up Node 24 and Bun for
+  lateregate's `frontend` gate as they do for `enum-typescript`, so a
+  repository that names its Bun packages under `frontend.projects` (from
+  ci-gate v0.62.0) gets them installed, type-checked, tested and built on
+  every push without a job of its own.
 
 ## v1.27.0 - 2026-10-31
 

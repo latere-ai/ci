@@ -166,6 +166,7 @@ failed, each a row in the step summary with its result and time, and each
 named in an annotation when it fails. A failed TypeScript setup fails
 `enum-typescript` without running it and leaves the other gates to run. A
 hosted runner keeps one job per gate, since its parallelism costs nothing.
+Node and Bun are set up only when `enum-typescript` or `frontend` runs.
 
 On a self-hosted label every job builds with `GOFLAGS=-trimpath`. Such a
 runner keeps one Go build and test cache for all of its runner processes,
