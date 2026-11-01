@@ -238,7 +238,7 @@ else
     fail "non-matrix jobs ignore runs_on (fixed=$fixed routed=$routed)"
 fi
 setups=$(grep -c 'uses: actions/setup-go' "$WORKFLOW")
-caches=$(grep -cF 'cache: ${{ startsWith(' "$WORKFLOW")
+caches=$(grep -cF "cache: \${{ runner.environment == 'github-hosted' }}" "$WORKFLOW")
 if [ "$setups" -eq "$caches" ]; then
     pass "Go caches restore only on hosted runners"
 else

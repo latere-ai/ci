@@ -133,7 +133,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ inputs.go_version }}
-          cache: ${{ startsWith(matrix.os, 'ubuntu-') || startsWith(matrix.os, 'macos-') || startsWith(matrix.os, 'windows-') }}
+          cache: ${{ runner.environment == 'github-hosted' }}
       - run: make fmt-check
       - run: make test
 
@@ -150,7 +150,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ inputs.go_version }}
-          cache: ${{ startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-') }}
+          cache: ${{ runner.environment == 'github-hosted' }}
       - run: make test-hermetic
 
   race:
@@ -163,7 +163,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ inputs.go_version }}
-          cache: ${{ startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-') }}
+          cache: ${{ runner.environment == 'github-hosted' }}
       - run: make test-race
 
   # Per package rather than as a repository average: an average lets a
@@ -179,7 +179,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ inputs.go_version }}
-          cache: ${{ startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-') }}
+          cache: ${{ runner.environment == 'github-hosted' }}
       - run: make cover
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
@@ -206,7 +206,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ inputs.go_version }}
-          cache: ${{ startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-') }}
+          cache: ${{ runner.environment == 'github-hosted' }}
       - run: make spec-lint
 
   # A license only binds the people it reaches, and a file that leaves the
@@ -221,7 +221,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ inputs.go_version }}
-          cache: ${{ startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-') }}
+          cache: ${{ runner.environment == 'github-hosted' }}
       - run: make license
 
   # A claim in a document with no gate behind it goes stale silently.
@@ -235,7 +235,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ inputs.go_version }}
-          cache: ${{ startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-') }}
+          cache: ${{ runner.environment == 'github-hosted' }}
       - run: make dist
 
   validate:
@@ -248,7 +248,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ inputs.go_version }}
-          cache: ${{ startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-') }}
+          cache: ${{ runner.environment == 'github-hosted' }}
       - run: make validate
 
   lint:
@@ -260,7 +260,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ inputs.go_version }}
-          cache: ${{ startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-') }}
+          cache: ${{ runner.environment == 'github-hosted' }}
       # .golangci.yml is generated from latere.ai/x/ci-gate and gitignored,
       # because golangci-lint cannot inherit a shared config. It has to exist
       # before the linter runs: with no config golangci-lint falls back to its

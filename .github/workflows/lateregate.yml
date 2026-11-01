@@ -66,7 +66,7 @@ jobs:
           # The module cache is worth restoring on a hosted runner, which
           # starts empty. A self-hosted runner keeps its own between jobs,
           # and restoring a tarball over it fails on every file that exists.
-          cache: ${{ startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-') }}
+          cache: ${{ runner.environment == 'github-hosted' }}
       # Keep in step with test/lateregate_test.sh, which unit-tests a copy of
       # this shell against canned plans.
       - name: Read the plan
@@ -127,7 +127,7 @@ jobs:
           # The module cache is worth restoring on a hosted runner, which
           # starts empty. A self-hosted runner keeps its own between jobs,
           # and restoring a tarball over it fails on every file that exists.
-          cache: ${{ startsWith(matrix.os, 'ubuntu-') || startsWith(matrix.os, 'macos-') || startsWith(matrix.os, 'windows-') }}
+          cache: ${{ runner.environment == 'github-hosted' }}
       - run: go tool lateregate test
 
   # One job per gate on a hosted runner, named for it, so a failure names
@@ -156,7 +156,7 @@ jobs:
           # The module cache is worth restoring on a hosted runner, which
           # starts empty. A self-hosted runner keeps its own between jobs,
           # and restoring a tarball over it fails on every file that exists.
-          cache: ${{ startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-') }}
+          cache: ${{ runner.environment == 'github-hosted' }}
       # Enum checking resolves each configured project's TypeScript compiler.
       # Prepare its committed lockfile before checking; Go gates need neither
       # a JavaScript runtime nor a dependency install.
@@ -219,7 +219,7 @@ jobs:
           # The module cache is worth restoring on a hosted runner, which
           # starts empty. A self-hosted runner keeps its own between jobs,
           # and restoring a tarball over it fails on every file that exists.
-          cache: ${{ startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-') }}
+          cache: ${{ runner.environment == 'github-hosted' }}
       - run: go tool lateregate contract
 
   # The one status check branch protection requires. The gate jobs come and

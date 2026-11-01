@@ -516,7 +516,7 @@ fi
 # fails file by file, so every setup-go step gates it on a hosted label, or
 # turns it off where only a self-hosted runner reaches it.
 setups=$(grep -c 'uses: actions/setup-go' "$WORKFLOW")
-gated=$(grep -cE "cache: (false|\\$\\{\\{ startsWith\\((inputs.runs_on|matrix.os), 'ubuntu-'\\))" "$WORKFLOW")
+gated=$(grep -cE "cache: (false|\\$\\{\\{ runner\\.environment == 'github-hosted' \\}\\})" "$WORKFLOW")
 if [ "$setups" -eq "$gated" ]; then
     pass "every setup-go caches only on a hosted runner"
 else

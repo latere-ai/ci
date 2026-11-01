@@ -162,7 +162,7 @@ jobs:
           # The module cache is worth restoring on a hosted runner, which
           # starts empty. A self-hosted runner keeps its own between jobs,
           # and restoring a tarball over it fails on every file that exists.
-          cache: ${{ startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-') }}
+          cache: ${{ runner.environment == 'github-hosted' }}
       # Every step that can find the release wanting writes the name of what
       # failed to $LOGS/failed and its output to $LOGS/<name>.log, which the
       # issue step reads. Keep in step with test/ci_gate_bump_test.sh.
