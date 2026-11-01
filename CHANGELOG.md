@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v1.29.0 - 2026-11-01
+
 ### Changed
 
 - `image-build.yml`, in a public repository: the bill of materials'
