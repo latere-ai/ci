@@ -61,8 +61,10 @@ echo "$TAG is on $BRANCH"
 notes_root=$(mktemp -d)
 trap 'rm -rf "$notes_root"' EXIT
 cp CHANGELOG.md "$notes_root/CHANGELOG.md"
-if ! go run "latere.ai/x/ci-gate/cmd/lateregate@${LATEREGATE_VERSION}" release-notes -C "$notes_root" "$TAG" > /dev/null; then
-    die "CHANGELOG.md has no section for $TAG; a tag is a release, and a release has notes"
+# The reader's own words say which failed: no section, or a reader that
+# could not be fetched or built.
+if ! reader=$(go run "latere.ai/x/ci-gate/cmd/lateregate@${LATEREGATE_VERSION}" release-notes -C "$notes_root" "$TAG" 2>&1 > /dev/null); then
+    die "CHANGELOG.md has no section for $TAG, or the note reader at ${LATEREGATE_VERSION} did not run: ${reader:-no output}. A tag is a release, and a release has notes"
 fi
 echo "CHANGELOG.md has a section for $TAG"
 

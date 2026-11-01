@@ -4,7 +4,7 @@ inputs:
   verify_workflow:
     description: "File name of the per-push workflow whose run on the tagged commit must have succeeded. Empty takes the one workflow in .github/workflows that calls lateregate.yml."
     required: false
-    default: verify.yml
+    default: ""
   wait_minutes:
     description: "How long to wait for a verify run that is still going. 0 refuses at once, for a job on the self-hosted runner that should not hold a slot while verify runs."
     required: false

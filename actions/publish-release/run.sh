@@ -50,8 +50,9 @@ trap 'rm -rf "$work"' EXIT
 [ -f CHANGELOG.md ] || die "there is no CHANGELOG.md, so $TAG has no release notes"
 mkdir "$work/notes"
 cp CHANGELOG.md "$work/notes/CHANGELOG.md"
-go run "latere.ai/x/ci-gate/cmd/lateregate@${LATEREGATE_VERSION}" release-notes -C "$work/notes" "$TAG" > "$work/body.md" \
-    || die "CHANGELOG.md has no section for $TAG; a tag is a release, and a release has notes"
+if ! go run "latere.ai/x/ci-gate/cmd/lateregate@${LATEREGATE_VERSION}" release-notes -C "$work/notes" "$TAG" > "$work/body.md" 2> "$work/reader.err"; then
+    die "CHANGELOG.md has no section for $TAG, or the note reader at ${LATEREGATE_VERSION} did not run: $(cat "$work/reader.err"). A tag is a release, and a release has notes"
+fi
 
 evidence=()
 expand evidence "${EVIDENCE:-}"

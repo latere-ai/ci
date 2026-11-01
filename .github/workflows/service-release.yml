@@ -250,7 +250,8 @@ jobs:
       - name: Isolate Docker credentials
         run: echo "DOCKER_CONFIG=$RUNNER_TEMP/docker-config" >> "$GITHUB_ENV"
 
-      # Taken from the checkout before anything is installed, so it lists
+      # Taken from the checkout before the frontend or the build installs
+      # anything (Go itself lives outside the checkout), so it lists
       # what the lockfiles (go.sum, bun.lock, uv.lock and the like) pin, not
       # what an install left on disk. Development packages are included:
       # they run in this job, which later holds the deploy credential. The
