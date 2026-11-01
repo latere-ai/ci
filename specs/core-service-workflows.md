@@ -233,7 +233,9 @@ Each is a gate in ci-gate, applies when its input exists, and is configured in
   cap, holds no shell, and starts with a read-only root file system and
   answers a probe. Configured per image: name, Dockerfile, version arguments,
   `max_mib`, start arguments and environment, probe path and port. A start
-  that needs a database first (examen) stays the service's own job.
+  that needs a database first (examen) stays the service's own job. Docker
+  runs it on a hosted runner and podman on the self-hosted one, whichever is
+  on `PATH`.
 - **`frontend`**: install with the frozen lockfile, then whichever of
   `typecheck`, `test` and `build` the package defines.
 
@@ -333,6 +335,20 @@ actionlint 1.7.12 does not know the two properties yet, so
    `sign-image`.
 6. ci `v1.28.0` once two services released on the prerelease.
 
+Each service's `image.images` entry, from the job it replaces. Every runtime
+base but origo's is distroless, so only origo declares a shell. An image
+whose verify job today only builds and checks its version starts with its
+own defaults at adoption, or names in `skip_start` what it needs first.
+
+| Service | Version check | Cap | Start | Replaces |
+|---|---|---|---|---|
+| pons | `version`, `ponsd ` | 40 MiB | `serve`; `PONS_PUBLIC_URL`, `PONS_OIDC_ISSUERS`; `/livez` on 8080 | the whole `image` job |
+| lectio | `version`, `lectiod ` | 60 MiB | `LECTIO_DEV=true`; `/v1/openapi.yaml` on 8080 | the whole `image` job |
+| sermo | `-version`, `v0.0.0-candidate`, with `build_args: {VERSION: v0.0.0-candidate}` | 40 MiB | `SERMO_OIDC_ISSUERS`; `/livez` on 8080, `wait_seconds: 30` | the whole `image` job |
+| examen | `version`, `examend ` | 40 MiB | `skip_start`: migrate needs Postgres | build, version, size and shell; the migrate and start stay in its job |
+| lux, cella, topos, arca, limen | `-version`, `<binary> ` | none today | measured at adoption | the whole `image` job |
+| origo | as its `build` job checks | none today | measured at adoption; `allow_shell`: git runs hooks through `/bin/sh` | the image steps of `build` |
+
 ## Acceptance criteria
 
 - No release file of the ten services calls `cosign`, `anchore/sbom-action`,
@@ -367,11 +383,5 @@ actionlint 1.7.12 does not know the two properties yet, so
 
 ## Open questions
 
-- The `image` gate on the self-hosted runner: podman is its container runtime;
-  the gate either drives the `docker` command podman provides or runs only on
-  hosted runners.
 - Whether topos, lectio and pons publish verify commands too once they sign
   through the stages.
-- managed-agents onto `lateregate.yml`: the wiring check (`contract`) reads
-  the gate module named in the caller's `gate_module`, for the pin, the
-  hooks and the Makefile targets.
