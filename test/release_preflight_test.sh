@@ -77,6 +77,32 @@ check "a tag with no CHANGELOG section is refused" v9.9.9 latere-ai "" 1 "has no
 check "the namespace override wins, lowered" v1.0.0 latere-ai "Example/Images" 0 "" "owner=example/images"
 check "an invalid namespace is refused" v1.0.0 latere-ai "bad..name" 1 "is not a valid image namespace"
 
+# A self-hosted runner reuses its workspace: an earlier run left the branch's
+# tip as a shallow commit, so the fetch brings nothing and the history between
+# that tip and the tag stays cut.
+seed checkout -q main
+seed commit -q --allow-empty -m "after the tag"
+seed push -q origin main 2>/dev/null
+reused() {
+    local name=$1 tag=$2 want=$3 text=$4 dir out rc
+    dir=$(mktemp -d "$TMP/clone.XXXX")
+    git clone -q --depth 1 --branch main "file://$ORIGIN" "$dir/w" 2>/dev/null
+    git -C "$dir/w" fetch -q --no-tags --depth=1 origin "+refs/tags/$tag:refs/tags/$tag"
+    git -C "$dir/w" checkout -q --detach "refs/tags/$tag"
+    : > "$dir/out"
+    out=$(cd "$dir/w" && PATH="$TMP/bin:$PATH" GITHUB_OUTPUT="$dir/out" GITHUB_REF_NAME=$tag \
+        GITHUB_REPOSITORY_OWNER=latere-ai NAMESPACE_OVERRIDE="" DEFAULT_BRANCH=main \
+        bash "$SCRIPT" 2>&1)
+    rc=$?
+    if [ "$rc" -ne "$want" ] || ! printf '%s' "$out" | grep -qF -- "$text"; then
+        fail "$name (exit $rc, want $want; output: $out)"
+        return
+    fi
+    pass "$name"
+}
+reused "a tag the branch has moved past passes in a reused workspace" v1.0.0 0 ""
+reused "a tag off the branch is still refused in a reused workspace" v1.0.1 1 "v1.0.1 is not on main"
+
 if [ "$FAILURES" -gt 0 ]; then
     printf "\n%d failure(s)\n" "$FAILURES"
     exit 1

@@ -38,15 +38,25 @@ case "$TAG" in
 esac
 
 # Fails unless HEAD is reachable from origin's branch $1. A one-commit
-# checkout needs no deepening: a fetch into a shallow clone brings the
-# branch down to the tag's commit when the tag is on it, and the whole
-# branch when it is not, which is all the ancestry check reads.
+# checkout usually needs no deepening: a fetch into a shallow clone brings
+# the branch down to the tag's commit when the tag is on it, and the whole
+# branch when it is not. A runner that reuses its workspace can already hold
+# the branch's tip as a shallow commit from an earlier run, so that fetch
+# brings nothing and the history below the tip stays cut, which reads as a
+# tag off the branch. A refusal is therefore decided on the whole branch.
 on_branch() {
     local branch=$1 rc=0
     if ! git fetch --no-tags --quiet origin "+refs/heads/$branch:refs/remotes/origin/$branch"; then
         die "cannot fetch $branch to check that $TAG is on it, so nothing was built"
     fi
     git merge-base --is-ancestor HEAD "refs/remotes/origin/$branch" || rc=$?
+    if [ "$rc" -eq 1 ] && [ "$(git rev-parse --is-shallow-repository)" = true ]; then
+        if ! git fetch --no-tags --quiet --unshallow origin "+refs/heads/$branch:refs/remotes/origin/$branch"; then
+            die "cannot fetch all of $branch to check that $TAG is on it, so nothing was built"
+        fi
+        rc=0
+        git merge-base --is-ancestor HEAD "refs/remotes/origin/$branch" || rc=$?
+    fi
     if [ "$rc" -eq 1 ]; then
         die "$TAG is not on $branch: its commit $(git rev-parse --short HEAD) is not reachable from origin/$branch, so nothing was built. Delete the tag with git push origin :refs/tags/$TAG, land the change on $branch, and tag a commit there."
     fi

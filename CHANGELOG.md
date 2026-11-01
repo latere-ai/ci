@@ -17,6 +17,14 @@ committed: the commit log already holds that.
   `actions/attest-sbom` is deprecated, and neither attestation asks for a
   storage record, which failed on every release with a warning.
 
+### Fixed
+
+- `service-release.yml`: the release preflight no longer refuses a tag on the
+  default branch as off it. On a self-hosted runner that reuses its workspace,
+  an earlier run can hold the branch's tip as a shallow commit; when the branch
+  had moved past the tag, the check read that cut history as a tag off the
+  branch. A refusal is now decided on the whole branch.
+
 ## v1.28.0 - 2026-11-01
 
 ### Added
