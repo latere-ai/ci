@@ -1,6 +1,6 @@
 ---
 title: Shared building blocks for the core services' workflows
-status: drafted
+status: complete
 depends_on: []
 affects:
   - ci/.github/workflows/image-build.yml (new reusable stage)
@@ -389,7 +389,74 @@ package in `frontend_browser_package`, since its tests drive Chromium.
   run by hand against that release.
 - The gates are tested in ci-gate with fixtures, as its other gates are.
 
-## Open questions
+## Outcome
 
-- Whether topos, lectio and pons publish verify commands too once they sign
-  through the stages.
+Shipped as ci v1.28.0 on 2026-11-01 (#20, 52e1a31), with ci-gate v0.62.0 and
+one adoption change in each of the thirteen services; implemented directly,
+not dispatched. pons v0.5.1 is the first public release through the stages
+and passed `release-verify` with `gh attestation verify` included; limen
+v0.1.1 is the first private one. Drift: moderate. Five of the eight acceptance
+criteria hold as written, and the other three hold in the narrower form below.
+
+### What shipped
+
+- `image-build.yml`, `image-publish.yml` and `release-verify.yml`, with the
+  composite actions under `actions/` and a test for each of their 11 scripts.
+- The ci-gate gates `tidy`, `actionlint`, `manifests`, `rules`, `image` and
+  `frontend`, which replaced the services' hand-written jobs.
+- Every service's release and gate workflows on `@v1`, and the verify command
+  in lux, cella, arca, origo, lectio, pons and topos.
+
+### Design evolution
+
+- "None of the thirteen verify files carries a job for ... the image check":
+  examen keeps `image`, because its start runs migrations and needs Postgres,
+  which the gate does not bring up. origo's `build` and lectio's `deploy`
+  stay for the reasons under Rollout.
+- "No workflow in ci tells a hosted runner from the self-hosted one by its
+  label": `runner.environment` decides the Go cache, as designed. The label
+  stays in `lateregate.yml` and `ci-gate-bump.yml` where the job has no runner
+  yet, in a job-level `if` and a job-level `GOFLAGS`, and
+  `test/trimpath_test.sh` holds that form.
+- "`cli-release.yml` runs no lint or test job": it runs no lint, and its `test`
+  job covers only the systems `test_os` lists. latere-cli lists macOS, since
+  the gates ran Linux on the tagged commit.
+- Rollout: no prerelease tag. Services pinned ci by commit until v1.28.0, all
+  of them went to main before pons released, and the stages' two release bugs
+  were fixed on the way. Services dropped their jobs in one change each rather
+  than as the nightly pin move reached them.
+
+### Not implemented
+
+None.
+
+### Unspecified work
+
+- Improvement: `frontend_browser_package` on `lateregate.yml`, since auth's
+  frontend tests drive Chromium.
+- Improvement: the `image` gate starts under podman with
+  `--read-only-tmpfs=false`, matching Docker, and prints a container's logs
+  when it exits at start.
+- Improvement: `platformd version`, which the image gate's version check needs.
+- Improvement: `sign-image` calls `actions/attest` directly, since
+  `actions/attest-sbom` is deprecated, and neither attestation asks for a
+  storage record.
+
+### Decisions, surprises and follow-ups
+
+- A private repository skips the attestations, so a private release proves
+  nothing about the public path. limen went green and pons v0.5.0 still
+  stopped at the bill of materials' attestation, because `actions/attest`
+  reads only `$HOME/.docker/config.json`. Prove a change to these steps on a
+  public release. v0.5.0 is tagged and has no release.
+- limen v0.1.0 stopped at the version check, which read `docker run`'s pull
+  progress as the binary's output.
+- managed-agents stays pinned by commit: `internal/gate/workflow_test.go`
+  refuses a tag, so `v1` does not reach it and each ci release is a hand bump.
+- platform's gates run in one job on the self-hosted runner and take about 20
+  minutes or more, so a busy day cancels most runs on main. That is the shared
+  shape: `lateregate contract` requires `cancel-in-progress: true`, and the
+  release guard reads past a superseded run.
+
+All public services carry a verify command; the private ones have no reader
+for one. No follow-up is open.
