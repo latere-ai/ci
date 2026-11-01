@@ -124,6 +124,12 @@ publish env GITHUB_REF_NAME=v1.3.0-rc1 > /dev/null
 [ -f "$TMP/release/prerelease" ] && pass "a hyphen in the version core makes a prerelease" || fail "a hyphen in the version core makes a prerelease"
 [ "$(cat "$TMP/release/title")" = "v1.3.0-rc1" ] && pass "no prefix titles it with the tag alone" || fail "no prefix titles it with the tag alone"
 
+# SemVer: a hyphen after '+' is build metadata, part of a stable release.
+new_repo
+printf '\n## v1.4.0+exp-sha.5114f85\n\nBuilt.\n' >> "$TMP/w/CHANGELOG.md"
+publish env GITHUB_REF_NAME=v1.4.0+exp-sha.5114f85 > /dev/null
+[ -f "$TMP/release/state" ] && [ ! -f "$TMP/release/prerelease" ] && pass "a hyphen in build metadata leaves a stable release" || fail "a hyphen in build metadata leaves a stable release"
+
 new_repo
 if out=$(publish env GITHUB_REF_NAME=v9.9.9); then
     fail "a tag with no CHANGELOG section is refused"

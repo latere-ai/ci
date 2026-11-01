@@ -18,8 +18,9 @@ FAILURES=0
 pass() { printf "  \033[32mPASS\033[0m %s\n" "$1"; }
 fail() { printf "  \033[31mFAIL\033[0m %s\n" "$1"; FAILURES=$((FAILURES + 1)); }
 
-# Every uses: is SHA-pinned, as in every other workflow here.
-if grep -E '^\s*-?\s*uses:' "$WORKFLOW" | grep -vE '@[0-9a-f]{40}' >/dev/null; then
+# Every uses: is SHA-pinned, as in every other workflow here, except the
+# shared steps, which come from this repository at the workflow's own commit.
+if grep -E '^\s*-?\s*uses:' "$WORKFLOW" | grep -vE '@[0-9a-f]{40}|uses: \./\.latere-ci/actions/[a-z-]+$' >/dev/null; then
     fail "an action is not pinned to a commit SHA"
 else
     pass "every action is pinned to a commit SHA"
@@ -41,7 +42,7 @@ fi
 # fails file by file, so every setup-go step either gates it on a hosted
 # label or turns it off.
 setups=$(grep -c 'uses: actions/setup-go' "$WORKFLOW")
-gated=$(grep -cE "cache: (false|\\$\\{\\{ startsWith\\(inputs.runs_on, 'ubuntu-'\\))" "$WORKFLOW")
+gated=$(grep -cE "cache: (false|\\$\\{\\{ runner\\.environment == 'github-hosted' \\}\\})" "$WORKFLOW")
 if [ "$setups" -eq "$gated" ]; then
     pass "every setup-go caches only on a hosted runner"
 else
@@ -58,23 +59,23 @@ else
     fail "a bun step runs without real Node (bun=$buns node=$nodes)"
 fi
 
-# kubectl and gh are fetched at the pinned input version, checksum-verified,
-# only when the runner has none. A fetch at `latest` or without a checksum
-# would break the supply-chain rule the README states.
-for tool in kubectl gh; do
-    if grep -qF "name: Ensure $tool" "$WORKFLOW" \
-        && grep -qF "if command -v $tool >/dev/null 2>&1; then" "$WORKFLOW" \
-        && grep -qF "inputs.${tool}_version" "$WORKFLOW"; then
-        pass "$tool is fetched at inputs.${tool}_version only when missing"
-    else
-        fail "$tool bootstrap step is missing or unpinned"
-    fi
-done
-if grep -A22 'name: Ensure kubectl' "$WORKFLOW" | grep -q 'sha256sum -c' \
-    && grep -A22 'name: Ensure gh' "$WORKFLOW" | grep -q 'sha256sum -c'; then
-    pass "both tool fetches verify a sha256"
+# kubectl is fetched at the pinned input version, checksum-verified, only
+# when the runner has none; gh is the publish step's, through ensure-gh. A
+# fetch at `latest` or without a checksum would break the supply-chain rule
+# the README states.
+if grep -qF "name: Ensure kubectl" "$WORKFLOW" \
+    && grep -qF "if command -v kubectl >/dev/null 2>&1; then" "$WORKFLOW" \
+    && grep -qF "inputs.kubectl_version" "$WORKFLOW" \
+    && grep -A22 'name: Ensure kubectl' "$WORKFLOW" | grep -q 'sha256sum -c'; then
+    pass "kubectl is fetched at inputs.kubectl_version, verified, only when missing"
 else
-    fail "a tool fetch skips checksum verification"
+    fail "kubectl bootstrap step is missing, unpinned or unverified"
+fi
+if grep -qF 'bash "$GITHUB_ACTION_PATH/../ensure-gh/run.sh"' "$REPO_ROOT/actions/publish-release/action.yml" \
+    && grep -A1 'name: Publish release with evidence' "$WORKFLOW" | grep -qF 'uses: ./.latere-ci/actions/publish-release'; then
+    pass "gh comes from ensure-gh, inside the publish step"
+else
+    fail "the publish step does not bring its own gh"
 fi
 if grep -E 'dl.k8s.io|cli/cli/releases' "$WORKFLOW" | grep -q 'latest'; then
     fail "a tool is fetched at latest"
@@ -115,7 +116,7 @@ fi
 # published last, after the smoke and any CLI build.
 prev=0
 order_ok=1
-for step in 'name: SBOM of the source' 'name: Install' 'name: Build and push' 'name: Sign the image' 'name: SBOM of the image' 'name: Write the kubeconfig' 'name: Apply manifests' 'name: Roll new image' 'name: After the roll' 'name: Drop the kubeconfig' 'name: Smoke production release' 'name: Build CLI binaries' 'name: Publish release with evidence'; do
+for step in 'uses: ./.latere-ci/actions/release-preflight' 'uses: ./.latere-ci/actions/rollback-guard' 'name: Isolate Docker credentials' 'name: SBOM of the source' 'name: Install' 'name: Build and push' 'uses: ./.latere-ci/actions/sign-image' 'name: Write the kubeconfig' 'name: Apply manifests' 'name: Roll new image' 'name: After the roll' 'name: Drop the kubeconfig' 'name: Smoke production release' 'name: Build CLI binaries' 'name: Publish release with evidence'; do
     line=$(grep -nF "$step" "$WORKFLOW" | head -1 | cut -d: -f1)
     if [ -z "$line" ] || [ "$line" -le "$prev" ]; then
         fail "$step is missing or out of order"
@@ -123,18 +124,21 @@ for step in 'name: SBOM of the source' 'name: Install' 'name: Build and push' 'n
     fi
     prev=${line:-$prev}
 done
-[ "$order_ok" -eq 1 ] && pass "source SBOM, build, signing, deploy, smoke, CLI build and publish run in order"
+[ "$order_ok" -eq 1 ] && pass "tag checks, source SBOM, build, signing, deploy, smoke, CLI build and publish run in order"
 
 # The image is signed by the digest the push produced, with the pinned
-# cosign, and the job's token can mint the OIDC identity keyless signing
-# trades for a certificate. The workflow-level block is the job's, since
-# the job sets none of its own.
-if grep -A4 'name: Sign the image' "$WORKFLOW" | grep -qF 'DIGEST: ${{ steps.build.outputs.digest }}' \
-    && grep -A4 'name: Sign the image' "$WORKFLOW" | grep -qF 'cosign sign --yes "${IMAGE}@${DIGEST}"' \
-    && grep -A2 'sigstore/cosign-installer@' "$WORKFLOW" | grep -qF 'cosign-release: ${{ inputs.cosign_version }}'; then
-    pass "the image is signed by its pushed digest with the pinned cosign"
+# cosign and syft, and its SBOM is CycloneDX 1.6 like the source's. The job's
+# token can mint the OIDC identity keyless signing trades for a certificate.
+# The workflow-level block is the job's, since the job sets none of its own.
+sign=$(sed -n '/uses: \.\/\.latere-ci\/actions\/sign-image/,/^$/p' "$WORKFLOW")
+if printf '%s\n' "$sign" | grep -qF 'digest: ${{ steps.build.outputs.digest }}' \
+    && printf '%s\n' "$sign" | grep -qF 'ref: ${{ inputs.image }}' \
+    && printf '%s\n' "$sign" | grep -qF 'cosign_version: ${{ steps.versions.outputs.cosign }}' \
+    && printf '%s\n' "$sign" | grep -qF 'syft_version: ${{ steps.versions.outputs.syft }}' \
+    && printf '%s\n' "$sign" | grep -qF 'sbom_format: cyclonedx-json@1.6'; then
+    pass "the image is signed by its pushed digest with the pinned cosign and syft"
 else
-    fail "the signing step does not sign the pushed digest with inputs.cosign_version"
+    fail "the signing step does not sign the pushed digest with the pinned versions"
 fi
 perms=$(sed -n '/^permissions:/,/^jobs:/p' "$WORKFLOW")
 if printf '%s\n' "$perms" | grep -qx '  id-token: write' && printf '%s\n' "$perms" | grep -qx '  attestations: write'; then
@@ -143,26 +147,28 @@ else
     fail "id-token or attestations write is missing from the workflow permissions"
 fi
 
-# Every SBOM step runs the pinned syft and keeps its file on the runner for
-# the release, rather than uploading a run artifact of its own.
-sboms=$(grep -cF 'uses: anchore/sbom-action@' "$WORKFLOW")
-pinned=$(grep -A8 'uses: anchore/sbom-action@' "$WORKFLOW" | grep -cF 'syft-version: ${{ inputs.syft_version }}')
-quiet=$(grep -A8 'uses: anchore/sbom-action@' "$WORKFLOW" | grep -cF 'upload-artifact: false')
-if [ "$sboms" -eq 2 ] && [ "$pinned" -eq 2 ] && [ "$quiet" -eq 2 ]; then
-    pass "both SBOM steps run inputs.syft_version and upload no artifact"
+# The source SBOM runs the pinned syft and keeps its file on the runner for
+# the release, rather than uploading a run artifact of its own; the image's
+# is sign-image's.
+src=$(grep -A8 'uses: anchore/sbom-action@' "$WORKFLOW")
+if [ "$(grep -cF 'uses: anchore/sbom-action@' "$WORKFLOW")" -eq 1 ] \
+    && printf '%s\n' "$src" | grep -qF 'syft-version: ${{ steps.versions.outputs.syft }}' \
+    && printf '%s\n' "$src" | grep -qF 'upload-artifact: false'; then
+    pass "the source SBOM runs the pinned syft and uploads no artifact"
 else
-    fail "an SBOM step is missing, unpinned or uploads an artifact (steps=$sboms pinned=$pinned quiet=$quiet)"
+    fail "the source SBOM step is missing, unpinned or uploads an artifact"
 fi
 
-# GitHub's attestations need Enterprise Cloud in a private repository, and
-# an attestation's body goes into the public Sigstore log, so both attest
-# steps run for a public caller only.
-attests=$(grep -cE 'uses: actions/attest-(sbom|build-provenance)@' "$WORKFLOW")
-gated=$(grep -B1 -E 'uses: actions/attest-(sbom|build-provenance)@' "$WORKFLOW" | grep -cF 'if: ${{ !github.event.repository.private }}')
-if [ "$attests" -eq 2 ] && [ "$gated" -eq 2 ]; then
-    pass "attestations run only for a public caller"
+# The release attaches both SBOMs, the CLI binaries when build_cli is set,
+# and appends the smoke evidence to the body.
+pub=$(sed -n '/name: Publish release with evidence/,$p' "$WORKFLOW")
+if printf '%s\n' "$pub" | grep -qF '${{ runner.temp }}/sbom-source.cdx.json' \
+    && printf '%s\n' "$pub" | grep -qF '${{ steps.sign.outputs.sbom }}' \
+    && printf '%s\n' "$pub" | grep -qF "\${{ inputs.build_cli && 'dist/*' || '' }}" \
+    && printf '%s\n' "$pub" | grep -qF 'evidence: release-evidence/smoke.md'; then
+    pass "the release attaches both SBOMs and any CLI binaries, with the smoke evidence"
 else
-    fail "an attest step runs for a private caller (attests=$attests gated=$gated)"
+    fail "the publish step misses an SBOM, the CLI binaries or the evidence"
 fi
 
 # A caller copying an example must grant what the pipeline asks for, or

@@ -1,0 +1,7 @@
+name: rollback-guard
+description: Refuse to release a tag once a newer vX.Y.Z is tagged, so a re-run cannot roll production back.
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: bash "$GITHUB_ACTION_PATH/run.sh"

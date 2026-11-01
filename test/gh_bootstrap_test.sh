@@ -45,6 +45,27 @@ for f in $(grep -l '^  workflow_call:$' "$WORKFLOWS"/*.yml); do
     fi
 done
 
+# A shared step whose script calls gh runs ensure-gh first, in its own
+# action, so a stage on the self-hosted runner gets gh wherever it is used.
+for dir in "$REPO_ROOT"/actions/*/; do
+    action=$(basename "$dir")
+    [ "$action" = ensure-gh ] || [ "$action" = lib ] && continue
+    # Comments and messages name gh commands without running them.
+    if cat "$dir"*.sh 2> /dev/null | grep -vE '^[[:space:]]*#|echo ' | grep -qE '(^|[[:space:];(!])gh (release|api|attestation) '; then
+        if grep -qF 'bash "$GITHUB_ACTION_PATH/../ensure-gh/run.sh"' "$dir/action.yml"; then
+            pass "actions/$action runs ensure-gh before it calls gh"
+        else
+            fail "actions/$action calls gh without ensure-gh"
+        fi
+    fi
+done
+if grep -qF 'sha256sum -c' "$REPO_ROOT/actions/ensure-gh/run.sh" \
+    && grep -qF '. "$(dirname "${BASH_SOURCE[0]}")/../lib/versions.sh"' "$REPO_ROOT/actions/ensure-gh/run.sh"; then
+    pass "ensure-gh fetches the pinned gh and verifies it"
+else
+    fail "ensure-gh fetches gh unpinned or unverified"
+fi
+
 if [ "$FAILURES" -gt 0 ]; then
     printf "\n%d failure(s)\n" "$FAILURES"
     exit 1

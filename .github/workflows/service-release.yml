@@ -11,9 +11,11 @@ name: service-release
 #               url: https://platform.latere.ai, title: Latere Platform }
 #       secrets: inherit
 #
-# Flow (one job): build the frontend, the binary and the image -> sign the
-# image and record its SBOMs -> deploy -> smoke -> release. The release
-# publishes only after the live smoke proves the exact build is serving. See
+# Flow (one job): check the tag -> build the frontend, the binary and the
+# image -> sign the image and record its SBOMs -> deploy -> smoke -> release.
+# The release publishes only after the live smoke proves the exact build is
+# serving. The tag check, the rollback guard, the signing and the publish are
+# the shared steps under actions/, run from this workflow's own commit. See
 # this repo's README for the consumer conventions.
 
 on:
@@ -60,20 +62,20 @@ on:
         type: string
         default: "1.35.1"
       gh_version:
-        description: "GitHub CLI release fetched for the publish step when the runner has none, verified against the release's checksums file. Hosted runners ship gh and skip the fetch."
+        description: "GitHub CLI release fetched for the publish step when the runner has none, verified against the release's checksums file. Hosted runners ship gh and skip the fetch. Empty takes the version in actions/lib/versions.sh."
         required: false
         type: string
-        default: "2.100.0"
+        default: ""
       cosign_version:
-        description: "cosign release the image is signed with, installed and verified by sigstore/cosign-installer. Explicit so a run cannot pick up a cosign build published after this workflow was reviewed."
+        description: "cosign release the image is signed with, installed and verified by sigstore/cosign-installer. Empty takes the version in actions/lib/versions.sh."
         required: false
         type: string
-        default: "v3.0.6"
+        default: ""
       syft_version:
-        description: "syft release that writes the source and image SBOMs, installed by anchore/sbom-action through the installer at that release's tag. Explicit for the same reason as cosign_version."
+        description: "syft release that writes the source and image SBOMs, installed by anchore/sbom-action through the installer at that release's tag. Empty takes the version in actions/lib/versions.sh."
         required: false
         type: string
-        default: "v1.51.1"
+        default: ""
       build_mode:
         description: "split = build frontend + Go binary in CI, then Dockerfile.ci packages the prebuilt binary (asset-hash pinned smoke). dockerfile = one Dockerfile builds everything (no asset pin; smoke proves liveness only)."
         required: false
@@ -150,10 +152,10 @@ on:
         type: string
         default: ""
       lateregate_version:
-        description: "latere-ai/ci-gate version whose `release-notes` reads the CHANGELOG.md section for the tag. Explicit rather than the consumer's tool pin so the reader is the same in every repository, including ones that pin no Go tool."
+        description: "latere-ai/ci-gate version whose `release-notes` reads the CHANGELOG.md section for the tag, rather than the consumer's tool pin, so the reader is the same in every repository, including ones that pin no Go tool. Empty takes the version in actions/lib/versions.sh."
         required: false
         type: string
-        default: "v0.29.0"
+        default: ""
     secrets:
       DEPLOY_KUBECONFIG:
         description: "Kubeconfig of the service's rollout identity: a ServiceAccount bound to a Role in its namespace over the kinds deploy/prod and any after_roll command apply (the consumer's deploy/bootstrap/rollout-identity.yaml). A repository secret of this name reaches the pipeline through 'secrets: inherit'. Optional here so a service whose cluster side is not provisioned yet still builds and publishes its image; its deploy fails naming the secret."
@@ -200,86 +202,50 @@ jobs:
           # The CLI build may read the tag history; the rest needs one commit.
           fetch-depth: ${{ inputs.build_cli && '0' || '1' }}
 
-      - name: Refuse a tag that is not on the default branch
-        # A tag releases what the default branch holds. A tag on a commit off
-        # it would build and deploy code the branch never had: a release cut
-        # whose branch push was rejected while its tag still went out, or a
-        # tag pushed from a side branch. The run stops here, before anything
-        # is built or pushed. The checkout above is usually one commit deep,
-        # and that needs no deepening: a fetch into a shallow clone brings
-        # the branch down to the tag's commit when the tag is on it, and the
-        # whole branch when it is not, which is all the ancestry check reads.
+      # The shared steps (latere-ai/ci's actions/) at this workflow's own
+      # commit, beside the checkout and hidden from its git status.
+      - name: The shared steps, at this workflow's own commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .latere-ci
+          sparse-checkout: actions
+          persist-credentials: false
+      - name: Keep the shared steps out of git status
+        run: echo '/.latere-ci/' >> .git/info/exclude
+      - name: Tool versions
+        id: versions
         env:
-          TAG: ${{ github.ref_name }}
-          BRANCH: ${{ github.event.repository.default_branch || 'main' }}
-        run: |
-          set -euo pipefail
-          # Fails unless HEAD, the commit the steps below build, is reachable
-          # from origin's branch $1. Keep in step with
-          # test/tag_on_branch_test.sh, which runs this function from this
-          # file against real clones.
-          on_branch() {
-            local branch=$1 rc=0
-            if ! git fetch --no-tags --quiet origin "+refs/heads/$branch:refs/remotes/origin/$branch"; then
-              echo "::error::cannot fetch $branch to check that $TAG is on it, so nothing was built or deployed"
-              return 1
-            fi
-            git merge-base --is-ancestor HEAD "refs/remotes/origin/$branch" || rc=$?
-            if [ "$rc" -eq 1 ]; then
-              echo "::error::$TAG is not on $branch: its commit $(git rev-parse --short HEAD) is not reachable from origin/$branch, so nothing was built or deployed. Delete the tag with git push origin :refs/tags/$TAG, land the change on $branch, and tag a commit there."
-              return 1
-            fi
-            if [ "$rc" -ne 0 ]; then
-              echo "::error::cannot tell whether $TAG is on $branch: git merge-base exited $rc, so nothing was built or deployed"
-              return 1
-            fi
-          }
-          on_branch "$BRANCH"
-          echo "$TAG is on $BRANCH"
+          COSIGN_VERSION: ${{ inputs.cosign_version }}
+          SYFT_VERSION: ${{ inputs.syft_version }}
+          GH_VERSION: ${{ inputs.gh_version }}
+          LATEREGATE_VERSION: ${{ inputs.lateregate_version }}
+        run: bash .latere-ci/actions/lib/versions.sh
 
-      - name: Refuse to roll production back
-        # A re-run repeats the whole release, the build and the deploy
-        # included. Once a newer version is tagged, re-running this one would
-        # push its image as latest and roll the Deployment back to it, so the
-        # run stops here, before anything is built or pushed. The newer tag's
-        # release carries this one's changes; if this tag's notes are still
-        # wanted, publish them by hand with `gh release create`.
-        env:
-          TAG: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          # Prints the newest vX.Y.Z tag read on stdin that is newer than
-          # the version core of $1, or nothing. Prereleases on stdin are
-          # ignored. Keep in step with test/rollback_guard_test.sh, which
-          # runs this function from this file on a table of tags.
-          newer_than() {
-            local core=${1#v} newest="" t
-            core=${core%%+*}
-            core=${core%%-*}
-            while read -r t; do
-              t=${t#v}
-              [[ $t =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
-              [ "$t" = "$core" ] && continue
-              if [ "$(printf '%s\n%s\n' "$core" "$t" | sort -V | tail -n 1)" = "$t" ]; then
-                if [ -z "$newest" ] || [ "$(printf '%s\n%s\n' "$newest" "$t" | sort -V | tail -n 1)" = "$t" ]; then
-                  newest=$t
-                fi
-              fi
-            done
-            if [ -n "$newest" ]; then
-              echo "v$newest"
-            fi
-          }
-          if ! tags=$(git ls-remote --tags --refs origin 'refs/tags/v*'); then
-            echo "::error::cannot list this repository's tags to check whether a newer release exists"
-            exit 1
-          fi
-          newer=$(printf '%s\n' "$tags" | sed 's|.*refs/tags/||' | newer_than "$TAG")
-          if [ -n "$newer" ]; then
-            echo "::error::$newer is tagged and newer than $TAG. Releasing $TAG now would push it as latest and roll production back to it, so nothing was built or deployed. If $TAG still needs its GitHub release, publish its CHANGELOG.md section by hand with gh release create."
-            exit 1
-          fi
-          echo "no tag newer than $TAG"
+      # Every mode needs Go: the note reader below, the split build, and the
+      # deploy's preflight and after_roll commands.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ inputs.go_version }}
+          check-latest: true
+          # The module cache is worth restoring on a hosted runner, which
+          # starts empty. A self-hosted runner keeps its own between jobs,
+          # and restoring a tarball over it fails on every file that exists.
+          cache: ${{ runner.environment == 'github-hosted' }}
+
+      # Before anything is built, pushed or deployed: the tag carries no
+      # build metadata (the image is tagged with the git tag, and an image
+      # tag cannot hold '+'), its commit is on the default branch, and
+      # CHANGELOG.md has its section.
+      - id: preflight
+        uses: ./.latere-ci/actions/release-preflight
+        with:
+          lateregate_version: ${{ steps.versions.outputs.lateregate }}
+
+      # A re-run repeats the whole release, the deploy included, so once a
+      # newer version is tagged a re-run of this one stops here.
+      - uses: ./.latere-ci/actions/rollback-guard
 
       - name: Isolate Docker credentials
         run: echo "DOCKER_CONFIG=$RUNNER_TEMP/docker-config" >> "$GITHUB_ENV"
@@ -296,7 +262,7 @@ jobs:
           path: .
           format: cyclonedx-json@1.6
           output-file: ${{ runner.temp }}/sbom-source.cdx.json
-          syft-version: ${{ inputs.syft_version }}
+          syft-version: ${{ steps.versions.outputs.syft }}
           upload-artifact: false
           upload-release-assets: false
         env:
@@ -347,17 +313,6 @@ jobs:
           echo "asset=$asset" >> "$GITHUB_OUTPUT"
 
 
-      # Every mode needs Go: the split build, the deploy's preflight and
-      # after_roll commands, and the release-note reader.
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: ${{ inputs.go_version }}
-          check-latest: true
-          # The module cache is worth restoring on a hosted runner, which
-          # starts empty. A self-hosted runner keeps its own between jobs,
-          # and restoring a tarball over it fails on every file that exists.
-          cache: ${{ startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-') }}
-
       - name: Embed frontend
         if: ${{ inputs.build_mode == 'split' && inputs.has_frontend && inputs.spa_embed_dir != '' }}
         run: |
@@ -392,42 +347,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Reject build-metadata tags
-        # docker/metadata-action sanitizes an image tag to [a-zA-Z0-9._-], so a
-        # SemVer build-metadata tag (§10) would push as v1.0.0-exp-sha.5114f85
-        # while `kubectl set image` below still references the raw ref with its
-        # '+'. The deploy depends on image tag == git tag, so refuse the tag
-        # rather than let the two diverge silently.
-        #
-        # This is the first step that touches a registry: nothing is pushed
-        # or deployed before it fires.
-        env:
-          TAG: ${{ github.ref_name }}
-        run: |
-          case "$TAG" in
-            *+*)
-              echo "::error::${TAG} carries SemVer build metadata; an image tag cannot contain '+'. Cut a tag without it."
-              exit 1
-              ;;
-          esac
-
-      - name: Classify tag
-        id: tag
-        # A hyphen marks a prerelease only in the SemVer version core (§9).
-        # Build metadata (§10, everything after '+') belongs to a stable
-        # release and may itself contain hyphens, so strip it first. The
-        # `enable=` expression below cannot strip '+...' inline, hence a step.
-        env:
-          TAG: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          core="${TAG%%+*}"
-          if [[ "$core" == *-* ]]; then
-            echo "stable=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "stable=true" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Compute tags
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
@@ -440,7 +359,7 @@ jobs:
           tags: |
             type=raw,value=${{ github.ref_name }}
             type=sha,prefix=sha-,format=short
-            type=raw,value=latest,enable=${{ steps.tag.outputs.stable }}
+            type=raw,value=latest,enable=${{ steps.preflight.outputs.prerelease != 'true' }}
 
       - name: Build and push
         id: build
@@ -467,54 +386,20 @@ jobs:
       # Signed by digest before anything deploys, so every image this
       # pipeline puts in production carries a signature. The signature and
       # its certificate (this workflow, the caller's repository, tag and
-      # commit) are recorded in the public Sigstore log. The SBOMs are not
-      # attested in a private repository: an attestation's body goes into
-      # that log too, and would publish the service's dependency list.
-      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      # commit) are recorded in the public Sigstore log. The image's SBOM
+      # (the Go modules compiled into the binary and the base image's
+      # packages) goes beside the source's, and both are attested only in a
+      # public repository: an attestation's body goes into that log too, and
+      # would publish a private service's dependency list.
+      - id: sign
+        uses: ./.latere-ci/actions/sign-image
         with:
-          cosign-release: ${{ inputs.cosign_version }}
-          # Runner slots on one machine share a HOME (see setup-bun above),
-          # so each job installs into its own temp dir.
-          install-dir: ${{ runner.temp }}/cosign
-
-      - name: Sign the image
-        env:
-          IMAGE: ${{ inputs.image }}
-          DIGEST: ${{ steps.build.outputs.digest }}
-        run: cosign sign --yes "${IMAGE}@${DIGEST}"
-
-      # What the image holds: the Go modules compiled into the binary and
-      # the base image's packages. The release carries it as
-      # sbom-image.cdx.json.
-      - name: SBOM of the image
-        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
-        with:
-          image: ${{ inputs.image }}@${{ steps.build.outputs.digest }}
-          format: cyclonedx-json@1.6
-          output-file: ${{ runner.temp }}/sbom-image.cdx.json
-          syft-version: ${{ inputs.syft_version }}
-          upload-artifact: false
-          upload-release-assets: false
-
-      # GitHub's artifact attestations need GitHub Enterprise Cloud in a
-      # private repository, so only a public caller gets them. A private
-      # caller has the signature above and the SBOMs on its release.
-      - name: Attest the image's SBOM
-        if: ${{ !github.event.repository.private }}
-        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
-        with:
-          subject-name: ${{ inputs.image }}
-          subject-digest: ${{ steps.build.outputs.digest }}
-          sbom-path: ${{ runner.temp }}/sbom-image.cdx.json
-          push-to-registry: true
-
-      - name: Attest the image's provenance
-        if: ${{ !github.event.repository.private }}
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        with:
-          subject-name: ${{ inputs.image }}
-          subject-digest: ${{ steps.build.outputs.digest }}
-          push-to-registry: true
+          ref: ${{ inputs.image }}
+          digest: ${{ steps.build.outputs.digest }}
+          sbom_dir: ${{ runner.temp }}
+          sbom_format: cyclonedx-json@1.6
+          cosign_version: ${{ steps.versions.outputs.cosign }}
+          syft_version: ${{ steps.versions.outputs.syft }}
 
       # Hosted runners ship kubectl; the self-hosted VM does not. The pinned
       # release is fetched with its published sha256 into a directory that
@@ -671,14 +556,9 @@ jobs:
           mkdir -p release-evidence
           OUTPUT_MD=release-evidence/smoke.md "${{ inputs.smoke_script }}"
           cat release-evidence/smoke.md >> "$GITHUB_STEP_SUMMARY"
-          {
-            echo 'evidence<<CI_EOF'
-            cat release-evidence/smoke.md
-            echo CI_EOF
-          } >> "$GITHUB_OUTPUT"
 
       # A copy for the run's artifacts. The same text already reaches the
-      # release body through the `evidence` output and the step summary, so
+      # release body from the file and the step summary, so
       # an exhausted artifact-storage quota must not fail a release whose
       # smoke has just passed.
       - name: Upload release evidence
@@ -700,95 +580,19 @@ jobs:
         if: ${{ inputs.build_cli }}
         run: ${{ inputs.cli_build_cmd }}
 
-      # Hosted runners ship gh; the self-hosted VM does not. The pinned
-      # release is fetched and verified against its checksums file.
-      - name: Ensure gh
-        env:
-          GH_VERSION: ${{ inputs.gh_version }}
-        run: |
-          set -euo pipefail
-          if command -v gh >/dev/null 2>&1; then
-            gh --version | head -n1
-            exit 0
-          fi
-          dir="$RUNNER_TEMP/gh-bin"
-          mkdir -p "$dir"
-          base="https://github.com/cli/cli/releases/download/v${GH_VERSION}"
-          archive="gh_${GH_VERSION}_linux_amd64.tar.gz"
-          curl -sSfL -o "$dir/$archive" "$base/$archive"
-          curl -sSfL -o "$dir/checksums.txt" "$base/gh_${GH_VERSION}_checksums.txt"
-          (cd "$dir" && grep " $archive\$" checksums.txt | sha256sum -c)
-          tar -xzf "$dir/$archive" -C "$dir" --strip-components=2 "gh_${GH_VERSION}_linux_amd64/bin/gh"
-          echo "$dir" >> "$GITHUB_PATH"
-          "$dir/gh" --version | head -n1
-
-      - name: Read the release note for this tag
-        # A tag is a release, and a release has notes. The section for this
-        # tag in CHANGELOG.md is the body, and no section fails the job before
-        # anything is created or edited. The reader is lateregate's, run at a
-        # version pinned here rather than the consumer's tool pin, so it also
-        # serves repositories that pin no Go tool; the pre-push hook in a Go
-        # repository refuses the tag with the same reader, so this branch is
-        # rarely taken.
-        env:
-          TAG: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          # Gate schemas evolve independently of this pinned note reader.
-          # Only the changelog at the checked-out tag is an input here.
-          notes_root=$(mktemp -d)
-          trap 'rm -rf "$notes_root"' EXIT
-          cp CHANGELOG.md "$notes_root/CHANGELOG.md"
-          go run latere.ai/x/ci-gate/cmd/lateregate@${{ inputs.lateregate_version }} release-notes -C "$notes_root" "$TAG" > notes.md
-
+      # The last step: production is already green. The body is the tag's
+      # CHANGELOG section, then the smoke evidence, rebuilt on every run so a
+      # re-run replaces rather than stacks. The source and image SBOMs are
+      # attached to every release, and the CLI binaries (build_cli) beside
+      # them. A new release stays a draft until every file is attached.
       - name: Publish release with evidence
-        # The body is the changelog section, then the smoke evidence, and
-        # it is rebuilt from both on every run, so an edit re-run replaces
-        # rather than stacks. The release is the last step: prod is already
-        # green.
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
-          TITLE: ${{ inputs.title }}
-          EVIDENCE: ${{ steps.run.outputs.evidence }}
-          BUILD_CLI: ${{ inputs.build_cli }}
-        run: |
-          set -euo pipefail
-          printf '%s\n' "$EVIDENCE" > evidence.md
-          # A hyphen marks a prerelease only in the SemVer version core (§9);
-          # build metadata (§10, after '+') is part of a stable release and
-          # may itself contain hyphens, so strip it before the test.
-          prerelease=""
-          core="${TAG%%+*}"
-          if [[ "$core" == *-* ]]; then
-            prerelease="--prerelease"
-          fi
-
-          # The source and image SBOMs are attached to every release, and
-          # CLI binaries (build_cli) beside them.
-          assets=("$RUNNER_TEMP/sbom-source.cdx.json" "$RUNNER_TEMP/sbom-image.cdx.json")
-          if [ "$BUILD_CLI" = "true" ]; then
-            shopt -s nullglob
-            cli=(dist/*)
-            shopt -u nullglob
-            [ ${#cli[@]} -gt 0 ] || { echo "build_cli set but dist/ is empty" >&2; exit 1; }
-            assets+=("${cli[@]}")
-          fi
-
-          # Keep in step with test/publish_release_test.sh, which unit-tests
-          # a copy of this line.
-          { cat notes.md; printf '\n'; cat evidence.md; } > body.md
-
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" --notes-file body.md
-            if [ ${#assets[@]} -gt 0 ]; then
-              gh release upload "$TAG" "${assets[@]}" --clobber
-            fi
-          else
-            # No --target: the tag already exists at $SHA, and passing
-            # target_commitish makes gh attempt a ref create GITHUB_TOKEN can't
-            # perform (cli/cli#9514).
-            gh release create "$TAG" $prerelease \
-              --title "${TITLE} ${TAG}" \
-              --notes-file body.md "${assets[@]}"
-          fi
+        uses: ./.latere-ci/actions/publish-release
+        with:
+          title: ${{ inputs.title }}
+          files: |
+            ${{ runner.temp }}/sbom-source.cdx.json
+            ${{ steps.sign.outputs.sbom }}
+            ${{ inputs.build_cli && 'dist/*' || '' }}
+          evidence: release-evidence/smoke.md
+          lateregate_version: ${{ steps.versions.outputs.lateregate }}
+          gh_version: ${{ steps.versions.outputs.gh }}
