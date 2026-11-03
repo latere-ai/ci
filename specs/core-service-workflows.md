@@ -54,7 +54,8 @@ The thirteen core services and how they release today:
 | --- | --- | --- | --- | --- |
 | platform, auth, insula | private | `service-release.yml` | 57 to 212 | 15, 13, 21 |
 | topos, lectio, pons | public | own build, then `notes-release.yml` | 212 to 317 | 17, 22, 16 |
-| sermo, examen, limen | private | own build, then `notes-release.yml` | 243 to 343 | 16, 17, 14 |
+| sermo | private | own build, then `notes-release.yml` | 243 to 343 | 16 |
+| examen, limen | public | own build, then `notes-release.yml` | 243 to 343 | 17, 14 |
 | lux, cella, arca, origo | public | entirely their own | 586 to 885 | 43, 38, 37, 68 |
 
 The ten services outside `service-release.yml` repeat these steps, with small
