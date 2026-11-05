@@ -262,7 +262,15 @@ read-only by default.
 | `is the pin current` | asks the module proxy for the newest release above the pin, and closes the issues this pipeline opened for versions the pin has reached. When the pin is current, the run ends here: no gate runs. |
 | `bump to vX.Y.Z` | `go get -tool latere.ai/x/ci-gate/cmd/lateregate@vX.Y.Z` and `go mod tidy`, then the whole bar on the result: every gate `go tool lateregate` runs, one after another, and `lateregate contract`. |
 
-When the bar passes, the job commits `go.mod` and `go.sum` as
+A pin kept in a nested module, such as `internal/gate`, is found on its
+own, the way the per-push gate finds it: the one `go.mod` in the repository
+with the `lateregate` tool line, the root's first. Every `go` command then
+runs in that module and every gate checks the whole repository. Set
+`gate_module` to the module's directory to name it instead, which wins over
+what is found; two nested modules that pin the tool fail the run until it is
+set.
+
+When the bar passes, the job commits the gate module's `go.mod` and `go.sum` as
 `gate: ci-gate vX.Y.Z` and pushes to the branch the run is on, which for
 the schedule is the default branch. A branch that moved while the bar ran
 is rebased onto, up to three attempts; when the new commits touched

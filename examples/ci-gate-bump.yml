@@ -9,6 +9,11 @@
 # made with the Actions token starts no workflow, so the new commit gets its
 # CI run by dispatch.
 #
+# A repository that pins the tool in a nested module (for example
+# internal/gate, to keep it out of its consumers' module graph) needs nothing
+# more: the module is found on its own. To name it instead, pass
+# `with: { gate_module: internal/gate }` on the job below.
+#
 # Pick a minute of your own for the cron, so the repositories sharing a
 # runner do not all start at once.
 name: ci-gate bump

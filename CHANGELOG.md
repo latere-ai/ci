@@ -10,6 +10,16 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- `ci-gate-bump.yml` finds the module that pins `latere.ai/x/ci-gate` the way
+  `lateregate.yml` does, so a repository that keeps the pin in a nested
+  module (`internal/gate`) can call it. The daily check, the pin move, the
+  gates, the commit and the issue's reproduce commands all use that module;
+  the commit holds its `go.mod` and `go.sum`. The new input `gate_module`
+  names the directory and wins over detection. A repository with the pin in
+  its root `go.mod` sees no difference.
+
 ## v1.33.0 - 2026-11-05
 
 ### Changed
