@@ -10,6 +10,14 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- The shared workflows and actions pin the same commit of each third-party
+  action as every latere-ai repository: `docker/login-action` v4.8.0,
+  `actions/download-artifact` v8.0.2, `docker/setup-qemu-action` v4.4.0 and
+  `sigstore/cosign-installer` v4.1.3. The cosign that signs and verifies is
+  unchanged: it is still the version `actions/lib/versions.sh` names.
+
 ## v1.34.0 - 2026-11-05
 
 ### Changed
