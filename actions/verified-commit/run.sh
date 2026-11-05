@@ -12,9 +12,10 @@
 #                           action_required, neutral, skipped and stale
 #                           count as failure, since none verified it.
 #   running or queued       waited for up to WAIT_MINUTES; 0 refuses at
-#                           once, so a job on the self-hosted runner does
-#                           not hold one of its two slots while verify
-#                           runs on the other.
+#                           once. Empty waits 60 minutes on a GitHub-hosted
+#                           runner and refuses at once on the self-hosted
+#                           runner, so a release there does not hold one of
+#                           its two slots while verify runs on the other.
 #   cancelled               refused: a newer push superseded the run, so
 #                           the commit itself was never verified.
 #   no run at all           the run may not exist yet, because a release
@@ -35,7 +36,7 @@
 #
 # Inputs, from the environment: GITHUB_REPOSITORY, GITHUB_SHA,
 # GITHUB_REF_NAME, GITHUB_REF_TYPE (tag, or branch; unset reads as tag),
-# GITHUB_RUN_ID, VERIFY_WORKFLOW (the workflow file name;
+# GITHUB_RUN_ID, RUNNER_ENVIRONMENT, VERIFY_WORKFLOW (the workflow file name;
 # empty takes the one workflow in the checkout's .github/workflows that
 # calls latere-ai/ci's lateregate.yml, the per-push gate), WAIT_MINUTES, SKIP_PATHS (one shell pattern per line, matched against
 # each changed path; * matches across directories), POLL_SECONDS (30;
@@ -49,7 +50,15 @@ TAG_PUSH=""
 [ "${GITHUB_REF_TYPE:-tag}" = tag ] && TAG_PUSH=$GITHUB_REF_NAME
 export TAG_PUSH
 VERIFY_WORKFLOW=${VERIFY_WORKFLOW:-}
-WAIT_MINUTES=${WAIT_MINUTES:-60}
+# The one place the default wait is decided, for every pipeline that runs
+# this check.
+if [ -z "${WAIT_MINUTES:-}" ]; then
+    if [ "${RUNNER_ENVIRONMENT:-github-hosted}" = self-hosted ]; then
+        WAIT_MINUTES=0
+    else
+        WAIT_MINUTES=60
+    fi
+fi
 POLL_SECONDS=${POLL_SECONDS:-30}
 SKIP_PATHS=${SKIP_PATHS-$'specs/*\n*.md'}
 # How many skipped commits are read through before giving up. Far past any

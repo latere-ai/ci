@@ -18,13 +18,19 @@ committed: the commit log already holds that.
   per-push gate run on its branch push must have succeeded, so a tag on a
   commit whose CI failed, was cancelled or never ran builds, deploys and
   publishes nothing. Both take the same `verify_workflow` (empty: the
-  workflow that calls `lateregate.yml`), `wait_minutes` (`60`) and
-  `skip_paths` (`specs/*`, `*.md`) inputs. A `notes-release.yml` caller
+  workflow that calls `lateregate.yml`), `wait_minutes` and `skip_paths`
+  (`specs/*`, `*.md`) inputs. A `notes-release.yml` caller
   now grants `actions: read` beside `contents: write`; without it the
   release fails at startup.
 
 ### Changed
 
+- `wait_minutes`, in every release pipeline that checks CI, defaults to
+  waiting 60 minutes on a GitHub-hosted runner and to refusing at once on
+  the self-hosted runner, where a waiting release held one of the two
+  slots the run it waited for needed. The refusal prints the command that
+  re-runs the release once CI is green. A caller that passes a number keeps
+  it.
 - `verified-commit`, in a run started on a branch rather than a tag (a
   manual rebuild from `main`), reads that branch's own push run of the
   commit. It used to set those runs apart as the tag push's and refuse.

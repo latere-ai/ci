@@ -6,9 +6,9 @@ inputs:
     required: false
     default: ""
   wait_minutes:
-    description: "How long to wait for a verify run that is still going. 0 refuses at once, for a job on the self-hosted runner that should not hold a slot while verify runs."
+    description: "How long to wait for a verify run that is still going. 0 refuses at once. Empty waits 60 minutes on a GitHub-hosted runner and refuses at once on the self-hosted runner, which should not hold a slot while verify runs."
     required: false
-    default: "60"
+    default: ""
   skip_paths:
     description: "Shell patterns, one per line, for paths that change no code. A commit that changes only these carries its parent's code, so where its own verify run is missing, still going or cancelled, its parent is read instead; a run that concluded on the commit still decides."
     required: false

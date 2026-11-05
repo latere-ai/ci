@@ -66,10 +66,10 @@ on:
         type: string
         default: ""
       wait_minutes:
-        description: "How long the release waits for a per-push run that is still going."
+        description: "How long the release waits for that run while it is still going. 0 refuses at once. Empty waits 60 minutes on a GitHub-hosted runner and refuses at once on the self-hosted runner, so a release there does not hold a slot the run it waits for needs; the refusal prints the command that re-runs it."
         required: false
         type: string
-        default: "60"
+        default: ""
       lateregate_version:
         description: "latere-ai/ci-gate version whose `release-notes` reads the CHANGELOG.md section for the tag, rather than the consumer's tool pin, so the reader is the same in every repository, including ones that pin no Go tool. Empty takes the version in actions/lib/versions.sh."
         required: false

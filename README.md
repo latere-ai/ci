@@ -394,7 +394,7 @@ pipeline can `kubectl set image` without reading the manifests.
 | `smoke_scope` | empty | an OAuth scope requested with the smoke token |
 | `build_cli`, `cli_build_cmd` | `false`, empty | also build command-line binaries (the command writes them under `dist/`) and attach them to the release |
 | `verify_workflow` | empty: the workflow that calls `lateregate.yml` | the per-push workflow whose run on the tagged commit must have succeeded |
-| `wait_minutes` | `60` | how long the release waits for that run while it is still going; `"0"` refuses at once |
+| `wait_minutes` | empty: `60` on a GitHub-hosted runner, `0` on the self-hosted one | how long the release waits for that run while it is still going; `"0"` refuses at once and prints the command that re-runs the release |
 | `skip_paths` | `specs/*`, `*.md` | paths that change no code; a commit that changes only these is read through to its parent. A repository whose gate ignores more paths lists them here too |
 | `go_version`, `bun_version` | `1.27`, `1.4.4` | toolchains |
 | `kubectl_version` | `1.35.1` | fetched, checksum-verified, when the runner has none |
@@ -562,8 +562,10 @@ jobs:
 runner once:
 
 1. The tagged commit's `verify.yml` run on its branch push succeeded. A
-   run still going is waited for up to `wait_minutes` (60); `"0"` refuses
-   at once, for a private repository that should not hold a runner slot. A
+   run still going is waited for up to `wait_minutes`: by default 60
+   minutes on a GitHub-hosted runner, while on the self-hosted runner,
+   whose two slots the run it waits for needs, the release refuses at once
+   and prints the command that re-runs it once the run is green. A
    cancelled run refuses, since the commit was never verified. A commit
    that changes only `skip_paths` (`specs/*` and `*.md`) carries its
    parent's code, so where its own run is missing, still going or
@@ -671,7 +673,8 @@ calls `lateregate.yml`, found in `.github/workflows`, or the file named in
 
 Inputs: `go_version`, `goreleaser_version` (default `v2.17.1`),
 `lateregate_version`, `run_tests`, `test_os` (empty: no extra runners),
-`verify_workflow`, `wait_minutes` (default `60`) and `runs_on`.
+`verify_workflow`, `wait_minutes` (default: `60` on a GitHub-hosted
+runner, `0` on the self-hosted one) and `runs_on`.
 `run_lint` and `golangci_version` are accepted and ignored. The caller
 grants `contents: write` and `actions: read`.
 

@@ -47,7 +47,8 @@ run_case() {
     local name=$1 want=$2 text=$3 out rc
     out=$(cd "${CHECKOUT:-$W}" && PATH="$W/bin:$PATH" STUB_GH_DIR="$W" GITHUB_REPOSITORY=$REPO GITHUB_SHA=$SHA \
         GITHUB_REF_NAME=${REF_NAME:-$TAG} GITHUB_REF_TYPE=${REF_TYPE:-tag} GITHUB_RUN_ID=42 POLL_SECONDS=0 \
-        VERIFY_WORKFLOW=${VERIFY-verify.yml} WAIT_MINUTES=${WAIT:-60} bash "$SCRIPT" 2>&1)
+        RUNNER_ENVIRONMENT=${RUNNER_ENV:-github-hosted} \
+        VERIFY_WORKFLOW=${VERIFY-verify.yml} WAIT_MINUTES=${WAIT-60} bash "$SCRIPT" 2>&1)
     rc=$?
     if [ "$rc" -eq "$want" ] && printf '%s' "$out" | grep -qF -- "$text"; then
         pass "$name"
@@ -98,6 +99,21 @@ stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs main:null)"
 stub_gh_fixture "$W" "repos/$REPO/commits/$SHA" "{\"parents\":[{\"sha\":\"$PARENT\"}]}"
 stub_gh_fixture "$W" "repos/$REPO/compare/$PARENT...$SHA" '{"files":[{"filename":"main.go"}]}'
 WAIT=0 run_case "wait_minutes 0 refuses a running verify with the re-run command" 1 "gh run rerun 42 --failed --repo $REPO"
+
+# An empty wait is the runner's: the self-hosted runner refuses at once, a
+# hosted one waits.
+new_case
+stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs main:null)"
+stub_gh_fixture "$W" "repos/$REPO/commits/$SHA" "{\"parents\":[{\"sha\":\"$PARENT\"}]}"
+stub_gh_fixture "$W" "repos/$REPO/compare/$PARENT...$SHA" '{"files":[{"filename":"main.go"}]}'
+WAIT="" RUNNER_ENV=self-hosted run_case "an empty wait refuses a running verify at once on the self-hosted runner" 1 "gh run rerun 42 --failed --repo $REPO"
+
+new_case
+stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs main:null)" 1
+stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs main:success)"
+stub_gh_fixture "$W" "repos/$REPO/commits/$SHA" "{\"parents\":[{\"sha\":\"$PARENT\"}]}"
+stub_gh_fixture "$W" "repos/$REPO/compare/$PARENT...$SHA" '{"files":[{"filename":"main.go"}]}'
+WAIT="" RUNNER_ENV=github-hosted run_case "an empty wait waits for a running verify on a hosted runner" 0 "concluded success"
 
 new_case
 stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs main:cancelled)"
