@@ -10,6 +10,16 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Removed
+
+- `runner-health.yml`, which moved `CI_RUNNER_PRIVATE` to `ubuntu-latest`
+  while `linux-vm` was offline or a job had waited for it over 20 minutes.
+  Those hosted minutes billed against the organization's Actions budget,
+  and a spent budget fails every private repository's hosted jobs at zero
+  steps until the month ends. A private repository's job now waits for the
+  self-hosted runner. `RUNNER_HEALTH_TOKEN` is no longer read, and
+  `CI_RUNNER_SWITCHES` is no longer written.
+
 ## v1.35.0 - 2026-11-05
 
 ### Changed

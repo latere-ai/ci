@@ -897,7 +897,7 @@ applies it as the default of its `runs_on` input:
 
 | Repository | Runs on | Falls back to |
 | --- | --- | --- |
-| private | the self-hosted runner, `linux-vm` | `ubuntu-latest`, while no `linux-vm` runner is online, or while a job has waited for one more than 20 minutes |
+| private | the self-hosted runner, `linux-vm` | nothing: a job waits for the runner |
 | public | `ubuntu-latest` | `linux-vm`, while hosted runners are down, for events only the repository starts |
 
 A caller that passes nothing gets the policy and its fallback. A label
@@ -917,7 +917,7 @@ It reads two organization variables:
 
 | Variable | Visible to | Value |
 | --- | --- | --- |
-| `CI_RUNNER_PRIVATE` | private repositories | `linux-vm`, or `ubuntu-latest` while `linux-vm` is offline or busy |
+| `CI_RUNNER_PRIVATE` | private repositories | `linux-vm` |
 | `CI_RUNNER_PUBLIC` | every repository | `ubuntu-latest`, or `linux-vm` while hosted runners are down |
 
 A public repository reads `CI_RUNNER_PRIVATE` as empty, so the
@@ -925,62 +925,22 @@ variable's visibility is what tells the two kinds of repository apart, on
 every event: a scheduled run's payload names no repository. With neither
 variable set, every job runs on `ubuntu-latest`.
 
-The two fallbacks have different triggers, because the two runners fail
-differently:
+A private repository has no fallback to hosted runners. Its hosted
+minutes bill against the organization's Actions budget, and a spent budget
+fails every hosted job at zero steps with no log, in every private
+repository at once, until the month ends. A job aimed at `linux-vm` while
+the runner is offline or busy waits in the queue instead, and GitHub drops
+it after a day unclaimed. The variable can still be moved by hand, for one
+job that cannot wait and is worth the minutes:
 
-- **The self-hosted runner is offline or busy.** A job aimed at a label
-  with no online runner waits in the queue until GitHub drops it a day
-  later, and one aimed at a busy runner waits for a slot; neither moves by
-  itself. [`runner-health.yml`](.github/workflows/runner-health.yml) runs
-  every ten minutes on a hosted runner here, where a public repository's
-  minutes cost nothing, and moves `CI_RUNNER_PRIVATE` by two rules, the
-  first winning:
+```sh
+gh api -X PATCH /orgs/latere-ai/actions/variables/CI_RUNNER_PRIVATE -f value=ubuntu-latest
+gh api -X PATCH /orgs/latere-ai/actions/variables/CI_RUNNER_PRIVATE -f value=linux-vm
+```
 
-  | Rule | Moves to `ubuntu-latest` when | Moves back to `linux-vm` when |
-  | --- | --- | --- |
-  | offline | no `linux-vm` runner answers over a minute | a runner is online and the busy rule is clear |
-  | busy | a runner is online and a queued job that asks for `linux-vm` has waited more than `BUSY_AFTER_MINUTES` (20) | no such job has waited more than `CLEAR_BELOW_MINUTES` (5) |
-
-  Between the two thresholds the variable keeps its value, so it does not
-  flap. The queue is every queued job in the organization's private,
-  unarchived repositories whose labels include `linux-vm`, read only while
-  a runner is online. Only jobs created after a move follow it; one
-  already queued for `linux-vm` waits for the runner.
-
-  Every move is a line in the organization variable `CI_RUNNER_SWITCHES`
-  (visible to private repositories, newest 200 lines): the time, the two
-  labels, the rule with the oldest wait, and how long the previous label
-  held. That is how often, and for how long, private jobs ran on hosted
-  minutes:
-
-  ```sh
-  gh api /orgs/latere-ai/actions/variables/CI_RUNNER_SWITCHES --jq .value
-  ```
-
-  GitHub's token can neither list the organization's runners, nor read
-  other repositories' runs, nor write organization variables, so the
-  workflow reads `RUNNER_HEALTH_TOKEN`, a fine-grained token for the
-  organization with "Self-hosted runners: read", "Variables: read and
-  write" and "Actions: read" on every repository, stored as a secret of
-  this repository. Without it the run warns and changes nothing, and the
-  variable is moved by hand:
-
-  ```sh
-  gh api -X PATCH /orgs/latere-ai/actions/variables/CI_RUNNER_PRIVATE -f value=ubuntu-latest  # linux-vm is offline or busy
-  gh api -X PATCH /orgs/latere-ai/actions/variables/CI_RUNNER_PRIVATE -f value=linux-vm       # it is back
-  ```
-
-  To hold the variable still, for maintenance on the machine, disable the
-  workflow (`gh workflow disable runner-health.yml --repo latere-ai/ci`).
-  GitHub also disables a public repository's scheduled workflows after 60
-  days without a commit; the variable then keeps its last value.
-- **Hosted runners are down.** A public repository pays nothing for
-  hosted runners, so its fallback is for a GitHub outage, which a check
-  on a hosted runner cannot see while it lasts: `CI_RUNNER_PUBLIC` is
-  moved by hand. A private repository's hosted fallback spends the
-  Actions budget, and a spent budget fails a job at zero steps with no
-  log; when the self-hosted runner is offline as well, nothing is left to
-  route to.
+A public repository pays nothing for hosted runners, so its fallback is
+for a GitHub outage, which a check on a hosted runner cannot see while it
+lasts: `CI_RUNNER_PUBLIC` is moved by hand.
 
 A public repository's job reaches the self-hosted runner only on `push`,
 `schedule`, `workflow_dispatch` and `release`, events only the

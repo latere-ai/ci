@@ -45,7 +45,7 @@ POLICY="\${{ (github.event.repository.private || contains(fromJSON('[\"push\",\"
 TEST_OS_USE="inputs.test_os || format('[\"{0}\"]', inputs.runs_on)"
 
 # A reusable workflow is one a consumer can call. The repo's own workflows
-# (actionlint, test, major-tag, release, runner-health) run here and keep a
+# (actionlint, test, major-tag, release) run here and keep a
 # fixed runner.
 reusable() { grep -l '^  workflow_call:$' "$WORKFLOWS"/*.yml; }
 

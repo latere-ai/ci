@@ -294,8 +294,8 @@ The same blocks take the repeated parts out of ci's own workflows:
   that own it, and `publish_release_test.sh` and `tag_on_branch_test.sh`
   are gone, covered by `publish_release_action_test.sh` and
   `release_preflight_test.sh`. The copies that remain test inline shell in
-  `lateregate.yml`, `ci-gate-bump.yml` and `runner-health.yml`, which the
-  gate-scan reason keeps inline.
+  `lateregate.yml` and `ci-gate-bump.yml`, which the gate-scan reason
+  keeps inline.
 
 A stage runs the actions from ci at its own commit: it checks out
 `job.workflow_repository` at `job.workflow_sha` into `.latere-ci/` beside the
