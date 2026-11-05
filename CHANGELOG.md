@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v1.31.0 - 2026-11-05
+
 ### Fixed
 
 - `ci-gate-bump.yml` finds the per-push caller by its `uses:` line. A comment
