@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v1.32.0 - 2026-11-05
+
 ### Changed
 
 - `lateregate.yml` measures the plan from the last green commit. The job that
