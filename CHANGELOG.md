@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v1.36.0 - 2026-11-06
+
 ### Added
 
 - `service-release.yml` takes a `platforms` input, default `linux/amd64`:
