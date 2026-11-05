@@ -59,12 +59,12 @@ on:
         type: string
         default: ""
 
-# actions: read lets the plan name the last green run. A caller that grants
-# only contents: read caps this, the API answers 403, and the run checks the
-# whole tree.
-permissions:
-  contents: read
-  actions: read
+# No permissions block: the jobs run with the caller's token. A reusable
+# workflow that asks for a permission its caller does not grant fails at
+# startup with no job and no log, so asking for actions: read here would
+# stop every caller that grants only contents: read. A caller that grants
+# actions: read lets the plan name the last green run; one that does not
+# gets a 403 from the API, and the run checks the whole tree.
 
 # Every job runs lateregate from the module that pins it, pointed at the
 # repository root with -C, so a nested gate module checks the same tree a

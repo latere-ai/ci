@@ -886,10 +886,15 @@ for job in probe test gate contract passed; do
         fail "$job must find the gate module (line [$find_line]) before its first lateregate call (line [$first_call])"
     fi
 done
-if grep -qE '^permissions:$' "$WORKFLOW" && awk '/^permissions:$/ { p = 1; next } p && /^[^ ]/ { exit } p' "$WORKFLOW" | grep -qxF '  actions: read'; then
-    pass "the workflow asks for actions: read so the plan can name the last green run"
+# A reusable workflow that asks for more than its caller grants fails at
+# startup, so the workflow asks for nothing beyond contents: read and a
+# caller's grant of actions: read reaches the plan through the caller's
+# token.
+extra=$(awk '/^permissions:/ { p = 1; next } p && /^[^ ]/ { exit } p && NF' "$WORKFLOW" | grep -vxF '  contents: read' || true)
+if [ -z "$extra" ]; then
+    pass "the workflow asks for no permission a contents: read caller lacks"
 else
-    fail "the workflow permissions must include actions: read"
+    fail "the workflow asks for permissions a contents: read caller does not grant: $extra"
 fi
 
 if [ "$FAILURES" -gt 0 ]; then

@@ -10,6 +10,15 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Fixed
+
+- `lateregate.yml` no longer asks for `actions: read`. A reusable workflow
+  that asks for a permission its caller does not grant fails at startup with
+  no job, so since v1.32.0 every run of a caller that grants only
+  `contents: read` failed before it began. The jobs now run with the
+  caller's token: a caller that grants `actions: read` gets the plan from
+  the last green commit, and one that does not checks the whole tree.
+
 ## v1.32.0 - 2026-11-05
 
 ### Changed

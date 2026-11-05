@@ -24,8 +24,11 @@ on:
     branches: [main]
   pull_request:
 
+# actions: read lets the plan start from the last green commit; without it
+# the run checks the whole tree.
 permissions:
   contents: read
+  actions: read
 
 jobs:
   gate:

@@ -94,6 +94,7 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   gate:
@@ -134,8 +135,10 @@ the log and the step summary. Gates run by name, one per job, take no
 When the base cannot be had, the whole tree is checked and the log says why.
 That happens when the pinned `lateregate` has no `base` command, no run was
 green, the API answered an error, or the caller grants no `actions: read`
-(the workflow asks for it, and a caller that grants only `contents: read`
-caps it, so the API answers 403). A cancelled run is never a base.
+(the workflow runs with the caller's token and asks for nothing more, since a
+reusable workflow that asks for a permission its caller lacks fails at
+startup; without the grant the API answers 403). A cancelled run is never a
+base.
 
 **The plan says what to install.** Each running entry in the plan may carry
 `needs`: `node` and `bun` install Node and Bun, and `chromium:<dir>` runs
