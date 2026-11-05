@@ -11,11 +11,12 @@ name: service-release
 #               url: https://platform.latere.ai, title: Latere Platform }
 #       secrets: inherit
 #
-# Flow (one job): check the tag -> build the frontend, the binary and the
-# image -> sign the image and record its SBOMs -> deploy -> smoke -> release.
-# The release publishes only after the live smoke proves the exact build is
-# serving. The tag check, the rollback guard, the signing and the publish are
-# the shared steps under actions/, run from this workflow's own commit. See
+# Flow (one job): check that the tagged commit passed CI -> check the tag ->
+# build the frontend, the binary and the image -> sign the image and record
+# its SBOMs -> deploy -> smoke -> release. The release publishes only after
+# the live smoke proves the exact build is serving. The CI check, the tag
+# check, the rollback guard, the signing and the publish are the shared
+# steps under actions/, run from this workflow's own commit. See
 # this repo's README for the consumer conventions.
 
 on:
@@ -62,7 +63,7 @@ on:
         type: string
         default: "1.35.1"
       gh_version:
-        description: "GitHub CLI release fetched for the publish step when the runner has none, verified against the release's checksums file. Hosted runners ship gh and skip the fetch. Empty takes the version in actions/lib/versions.sh."
+        description: "GitHub CLI release fetched for the CI check and the publish step when the runner has none, verified against the release's checksums file. Hosted runners ship gh and skip the fetch. Empty takes the version in actions/lib/versions.sh."
         required: false
         type: string
         default: ""
@@ -151,6 +152,23 @@ on:
         required: false
         type: string
         default: ""
+      verify_workflow:
+        description: "File name of the per-push workflow whose run on the tagged commit must have succeeded before anything is built. Empty takes the one workflow in .github/workflows that calls lateregate.yml."
+        required: false
+        type: string
+        default: ""
+      wait_minutes:
+        description: "How long the release waits for that run while it is still going. 0 refuses at once."
+        required: false
+        type: string
+        default: "60"
+      skip_paths:
+        description: "Shell patterns, one per line, for paths that change no code. A commit that changes only these carries its parent's code, so where its own verify run is missing, still going or cancelled, its parent is read instead; a run that concluded on the commit still decides. A repository whose verify workflow ignores more paths lists them here too."
+        required: false
+        type: string
+        default: |
+          specs/*
+          *.md
       lateregate_version:
         description: "latere-ai/ci-gate version whose `release-notes` reads the CHANGELOG.md section for the tag, rather than the consumer's tool pin, so the reader is the same in every repository, including ones that pin no Go tool. Empty takes the version in actions/lib/versions.sh."
         required: false
@@ -214,6 +232,19 @@ jobs:
           persist-credentials: false
       - name: Keep the shared steps out of git status
         run: echo '/.latere-ci/' >> .git/info/exclude
+
+      # First of all: the tagged commit passed the repository's per-push
+      # gate on its branch push. A tag on a commit whose CI failed, was
+      # cancelled or never ran builds, deploys and publishes nothing, however
+      # the tag was pushed.
+      - name: The tagged commit passed CI
+        uses: ./.latere-ci/actions/verified-commit
+        with:
+          verify_workflow: ${{ inputs.verify_workflow }}
+          wait_minutes: ${{ inputs.wait_minutes }}
+          skip_paths: ${{ inputs.skip_paths }}
+          gh_version: ${{ inputs.gh_version }}
+
       - name: Tool versions
         id: versions
         env:

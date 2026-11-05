@@ -11,8 +11,13 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
   release:
     uses: ./.github/workflows/notes-release.yml
+    # lateregate.yml here is the reusable gate itself, not a caller of it;
+    # this repository's per-push check is test.yml.
+    with:
+      verify_workflow: test.yml
     secrets: inherit

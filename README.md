@@ -324,7 +324,12 @@ caller that grants neither fails at startup the same way.
 
 The run is one job, so on a busy self-hosted runner a release waits for
 a slot once rather than before every stage. Its steps run in order, and a
-failed step skips the rest. The build pushes the image; in `split` mode it
+failed step skips the rest. The first is the shared `verified-commit`
+step: the tagged commit's per-push gate run on its branch push must have
+succeeded, read and waited for exactly as in
+[`image-build.yml`](#releasing-signed-images-image-buildyml-image-publishyml-release-verifyyml),
+so a tag on a commit whose CI failed, was cancelled or never ran builds
+and deploys nothing. The build pushes the image; in `split` mode it
 first builds the frontend (with a typecheck) and the Go binary (after
 `go vet`) on the runner. The pushed image is then signed and its SBOM
 recorded; see [Signatures and SBOMs](#signatures-and-sboms). The deploy
@@ -388,6 +393,9 @@ pipeline can `kubectl set image` without reading the manifests.
 | `smoke_script` | `tools/smoke/release.sh` | the post-deploy smoke |
 | `smoke_scope` | empty | an OAuth scope requested with the smoke token |
 | `build_cli`, `cli_build_cmd` | `false`, empty | also build command-line binaries (the command writes them under `dist/`) and attach them to the release |
+| `verify_workflow` | empty: the workflow that calls `lateregate.yml` | the per-push workflow whose run on the tagged commit must have succeeded |
+| `wait_minutes` | `60` | how long the release waits for that run while it is still going; `"0"` refuses at once |
+| `skip_paths` | `specs/*`, `*.md` | paths that change no code; a commit that changes only these is read through to its parent. A repository whose gate ignores more paths lists them here too |
 | `go_version`, `bun_version` | `1.27`, `1.4.4` | toolchains |
 | `kubectl_version` | `1.35.1` | fetched, checksum-verified, when the runner has none |
 | `gh_version` | empty: `versions.sh` | fetched, checksum-verified, when the runner has none |
@@ -680,13 +688,18 @@ on:
     tags: ['v*']
 permissions:
   contents: write
+  actions: read
 jobs:
   release:
     uses: latere-ai/ci/.github/workflows/notes-release.yml@v1
     secrets: inherit
 ```
 
-Nothing is built. The release body is the changelog section, the title is
+Nothing is built. Before anything is published, the shared
+`verified-commit` step checks that the tagged commit's per-push gate run
+succeeded, as in `service-release.yml`, with the same `verify_workflow`,
+`wait_minutes` and `skip_paths` inputs; that read is why the caller grants
+`actions: read`. The release body is the changelog section, the title is
 the tag (or `title: Name` for `Name vX.Y.Z`), and a hyphen in the version
 core marks a prerelease. A re-run edits the body rather than failing on an
 existing release. The publish is the shared `publish-release` step, the

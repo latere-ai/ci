@@ -10,11 +10,13 @@ name: notes-release
 #       uses: latere-ai/ci/.github/workflows/notes-release.yml@v1
 #       secrets: inherit
 #
-# Flow (one run): read the tag's CHANGELOG.md section -> publish the GitHub
-# release with that section as the body, through the shared publish-release
-# step under actions/, run from this workflow's own commit. A tag without a
-# section fails before anything is created. See this repo's README for the
-# changelog convention.
+# Flow (one run): check that the tagged commit passed CI -> read the tag's
+# CHANGELOG.md section -> publish the GitHub release with that section as the
+# body, through the shared verified-commit and publish-release steps under
+# actions/, run from this workflow's own commit. A tag on a commit whose CI
+# did not pass, or without a section, fails before anything is created. The
+# caller grants contents: write and actions: read. See this repo's README for
+# the changelog convention.
 
 on:
   workflow_call:
@@ -39,14 +41,33 @@ on:
         required: false
         type: string
         default: ""
+      verify_workflow:
+        description: "File name of the per-push workflow whose run on the tagged commit must have succeeded before the release is published. Empty takes the one workflow in .github/workflows that calls lateregate.yml."
+        required: false
+        type: string
+        default: ""
+      wait_minutes:
+        description: "How long the release waits for that run while it is still going. 0 refuses at once."
+        required: false
+        type: string
+        default: "60"
+      skip_paths:
+        description: "Shell patterns, one per line, for paths that change no code. A commit that changes only these carries its parent's code, so where its own verify run is missing, still going or cancelled, its parent is read instead; a run that concluded on the commit still decides. A repository whose verify workflow ignores more paths lists them here too."
+        required: false
+        type: string
+        default: |
+          specs/*
+          *.md
       gh_version:
-        description: "GitHub CLI release fetched for the publish step when the runner has none, verified against its checksums file. Hosted runners ship gh and skip the fetch. Empty takes the version in actions/lib/versions.sh."
+        description: "GitHub CLI release fetched for the CI check and the publish step when the runner has none, verified against its checksums file. Hosted runners ship gh and skip the fetch. Empty takes the version in actions/lib/versions.sh."
         required: false
         type: string
         default: ""
 
 permissions:
   contents: write
+  # The CI check reads the verify workflow's runs on the tagged commit.
+  actions: read
 
 jobs:
   release:
@@ -67,6 +88,20 @@ jobs:
           path: .latere-ci
           sparse-checkout: actions
           persist-credentials: false
+      - name: Keep the shared steps out of git status
+        run: echo '/.latere-ci/' >> .git/info/exclude
+
+      # Before anything is created: the tagged commit passed the
+      # repository's per-push gate on its branch push. A tag on a commit
+      # whose CI failed, was cancelled or never ran publishes nothing,
+      # however the tag was pushed.
+      - name: The tagged commit passed CI
+        uses: ./.latere-ci/actions/verified-commit
+        with:
+          verify_workflow: ${{ inputs.verify_workflow }}
+          wait_minutes: ${{ inputs.wait_minutes }}
+          skip_paths: ${{ inputs.skip_paths }}
+          gh_version: ${{ inputs.gh_version }}
 
       # A tag is a release, and a release has notes. The section for this
       # tag in CHANGELOG.md is the body, read by lateregate's note reader at

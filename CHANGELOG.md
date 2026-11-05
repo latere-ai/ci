@@ -10,6 +10,25 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Added
+
+- `service-release.yml` and `notes-release.yml` refuse a tag whose commit did
+  not pass CI. Their first step is the shared `verified-commit` check that
+  `image-build.yml` and `cli-release.yml` already run: the tagged commit's
+  per-push gate run on its branch push must have succeeded, so a tag on a
+  commit whose CI failed, was cancelled or never ran builds, deploys and
+  publishes nothing. Both take the same `verify_workflow` (empty: the
+  workflow that calls `lateregate.yml`), `wait_minutes` (`60`) and
+  `skip_paths` (`specs/*`, `*.md`) inputs. A `notes-release.yml` caller
+  now grants `actions: read` beside `contents: write`; without it the
+  release fails at startup.
+
+### Changed
+
+- `verified-commit`, in a run started on a branch rather than a tag (a
+  manual rebuild from `main`), reads that branch's own push run of the
+  commit. It used to set those runs apart as the tag push's and refuse.
+
 ## v1.29.0 - 2026-11-01
 
 ### Changed
