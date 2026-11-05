@@ -4,11 +4,24 @@ name: actionlint
 # locally, so a static lint on every change is the first line of defense before
 # a canary tag exercises them on a real consumer.
 
+# A push or pull request that changes only specs or markdown outside the
+# exception starts no run, because no workflow, action or test reads them. The
+# exception is README.md, which a test holds to the runner policy it documents.
 on:
   push:
     branches: [main]
+    paths:
+      - "**"
+      - "!specs/**"
+      - "!**.md"
+      - "README.md"
   pull_request:
     branches: [main]
+    paths:
+      - "**"
+      - "!specs/**"
+      - "!**.md"
+      - "README.md"
 
 permissions:
   contents: read

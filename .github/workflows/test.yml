@@ -4,11 +4,24 @@ name: test
 # be executed locally, so the suite unit-tests copies of their inline shell
 # and greps the workflows so those copies cannot silently drift.
 
+# A push or pull request that changes only specs or markdown outside the
+# exception starts no run, because no workflow, action or test reads them. The
+# exception is README.md, which a test holds to the runner policy it documents.
 on:
   push:
     branches: [main]
+    paths:
+      - "**"
+      - "!specs/**"
+      - "!**.md"
+      - "README.md"
   pull_request:
     branches: [main]
+    paths:
+      - "**"
+      - "!specs/**"
+      - "!**.md"
+      - "README.md"
 
 permissions:
   contents: read
