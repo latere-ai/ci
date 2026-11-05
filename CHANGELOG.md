@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v1.33.0 - 2026-11-05
+
 ### Changed
 
 - The release check (`verified-commit`, run by `image-build.yml`,
