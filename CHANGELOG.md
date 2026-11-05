@@ -10,6 +10,13 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Fixed
+
+- `ci-gate-bump.yml` finds the per-push caller by its `uses:` line. A comment
+  or a header example that names `lateregate.yml@v1` is no longer counted as a
+  second caller, so a repository that documents the pipeline in a comment no
+  longer fails the dispatch of the gate on the pin commit.
+
 ### Added
 
 - `image-deploy.yml`, a stage a core calls between `image-build.yml` and

@@ -455,6 +455,33 @@ else
     fail "status=$(status) calls=$(cat "$TMP/calls")"
 fi
 
+new_workflows "$TMP/r"; caller "$TMP/r/.github/workflows/ci.yml" yes
+printf '# Reusable gate. A caller is:\n#   uses: latere-ai/ci/.github/workflows/lateregate.yml@v1\nname: reusable\non:\n  workflow_call:\n' > "$TMP/r/.github/workflows/lateregate.yml"
+run_step "$DISPATCH_SCRIPT" "$TMP/r" BRANCH=main
+if [ "$(status)" = 0 ] && [ "$(cat "$TMP/calls")" = 'POST repos/latere-ai/example/actions/workflows/ci.yml/dispatches {"ref":"main"}' ]; then
+    pass "a comment that names the pipeline is not a second caller"
+else
+    fail "status=$(status) calls=$(cat "$TMP/calls"); log: $(cat "$TMP/log")"
+fi
+
+new_workflows "$TMP/r"
+printf 'name: other\non:\n  workflow_dispatch:\njobs:\n  gate:\n    steps:\n      - uses: latere-ai/ci/.github/workflows/lateregate.yml@v1\n' > "$TMP/r/.github/workflows/steps.yml"
+run_step "$DISPATCH_SCRIPT" "$TMP/r" BRANCH=main
+if [ "$(status)" = 0 ] && grep -q 'actions/workflows/steps.yml/dispatches' "$TMP/calls"; then
+    pass "a list item that uses the pipeline is a caller"
+else
+    fail "status=$(status) calls=$(cat "$TMP/calls")"
+fi
+
+new_workflows "$TMP/r"
+printf '# uses: latere-ai/ci/.github/workflows/lateregate.yml@v1\nname: none\non: push\n' > "$TMP/r/.github/workflows/note.yml"
+run_step "$DISPATCH_SCRIPT" "$TMP/r" BRANCH=main
+if [ "$(status)" = 1 ] && [ ! -s "$TMP/calls" ] && grep -q 'expected one workflow calling lateregate.yml under .github/workflows, found: none' "$TMP/log"; then
+    pass "no caller, only a commented mention, fails naming that none was found"
+else
+    fail "status=$(status) calls=$(cat "$TMP/calls"); log: $(cat "$TMP/log")"
+fi
+
 # ---------------------------------------------------------------------------
 echo "open or update the issue"
 
