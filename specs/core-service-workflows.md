@@ -312,8 +312,9 @@ actionlint 1.7.12 does not know the two properties yet, so
   Their pins (`helm/kind-action`, `actions/upload-artifact`,
   `actions/download-artifact`) stay with the service.
 - Deploys: arca and origo deploy from their own release; the others are
-  deployed from `platform/deploy`. Sharing arca's and origo's deploy and smoke
-  is out of scope.
+  deployed from `platform/deploy`. The deploy and smoke arca and origo carry
+  are shared as `image-deploy.yml`, which a core calls when it deploys from
+  its own release; whether it does, and its cluster side, stay with the core.
 - Tests that need running services: Postgres, MinIO, device and e2e jobs.
 
 ## Rollout

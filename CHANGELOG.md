@@ -10,6 +10,29 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Added
+
+- `image-deploy.yml`, a stage a core calls between `image-build.yml` and
+  `image-publish.yml` to deploy its own release. It takes the build's
+  `images` (one to three `<ref>@<digest>` lines, or `<name>=<ref>@<digest>`
+  where the overlay names the image otherwise) and the `deployments` to wait
+  for, sets each image by digest in `deploy/prod`'s `kustomization.yaml` with
+  `kustomize edit set image`, runs `kubectl apply -k`, waits for each
+  Deployment, runs `after_roll`, removes the kubeconfig, and runs the smoke
+  script, which it repeats for `smoke_timeout` seconds so a Deployment on the
+  Recreate strategy can come back. The job runs in the `production`
+  environment with `url`, refuses once a newer tag exists, and uploads the
+  smoke evidence as the artifact `smoke-evidence` for `image-publish.yml`'s
+  `evidence: '*-evidence'`. The caller gates the job with its own repository
+  variable and maps its secret onto `DEPLOY_KUBECONFIG`
+  (`DEPLOY_KUBECONFIG: ${{ secrets.ARCA_KUBECONFIG }}`), and grants
+  `contents: read`. `examples/image-release.yml` shows the job and the
+  `publish` condition that tolerates a skipped deploy.
+- `actions/ensure-kubectl`, `actions/ensure-kustomize` and
+  `actions/deploy-by-digest`, the shared steps behind it, and
+  `KUBECTL_VERSION` and `KUSTOMIZE_VERSION` in `actions/lib/versions.sh`
+  (`kubectl` and `kustomize` outputs).
+
 ## v1.30.0 - 2026-11-05
 
 ### Added

@@ -24,6 +24,7 @@ repository, by convention rather than through a long list of inputs.
 | [`ci-gate-bump.yml`](.github/workflows/ci-gate-bump.yml) | once a day | a Go repository that pins `latere.ai/x/ci-gate` | move the pin to the latest release when the bar passes on it, or open an issue |
 | [`service-release.yml`](.github/workflows/service-release.yml) | a `v*` tag | a Kubernetes service | build the image, deploy, smoke the live surface, publish the release |
 | [`image-build.yml`](.github/workflows/image-build.yml), [`image-publish.yml`](.github/workflows/image-publish.yml), [`release-verify.yml`](.github/workflows/release-verify.yml) | a `v*` tag | a service that publishes signed images and lets others install them | build and sign the images by digest; then, after the repository's own jobs, tag them and publish the release; then verify what was published |
+| [`image-deploy.yml`](.github/workflows/image-deploy.yml) | a `v*` tag, between build and publish | a core that deploys its own release | apply `deploy/prod` with the images pinned by digest, wait for the rollout, smoke the live service |
 | [`cli-release.yml`](.github/workflows/cli-release.yml) | a `v*` tag | a command-line tool | the tagged commit's per-push run passed, tests on the extra runners in `test_os`, GoReleaser |
 | [`notes-release.yml`](.github/workflows/notes-release.yml) | a `v*` tag | a module or library that builds nothing on a tag | publish the release |
 
@@ -528,7 +529,9 @@ re-applying the identity file, and running the same steps.
 
 ## Releasing signed images: `image-build.yml`, `image-publish.yml`, `release-verify.yml`
 
-Three stages a repository calls with its own jobs between them, for a
+Three stages a repository calls with its own jobs between them, and a fourth,
+[`image-deploy.yml`](#deploying-a-core-image-deployyml), for a core that also
+deploys its own release, for a
 service that publishes images other people pull and verify: up to three
 images per release, built for linux/amd64 and linux/arm64, signed, with a
 bill of materials each, and archives beside them when the repository builds
@@ -545,14 +548,24 @@ jobs:
   conformance:            # the repository's own, against the digests
     needs: build
     ...
-  publish:
+  deploy:                 # only where the repository deploys its own release
     needs: [build, conformance]
+    if: ${{ vars.EXAMPLE_RELEASE_DEPLOY != '' }}
+    uses: latere-ai/ci/.github/workflows/image-deploy.yml@v1
+    permissions: { contents: read }
+    with: { images: "${{ needs.build.outputs.images }}", deployments: exampled, url: "https://example.latere.ai" }
+    secrets: { DEPLOY_KUBECONFIG: "${{ secrets.EXAMPLE_KUBECONFIG }}" }
+  publish:
+    needs: [build, conformance, deploy]
+    if: ${{ always() && needs.build.result == 'success' && needs.conformance.result == 'success' && needs.deploy.result != 'failure' && needs.deploy.result != 'cancelled' }}
     uses: latere-ai/ci/.github/workflows/image-publish.yml@v1
     permissions: { contents: write, packages: write, id-token: write }
     with:
       images: ${{ needs.build.outputs.images }}
+      evidence: '*-evidence'
   verify:
     needs: publish
+    if: ${{ always() && needs.publish.result == 'success' }}
     uses: latere-ai/ci/.github/workflows/release-verify.yml@v1
     permissions: { contents: read, packages: read, attestations: read }
     with:
@@ -611,6 +624,121 @@ another repository is refused, every asset matches it, each image's tag
 resolves to a signed digest (and attested, in a public repository), and the
 body opens with the `CHANGELOG.md` section.
 
+### Deploying a core: `image-deploy.yml`
+
+The stage a core calls between `image-build.yml` and `image-publish.yml` to
+apply its production manifests and roll it, for a core that deploys from its
+own release. It is the deploy job arca and origo carried, for any number of
+images and Deployments.
+
+```yaml
+  deploy:
+    needs: [build, conformance]
+    # The caller decides whether to deploy at all. The stage reads no
+    # repository variable, so a fork that sets nothing skips the job.
+    if: ${{ vars.ARCA_RELEASE_DEPLOY != '' }}
+    uses: latere-ai/ci/.github/workflows/image-deploy.yml@v1
+    permissions:
+      contents: read
+    with:
+      images: ${{ needs.build.outputs.images }}
+      deployments: |
+        arcad
+        arcad-reaper
+      url: https://api.latere.ai
+    secrets:
+      DEPLOY_KUBECONFIG: ${{ secrets.ARCA_KUBECONFIG }}
+
+  publish:
+    needs: [build, conformance, deploy]
+    # deploy is skipped wherever the variable is unset, and a job that
+    # leans on the implicit success() is skipped whenever a job above it is.
+    if: ${{ always() && needs.build.result == 'success' && needs.conformance.result == 'success' && needs.deploy.result != 'failure' && needs.deploy.result != 'cancelled' }}
+    uses: latere-ai/ci/.github/workflows/image-publish.yml@v1
+    ...
+    with:
+      images: ${{ needs.build.outputs.images }}
+      evidence: '*-evidence'
+```
+
+One job, in the `production` environment with `url` as its URL, so the
+rollout is a GitHub deployment and the environment's required reviewers
+hold the run before anything is applied. In order:
+
+1. No newer `vX.Y.Z` is tagged (the rollback guard), so a re-run of an
+   older tag cannot roll production back. This is before the kubeconfig is
+   written.
+2. kubectl and kustomize are on `PATH` at the pinned versions, fetched with
+   their published checksums where the runner has none (kubectl) or has
+   another version (kustomize).
+3. `DEPLOY_KUBECONFIG` is written to a mode 600 file under `RUNNER_TEMP`.
+4. Each line of `images` is set in `deploy_dir`'s `kustomization.yaml` as
+   `<ref>@<digest>` with `kustomize edit set image`, which replaces the
+   committed tag. The overlay is rendered and must run every digest, so an
+   overlay that names no such image fails here rather than rolling an old
+   one.
+5. `kubectl apply -k deploy_dir`.
+6. `kubectl rollout status` for each line of `deployments`, in order, each
+   within `rollout_timeout`.
+7. `after_roll`, when set.
+8. The kubeconfig is removed, in a step that runs whatever happened.
+9. The smoke script, repeated until it passes or `smoke_timeout` ends.
+10. The smoke evidence is uploaded as the run artifact `smoke-evidence`.
+
+| Input | Default | |
+| --- | --- | --- |
+| `images` | required | `<ref>@<digest>` per line: `image-build.yml`'s `images` output, or its `ref_N@digest_N` for a subset. A line `<name>=<ref>@<digest>` sets the image the overlay names `<name>`, for a ref that differs from the committed name (a fork's packages). One to three images in practice; cella's several and lectio's `lectiod` and `lectio-convert` are lines. |
+| `deployments` | required | The Deployments to wait for, one per line, with or without a `deployment/` prefix. lectio lists four, arca two. |
+| `url` | required | The environment's URL and the smoke's `BASE_URL`. |
+| `deploy_dir` | `deploy/prod` | The overlay: a directory with a `kustomization.yaml`, holding only manifests that can be applied again. |
+| `namespace` | empty | Empty takes the one namespace the rendered objects name, and fails when there are two. |
+| `rollout_timeout` | `600s` | Per Deployment, as kubectl spells it. |
+| `after_roll` | empty | A shell command run after the rollout, as the same identity, under `set -euo pipefail`, with `DEPLOY_NAMESPACE` set. A failure fails the job before the smoke. |
+| `smoke_script` | `tools/smoke/release.sh` | Run from the checkout. |
+| `smoke_timeout`, `smoke_interval` | `120`, `5` | Seconds. See the smoke contract. |
+| `evidence_name` | `smoke-evidence` | The artifact's name. |
+| `runs_on` | the runner policy | As on every stage ([Runners](#runners)). |
+| `kubectl_version`, `kustomize_version` | empty | Empty takes the pin in [`actions/lib/versions.sh`](actions/lib/versions.sh). |
+
+Output: `evidence`, the smoke's Markdown.
+
+**The secret.** The stage's secret is `DEPLOY_KUBECONFIG`, the name
+`service-release.yml` uses, built as in [Deploy credential](#deploy-credential).
+A reusable workflow reads only the secrets it declares, so a caller whose
+secret has another name maps it, as above:
+`DEPLOY_KUBECONFIG: ${{ secrets.ARCA_KUBECONFIG }}` for arca,
+`${{ secrets.ORIGO_KUBECONFIG }}` for origo, with no secret renamed. A caller
+whose secret is already named `DEPLOY_KUBECONFIG` can write `secrets: inherit`.
+The secret is required: a call that maps nothing fails when it starts,
+naming it.
+
+**The smoke contract.** `smoke_script` is an executable in the checkout. It
+is run with `BASE_URL` (`url`), `TAG` (the release tag), `COMMIT` (the
+tagged commit), `DEPLOY_URL` (this run) and `OUTPUT_MD` set, and writes its
+Markdown evidence to `OUTPUT_MD`. It exits non-zero until the service serves
+`TAG`, and it is safe to run again, because the stage runs it again every
+`smoke_interval` seconds until it passes or `smoke_timeout` seconds have
+passed; `0` runs it once. The last run's `OUTPUT_MD` is the evidence, and
+it is appended to the step summary.
+
+**Recreate.** A core on the `Recreate` strategy (limen) stops its only Pod
+before the new one is ready, so the rollout can return before the ingress
+answers with the new version, and requests in between fail or get the old
+version. The retry covers that gap: raise `smoke_timeout` if the Pod takes
+longer than two minutes to start.
+
+**The evidence reaches the release** through the artifact: the caller's
+`image-publish.yml` takes `evidence: '*-evidence'` and appends every `.md`
+file in the matching artifacts to the release body, so the smoke follows a
+conformance artifact that matches the same pattern. A failure to store the
+artifact fails the job, since nothing else carries the evidence.
+
+**What the rollout identity needs.** The kubeconfig's ServiceAccount holds
+`get, list, create, update, patch` on each kind `deploy_dir` contains and
+`watch` on Deployments (see [Deploy credential](#deploy-credential)).
+This stage does not run `kubectl set image`: the digest is in the applied
+manifest, so the Deployment's `patch` is the apply's alone.
+
 ### Verifying a release
 
 The signatures are keyless and name the stage that made them, as
@@ -648,7 +776,7 @@ docker build context; a Dockerfile that copies the whole context can list
 A repository whose release the stages do not fit calls the actions
 directly, as `latere-ai/ci/actions/<name>@v1`, inside jobs of its own; its
 signatures then name its own workflow. Tool versions (cosign, syft, gh,
-the note reader) are defined once, in
+the note reader, kubectl, kustomize) are defined once, in
 [`actions/lib/versions.sh`](actions/lib/versions.sh), and every stage takes
 an input to override each.
 

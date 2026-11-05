@@ -1,0 +1,275 @@
+name: image-deploy
+
+# Reusable deploy stage of an image release, called between image-build.yml
+# and image-publish.yml, after whatever the consumer runs to qualify the
+# digests (conformance, an install walk). It applies the core's production
+# manifests with its images pinned by digest and rolls it:
+#
+#   deploy:
+#     needs: [build, conformance]
+#     if: ${{ vars.EXAMPLE_RELEASE_DEPLOY != '' }}
+#     uses: latere-ai/ci/.github/workflows/image-deploy.yml@v1
+#     permissions: { contents: read }
+#     with:
+#       images: ${{ needs.build.outputs.images }}
+#       deployments: exampled
+#       url: https://example.latere.ai
+#     secrets:
+#       DEPLOY_KUBECONFIG: ${{ secrets.EXAMPLE_KUBECONFIG }}
+#
+# Flow (one job, in the production environment): no newer vX.Y.Z is tagged
+# -> each image set to <ref>@<digest> in the overlay's kustomization.yaml
+# with `kustomize edit set image` -> kubectl apply -k of the overlay -> each
+# Deployment waited for -> after_roll, when set -> the kubeconfig removed ->
+# the smoke script, repeated until the service serves the tag -> the smoke
+# evidence uploaded as the run artifact smoke-evidence, which image-publish.yml
+# appends to the release body when its evidence input matches it.
+#
+# The stage does not read repository variables. The caller decides whether to
+# deploy at all, by gating the job, so a fork that sets nothing skips it.
+
+on:
+  workflow_call:
+    inputs:
+      images:
+        description: "The images to deploy, one per line: <ref>@<digest>, which image-build.yml's images output is, or <name>=<ref>@<digest> where the overlay names the image <name> and the ref differs (a fork's packages). Each is set in the kustomization by digest, replacing its tag."
+        required: true
+        type: string
+      deployments:
+        description: "The Deployments to wait for, one per line, in the order they are waited for."
+        required: true
+        type: string
+      url:
+        description: "Public production URL: the environment's URL and the smoke's BASE_URL."
+        required: true
+        type: string
+      deploy_dir:
+        description: "The overlay to apply, a directory with a kustomization.yaml. It holds only manifests that can be applied again."
+        required: false
+        type: string
+        default: deploy/prod
+      namespace:
+        description: "Namespace of the Deployments. Empty takes the one namespace the rendered overlay names."
+        required: false
+        type: string
+        default: ""
+      rollout_timeout:
+        description: "How long each Deployment may take to finish rolling, as kubectl spells it."
+        required: false
+        type: string
+        default: 600s
+      after_roll:
+        description: "Optional shell command run once the Deployments have rolled, with the same kubeconfig and DEPLOY_NAMESPACE set (e.g. applying a second tree that must follow this release). A failure fails the job, so neither the smoke nor the release runs. Empty skips it."
+        required: false
+        type: string
+        default: ""
+      smoke_script:
+        description: "Post-deploy smoke script, run from the checkout. It reads BASE_URL, TAG, COMMIT, DEPLOY_URL and OUTPUT_MD, exits non-zero until the service serves TAG, and writes its Markdown evidence to OUTPUT_MD."
+        required: false
+        type: string
+        default: tools/smoke/release.sh
+      smoke_timeout:
+        description: "Seconds the smoke may keep failing before the job fails. A Deployment on the Recreate strategy answers nothing, or the old version, until its new Pod is ready, so the script is run again every smoke_interval seconds until it passes. 0 runs it once."
+        required: false
+        type: string
+        default: "120"
+      smoke_interval:
+        description: "Seconds between smoke attempts."
+        required: false
+        type: string
+        default: "5"
+      evidence_name:
+        description: "Name of the run artifact holding the smoke evidence; image-publish.yml appends it when its evidence input matches the name."
+        required: false
+        type: string
+        default: smoke-evidence
+      runs_on:
+        description: "Runner label. By default the organization's runner policy picks it (README, Runners)."
+        required: false
+        type: string
+        default: ${{ (github.event.repository.private || contains(fromJSON('["push","schedule","workflow_dispatch","release"]'), github.event_name)) && (vars.CI_RUNNER_PRIVATE || vars.CI_RUNNER_PUBLIC) || 'ubuntu-latest' }}
+      kubectl_version:
+        description: "kubectl release (without the v) fetched when the runner has none, verified against its published sha256. Keep within one minor of the cluster. Empty takes the version in actions/lib/versions.sh."
+        required: false
+        type: string
+        default: ""
+      kustomize_version:
+        description: "kustomize release (without the v), fetched and verified against the release's checksums file whenever the runner's copy is another version. Empty takes the version in actions/lib/versions.sh."
+        required: false
+        type: string
+        default: ""
+    secrets:
+      DEPLOY_KUBECONFIG:
+        description: "Kubeconfig of the core's rollout identity: a ServiceAccount bound to a Role in its namespace over the kinds deploy_dir contains and any after_roll command applies. A caller maps its own secret onto this name (README, image-deploy.yml)."
+        required: true
+    outputs:
+      evidence:
+        description: "The smoke's Markdown evidence."
+        value: ${{ jobs.deploy.outputs.evidence }}
+
+# Reads the repository. The cluster is reached with the kubeconfig, not with
+# the job's token.
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: deploy and smoke
+    runs-on: ${{ inputs.runs_on }}
+    timeout-minutes: 60
+    # The job is a GitHub deployment with a URL on the repository's
+    # Deployments page, and the environment's required reviewers, where it
+    # has any, hold the run here until one approves.
+    environment:
+      name: production
+      url: ${{ inputs.url }}
+    outputs:
+      evidence: ${{ steps.evidence.outputs.evidence }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The shared steps (latere-ai/ci's actions/) at this workflow's own
+      # commit, beside the checkout and hidden from its git status.
+      - name: The shared steps, at this workflow's own commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .latere-ci
+          sparse-checkout: actions
+          persist-credentials: false
+      - name: Keep the shared steps out of git status
+        run: echo '/.latere-ci/' >> .git/info/exclude
+
+      # Before the cluster is touched: a re-run of this job after a newer
+      # version is tagged stops here, so it cannot roll production back to
+      # the older image.
+      - uses: ./.latere-ci/actions/rollback-guard
+
+      - name: Tool versions
+        id: versions
+        env:
+          KUBECTL_VERSION: ${{ inputs.kubectl_version }}
+          KUSTOMIZE_VERSION: ${{ inputs.kustomize_version }}
+        run: bash .latere-ci/actions/lib/versions.sh
+      - name: Ensure kubectl
+        uses: ./.latere-ci/actions/ensure-kubectl
+        with:
+          version: ${{ steps.versions.outputs.kubectl }}
+      - name: Ensure kustomize
+        uses: ./.latere-ci/actions/ensure-kustomize
+        with:
+          version: ${{ steps.versions.outputs.kustomize }}
+
+      # The kubeconfig lives in this job's temp directory, which the runner
+      # empties when the job ends: on a self-hosted runner a file under $HOME
+      # would outlive the job and be shared with the other slot.
+      # "Drop the kubeconfig" removes it once the deploy steps are done.
+      - name: Write the kubeconfig
+        env:
+          KUBECONFIG_CONTENT: ${{ secrets.DEPLOY_KUBECONFIG }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KUBECONFIG_CONTENT" ]; then
+            echo "::error::DEPLOY_KUBECONFIG is empty. Map the repository's kubeconfig secret onto it; see the latere-ai/ci README, 'Deploy credential'."
+            exit 1
+          fi
+          install -m 700 -d "$RUNNER_TEMP/kube"
+          printf '%s' "$KUBECONFIG_CONTENT" > "$RUNNER_TEMP/kube/config"
+          chmod 600 "$RUNNER_TEMP/kube/config"
+          echo "KUBECONFIG=$RUNNER_TEMP/kube/config" >> "$GITHUB_ENV"
+
+      # The digests the build pushed, in place of the tags the committed
+      # overlay names: the images carry the release tag only when publish
+      # runs, after this job, so no other build is rolled on the way.
+      - name: Pin the images by digest
+        uses: ./.latere-ci/actions/deploy-by-digest
+        with:
+          step: pin
+        env:
+          DEPLOY_DIR: ${{ inputs.deploy_dir }}
+          IMAGES: ${{ inputs.images }}
+
+      # deploy_dir holds only manifests that can be applied again. A
+      # bootstrap tree, and anything run once by hand before the tag, is
+      # never read here.
+      - name: Apply the overlay
+        uses: ./.latere-ci/actions/deploy-by-digest
+        with:
+          step: apply
+        env:
+          DEPLOY_DIR: ${{ inputs.deploy_dir }}
+          NAMESPACE: ${{ inputs.namespace }}
+
+      - name: Wait for the rollout
+        uses: ./.latere-ci/actions/deploy-by-digest
+        with:
+          step: rollout
+        env:
+          DEPLOY_DIR: ${{ inputs.deploy_dir }}
+          NAMESPACE: ${{ inputs.namespace }}
+          DEPLOYMENTS: ${{ inputs.deployments }}
+          ROLLOUT_TIMEOUT: ${{ inputs.rollout_timeout }}
+
+      - name: After the roll
+        # Runs only once the Deployments above have rolled, as the same
+        # rollout identity, so a tree whose workloads call the new release
+        # rolls second. A failure fails the job: the smoke is skipped and the
+        # run is red, and re-running it repeats the apply, the roll and this
+        # step.
+        if: ${{ inputs.after_roll != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ${{ inputs.after_roll }}
+
+      - name: Drop the kubeconfig
+        # The smoke script needs no rollout identity. Runs when a deploy step
+        # failed too. KUBECONFIG names an empty file rather than nothing, so
+        # kubectl cannot fall back to a config in the runner's home
+        # directory.
+        if: ${{ always() }}
+        run: |
+          set -euo pipefail
+          rm -rf "$RUNNER_TEMP/kube"
+          echo "KUBECONFIG=/dev/null" >> "$GITHUB_ENV"
+
+      # The rollout returns as soon as the new replicas are ready. Only a
+      # request through the ingress proves that what answers there is the
+      # version just built, and on a Recreate Deployment the first requests
+      # land in the gap before it does.
+      - name: Smoke the live service
+        id: smoke
+        uses: ./.latere-ci/actions/deploy-by-digest
+        with:
+          step: smoke
+        env:
+          SMOKE_SCRIPT: ${{ inputs.smoke_script }}
+          SMOKE_TIMEOUT: ${{ inputs.smoke_timeout }}
+          SMOKE_INTERVAL: ${{ inputs.smoke_interval }}
+          BASE_URL: ${{ inputs.url }}
+          TAG: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
+          DEPLOY_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          OUTPUT_MD: release-evidence/smoke.md
+      - name: The evidence, as the job's output
+        id: evidence
+        run: |
+          set -euo pipefail
+          {
+            echo 'evidence<<CI_EOF'
+            cat release-evidence/smoke.md
+            echo CI_EOF
+          } >> "$GITHUB_OUTPUT"
+
+      # The only way the evidence reaches the release is this artifact, so a
+      # failure to store it fails the job.
+      - name: Upload the smoke evidence
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ inputs.evidence_name }}
+          path: release-evidence/smoke.md
+          if-no-files-found: error
+          # 7 days: long enough to re-run a failed publish, short enough
+          # that the store does not fill.
+          retention-days: 7

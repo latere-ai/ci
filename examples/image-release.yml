@@ -7,6 +7,14 @@
 # digests, signs checksums.txt over the attached files, and publishes the
 # GitHub release whose body is the tag's CHANGELOG.md section. The verify job
 # then checks the published release from a runner with no checkout.
+#
+# The deploy job is the repository's own installation: it runs only where the
+# repository variable EXAMPLE_RELEASE_DEPLOY is set, so a fork that sets
+# nothing publishes every artifact and skips it. It applies deploy/prod with
+# the images pinned by the digests the build pushed, waits for the
+# Deployments, and smokes the live service; its evidence reaches the release.
+# EXAMPLE_KUBECONFIG is the repository secret holding the kubeconfig of the
+# service's rollout identity (README, Deploy credential).
 name: release
 
 on:
@@ -47,8 +55,35 @@ jobs:
   #   steps:
   #     - run: ./test/conformance.sh "${{ needs.build.outputs.ref_1 }}@${{ needs.build.outputs.digest_1 }}"
 
-  publish:
+  # Only with the repository variable: the cluster side is this
+  # repository's own, and no fork has it. The job runs in the production
+  # environment, so a required reviewer holds the run here.
+  deploy:
     needs: build
+    if: ${{ vars.EXAMPLE_RELEASE_DEPLOY != '' }}
+    uses: latere-ai/ci/.github/workflows/image-deploy.yml@v1
+    permissions:
+      contents: read
+    with:
+      images: ${{ needs.build.outputs.images }}
+      deployments: exampled
+      url: https://example.latere.ai
+      # The overlay and the smoke script, when they are not these:
+      # deploy_dir: deploy/prod
+      # smoke_script: tools/smoke/release.sh
+      # A Deployment on the Recreate strategy answers late; the smoke is
+      # tried again for this many seconds:
+      # smoke_timeout: "120"
+    secrets:
+      DEPLOY_KUBECONFIG: ${{ secrets.EXAMPLE_KUBECONFIG }}
+
+  publish:
+    needs: [build, deploy]
+    # deploy is skipped wherever the variable is unset, and a job that leans
+    # on the implicit success() is skipped whenever a job above it is, so
+    # each result is named: publish runs unless the build or the deploy
+    # failed.
+    if: ${{ always() && needs.build.result == 'success' && needs.deploy.result != 'failure' && needs.deploy.result != 'cancelled' }}
     uses: latere-ai/ci/.github/workflows/image-publish.yml@v1
     permissions:
       contents: write
@@ -56,10 +91,13 @@ jobs:
       id-token: write
     with:
       images: ${{ needs.build.outputs.images }}
+      # The smoke evidence of the deploy job, appended to the release body:
+      evidence: '*-evidence'
       # title: Example
 
   verify:
     needs: publish
+    if: ${{ always() && needs.publish.result == 'success' }}
     uses: latere-ai/ci/.github/workflows/release-verify.yml@v1
     permissions:
       contents: read
