@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v1.35.0 - 2026-11-05
+
 ### Changed
 
 - The shared workflows and actions pin the same commit of each third-party
