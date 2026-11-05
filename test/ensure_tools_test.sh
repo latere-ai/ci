@@ -23,7 +23,7 @@ trap 'rm -rf "$TMP"' EXIT
 # The PATH holds only the utilities the scripts use, linked from the host,
 # so a kubectl or kustomize the host ships cannot answer for the fetch.
 mkdir -p "$TMP/safe"
-for t in bash sh curl tar cat mkdir chmod grep cut head dirname basename rm sed awk tr sort uname; do
+for t in bash sh curl tar gzip gunzip cat mkdir chmod grep cut head dirname basename rm sed awk tr sort uname; do
     p=$(command -v "$t") && ln -sf "$p" "$TMP/safe/$t"
 done
 SAFE_PATH="$TMP/safe"
