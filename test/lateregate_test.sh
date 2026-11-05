@@ -357,6 +357,15 @@ job_step() {
     '
 }
 
+# The test job runs on the systems test.os names, Windows among them, where a
+# step without a shell runs in PowerShell and the bash in it fails to parse.
+test_block=$(job_block test)
+if printf '%s\n' "$test_block" | awk '/^    defaults:$/ { d = 1; next } d && /^      run:$/ { r = 1; next } r && /^        shell: bash$/ { ok = 1 } END { exit !ok }'; then
+    pass "the test job runs every step in bash"
+else
+    fail "the test job must set defaults.run.shell to bash, or a Windows leg runs its steps in PowerShell"
+fi
+
 passed_block=$(job_block passed)
 
 if [ -n "$passed_block" ]; then

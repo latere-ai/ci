@@ -244,6 +244,11 @@ jobs:
       fail-fast: false
       matrix:
         os: ${{ fromJSON(needs.probe.outputs.tests) }}
+    # Every step is bash. A Windows runner otherwise runs a step in
+    # PowerShell, which cannot parse the module search below.
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # Keep in step with test/lateregate_test.sh, which unit-tests a copy of
