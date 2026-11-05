@@ -42,9 +42,12 @@ version is cut.
 2. To try a change on one repository first, push a prerelease tag
    (`v1.18.0-rc1`) and point that repository's caller at it
    (`@v1.18.0-rc1`). A prerelease tag does not move `v1`.
-3. Cut the version: move the notes into a `## v1.MINOR.PATCH - <date>`
-   section, commit, and push the tag. `release.yml` publishes the GitHub
-   release from that section through this repository's own
+3. Cut the version from a clean checkout of `main` at origin's tip with
+   `go tool lateregate release v1.MINOR.PATCH`. It moves the notes into a
+   `## v1.MINOR.PATCH - <date>` section, commits, and pushes the commit and
+   an annotated tag together. It refuses while CI is red on `main`. The root
+   `go.mod` pins `lateregate` and nothing else. `release.yml` publishes the
+   GitHub release from that section through this repository's own
    `notes-release.yml`, and `major-tag.yml` moves `v1` to the tag.
 
 ## Pinning

@@ -279,8 +279,9 @@ reader the same in every repository, including ones that pin no Go tool.
 In a Go repository the same binary runs in the pre-push hook and refuses
 the tag before it leaves the laptop, and `go tool lateregate release
 vX.Y.Z` moves the notes under `Unreleased` into the tag's section,
-commits, tags and pushes. A repository without the tool writes the
-section by hand and pushes the tag.
+commits, tags and pushes. A repository with no Go keeps a root `go.mod`
+that holds only the tool pin and runs the same command, as this one does.
+`major-tag.yml` still moves `v1` when a `v1.MAJOR.MINOR` tag lands.
 
 `service-release.yml` checks the section before it builds anything, so a
 tag without one deploys nothing. Publishing is still the last step: a
