@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v1.34.0 - 2026-11-05
+
 ### Changed
 
 - `ci-gate-bump.yml` finds the module that pins `latere.ai/x/ci-gate` the way
