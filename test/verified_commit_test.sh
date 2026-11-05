@@ -24,6 +24,23 @@ PARENT=bbbb
 GRANDPARENT=cccc
 
 runs_url() { echo "repos/$REPO/actions/workflows/verify.yml/runs?head_sha=$1&event=push&per_page=20"; }
+# Every workflow's push runs of commit $1, which the check reads once verify
+# passed.
+others_url() { echo "repos/$REPO/actions/runs?head_sha=$1&event=push&per_page=100"; }
+# runs JSON of every workflow from "file:branch:conclusion" triples;
+# conclusion null for a running run.
+all_runs() {
+    local out="" t file branch c
+    for t in "$@"; do
+        file=${t%%:*}
+        t=${t#*:}
+        branch=${t%%:*}
+        c=${t#*:}
+        [ "$c" = null ] || c="\"$c\""
+        out="${out:+$out,}{\"path\":\".github/workflows/$file\",\"head_branch\":\"$branch\",\"conclusion\":$c}"
+    done
+    echo "{\"workflow_runs\":[${out}]}"
+}
 # runs JSON from "branch:conclusion" pairs; conclusion null for a running run.
 runs() {
     local out="" pair branch c
@@ -39,9 +56,14 @@ runs() {
 # run_case NAME EXPECT_EXIT EXPECT_TEXT, with fixtures already in $W; extra
 # environment through the caller's assignments.
 W=""
+# Every commit's push ran no other workflow unless a case says otherwise.
 new_case() {
     W=$(mktemp -d)
     stub_gh_install "$W"
+    local c
+    for c in $SHA $PARENT $GRANDPARENT; do
+        stub_gh_fixture "$W" "$(others_url $c)" '{"workflow_runs":[]}'
+    done
 }
 run_case() {
     local name=$1 want=$2 text=$3 out rc
@@ -216,6 +238,58 @@ gate_checkout ci.yml verify.yml
 VERIFY="" run_case "two workflows running the gate refuse" 1 "more than one workflow"
 rm -rf "$CHECKOUT"
 unset CHECKOUT
+
+# The other workflows the commit's push ran.
+new_case
+stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs main:success)"
+stub_gh_fixture "$W" "$(others_url $SHA)" "$(all_runs verify.yml:main:success device.yml:main:success)"
+WAIT=60 run_case "verify and every other workflow passed releases" 0 "and so did every other workflow its push ran (device.yml=success)"
+
+new_case
+stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs main:success)"
+stub_gh_fixture "$W" "$(others_url $SHA)" "$(all_runs verify.yml:main:success device.yml:main:failure)"
+WAIT=60 run_case "another workflow that failed on the push refuses" 1 "but not every other workflow its push ran did (device.yml=failure)"
+
+new_case
+stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs main:success)"
+stub_gh_fixture "$W" "$(others_url $SHA)" "$(all_runs device.yml:main:failure device.yml:main:success)"
+WAIT=60 run_case "a workflow passes on any of its runs" 0 "device.yml=success"
+
+new_case
+stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs main:success)"
+stub_gh_fixture "$W" "$(others_url $SHA)" "$(all_runs device.yml:main:null)" 1
+stub_gh_fixture "$W" "$(others_url $SHA)" "$(all_runs device.yml:main:success)"
+WAIT=60 run_case "another workflow still running is waited for" 0 "and so did every other workflow"
+
+new_case
+stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs main:success)"
+stub_gh_fixture "$W" "$(others_url $SHA)" "$(all_runs device.yml:main:null)"
+WAIT=0 run_case "wait_minutes 0 refuses another workflow still running" 1 "gh run rerun 42 --failed --repo $REPO"
+
+new_case
+stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs main:success)"
+stub_gh_fixture "$W" "$(others_url $SHA)" "$(all_runs device.yml:main:cancelled)"
+WAIT=60 run_case "another workflow cancelled on the push refuses" 1 "was cancelled (device.yml=cancelled)"
+
+new_case
+stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs main:success)"
+stub_gh_fixture "$W" "$(others_url $SHA)" "$(all_runs site.yml:main:skipped)"
+WAIT=60 run_case "a workflow that skipped every job has no say" 0 "concluded success"
+
+new_case
+stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs main:success)"
+stub_gh_fixture "$W" "$(others_url $SHA)" "$(all_runs verify.yml:main:failure device.yml:main:success)"
+WAIT=60 run_case "the verify workflow's own runs are left to its verdict" 0 "(device.yml=success)"
+
+new_case
+stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs main:success)"
+stub_gh_fixture "$W" "$(others_url $SHA)" "$(all_runs release.yml:$TAG:failure)"
+WAIT=60 run_case "a workflow the tag's own push ran has no say" 0 "concluded success on $SHA"
+
+new_case
+stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs main:success)"
+stub_gh_fixture "$W" "$(others_url $SHA)" "FAIL"
+WAIT=60 run_case "an API error on the other workflows refuses" 1 "cannot read the other workflows"
 
 if [ "$FAILURES" -gt 0 ]; then
     printf "\n%d failure(s)\n" "$FAILURES"

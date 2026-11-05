@@ -10,6 +10,22 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- The release check (`verified-commit`, run by `image-build.yml`,
+  `service-release.yml`, `cli-release.yml` and `notes-release.yml`) also
+  reads every other workflow the tagged commit's branch push ran. A check a
+  repository keeps in a workflow of its own, such as a device session under
+  a real sandbox, now blocks a release when it failed or was cancelled, and
+  is waited for while it runs, as the per-push gate is. A workflow whose run
+  skipped every job, or that did not run on the commit, has no say.
+
+### Fixed
+
+- `lateregate.yml` runs every step of the test job in bash. On a Windows
+  runner a step without a shell runs in PowerShell, so a `windows-latest`
+  in `test.os` failed at its first step.
+
 ## v1.32.1 - 2026-11-05
 
 ### Fixed

@@ -627,7 +627,11 @@ runner once:
    cancelled, its parent is read instead. That covers the commit
    `lateregate release` cuts, which changes `CHANGELOG.md` alone and is
    pushed with its tag, so its own run has only just started. A run that
-   concluded on the commit itself still decides.
+   concluded on the commit itself still decides. Every other workflow the
+   same branch push ran must have passed too, such as one holding a check
+   the shared gate cannot host yet: one still running is waited for the
+   same way, and a failed or cancelled one refuses. A workflow whose run
+   skipped every job, or that did not run on the commit, has no say.
 2. The tag carries no build metadata, is on the default branch, and has a
    `CHANGELOG.md` section. The namespace is `namespace`, else the
    repository variable `RELEASE_IMAGE_NAMESPACE`, else the repository

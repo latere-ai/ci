@@ -23,6 +23,16 @@
 #                           is waited for up to five minutes (never longer
 #                           than WAIT_MINUTES), then refused.
 #
+# Once the verify workflow passed, every other workflow the same branch push
+# ran must have passed too. A repository keeps a check the shared gate cannot
+# host yet, such as a device session under a real sandbox, in a workflow of
+# its own, and a release from a commit that check failed on is not cut from
+# a green tree either. Per workflow file, a success on any of its runs
+# passes; one still running is waited for as verify is; a failure and the
+# like, or a cancel, refuses. A workflow whose push run skipped every job
+# decided it had nothing to check, and a workflow that did not run on the
+# commit, such as one whose path filter left it out, has no say.
+#
 # A commit that changes nothing but SKIP_PATHS carries its parent's code,
 # so where its own runs are running, cancelled or missing, the parent is
 # read instead. That is the commit `lateregate release` cuts: it changes
@@ -85,6 +95,8 @@ if [ -z "$VERIFY_WORKFLOW" ]; then
     esac
     echo "the per-push gate is $VERIFY_WORKFLOW"
 fi
+# read_others leaves the verify workflow out by its file name.
+export VERIFY_WORKFLOW
 
 # Sets VERDICT to success, failure, pending, cancelled or none for the verify
 # runs of commit $1, and RUNS to their conclusions.
@@ -102,6 +114,40 @@ read_verdict() {
         *" cancelled "*) VERDICT=cancelled ;;
         *) VERDICT=failure ;;
     esac
+}
+
+# Sets OTHERS to "file=verdict" for each workflow other than verify that the
+# branch push of commit $1 ran, and OTHER to the first verdict that decides:
+# failure (with its conclusion), cancelled, running, or empty when every one
+# passed or had no say.
+read_others() {
+    # $ENV is jq's, which reads the tag and the verify workflow from the
+    # environment.
+    # shellcheck disable=SC2016
+    OTHERS=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=$1&event=push&per_page=100" \
+        --jq '[.workflow_runs[] | select(.head_branch != $ENV.TAG_PUSH)
+              | {file: (.path | split("/") | last), c: (.conclusion // "running")}
+              | select(.file != $ENV.VERIFY_WORKFLOW)]
+            | group_by(.file)
+            | map(.[0].file + "=" + (
+                if any(.[]; .c == "success") then "success"
+                elif any(.[]; .c == "running") then "running"
+                elif all(.[]; .c == "skipped" or .c == "neutral") then "success"
+                elif all(.[]; .c == "cancelled" or .c == "skipped" or .c == "neutral") then "cancelled"
+                else ([.[] | .c | select(. != "skipped" and . != "neutral" and . != "cancelled")][0] // "failure") end))
+            | join(" ")') \
+        || die "cannot read the other workflows the push of $1 ran, so nothing was released"
+    # A failure outranks a cancel, and a cancel outranks a run still going.
+    OTHER=""
+    local entry
+    for entry in $OTHERS; do
+        case "${entry#*=}" in
+            success) ;;
+            running) [ -n "$OTHER" ] || OTHER=running ;;
+            cancelled) [ "$OTHER" = failure ] || OTHER=cancelled ;;
+            *) OTHER=failure ;;
+        esac
+    done
 }
 
 # Sets PARENT and CODE for commit $1: its first parent, and the paths it
@@ -166,7 +212,27 @@ while :; do
     read_verdict "$sha"
     case "$VERDICT" in
         success)
-            echo "$VERIFY_WORKFLOW concluded success on $sha"
+            read_others "$sha"
+            case "$OTHER" in
+                failure)
+                    die "$VERIFY_WORKFLOW concluded success on $sha, but not every other workflow its push ran did ($OTHERS); a release is cut from a green tree"
+                    ;;
+                cancelled)
+                    die "$VERIFY_WORKFLOW concluded success on $sha, but another workflow its push ran was cancelled ($OTHERS), so the commit was never verified by it. Re-run that run, or tag a newer commit."
+                    ;;
+                running)
+                    if [ "$(date +%s)" -ge "$deadline" ]; then
+                        if [ "$WAIT_MINUTES" -eq 0 ]; then
+                            die "$VERIFY_WORKFLOW concluded success on $sha, but another workflow its push ran has not concluded ($OTHERS), and this release does not wait for it. Once it is green: gh run rerun ${GITHUB_RUN_ID:-<this run>} --failed --repo ${GITHUB_REPOSITORY}"
+                        fi
+                        die "another workflow the push of $sha ran did not conclude within $WAIT_MINUTES minutes ($OTHERS)"
+                    fi
+                    echo "$VERIFY_WORKFLOW concluded success on $sha; waiting for the other workflows its push ran ($OTHERS)"
+                    sleep "$POLL_SECONDS"
+                    continue
+                    ;;
+            esac
+            echo "$VERIFY_WORKFLOW concluded success on $sha${OTHERS:+, and so did every other workflow its push ran ($OTHERS)}"
             exit 0
             ;;
         failure)
