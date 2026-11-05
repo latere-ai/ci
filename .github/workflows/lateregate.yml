@@ -413,14 +413,20 @@ jobs:
       # Every gate but lint keeps the machine's TMPDIR. A cached test result is
       # keyed on the TMPDIR the test read, and a value per runner process
       # would keep each process from replaying what another recorded.
-      - run: go -C "$GATE_MODULE" tool lateregate ${{ matrix.gate }} -C "$GITHUB_WORKSPACE"
+      # The base the probe resolved, when it has one: a gate that holds parts
+      # of its own, such as e2e's suites, skips the parts the change cannot
+      # reach. An empty base passes no flag, which an older pin also takes.
+      - run: go -C "$GATE_MODULE" tool lateregate ${{ matrix.gate }} -C "$GITHUB_WORKSPACE" ${BASE:+-since "$BASE"}
         if: ${{ matrix.gate != 'lint' }}
+        env:
+          BASE: ${{ needs.probe.outputs.base }}
       # golangci-lint locks a file under TMPDIR for the whole machine, so lint
       # gets the runner process's own directory and two of them do not collide.
-      - run: go -C "$GATE_MODULE" tool lateregate lint -C "$GITHUB_WORKSPACE"
+      - run: go -C "$GATE_MODULE" tool lateregate lint -C "$GITHUB_WORKSPACE" ${BASE:+-since "$BASE"}
         if: ${{ matrix.gate == 'lint' }}
         env:
           TMPDIR: ${{ runner.temp }}
+          BASE: ${{ needs.probe.outputs.base }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ always() && (matrix.gate == 'cover' || matrix.gate == 'suite') }}
         # Coverage remains a required gate; this report copy is optional.
@@ -706,6 +712,7 @@ jobs:
         env:
           GATES: ${{ steps.plan.outputs.gates }}
           ENUM_SETUP: ${{ steps.prepare.outcome }}
+          BASE: ${{ steps.plan.outputs.base }}
         run: |
           # A failed gate is caught where it runs and recorded, so the next one
           # still runs and one push reports every failure.
@@ -731,9 +738,11 @@ jobs:
             elif [ "$gate" = lint ]; then
               # golangci-lint locks a file under TMPDIR for the whole machine; the
               # runner process's own directory keeps two slots apart.
-              TMPDIR="$RUNNER_TEMP" go -C "$GATE_MODULE" tool lateregate lint -C "$GITHUB_WORKSPACE" || status=$?
+              TMPDIR="$RUNNER_TEMP" go -C "$GATE_MODULE" tool lateregate lint -C "$GITHUB_WORKSPACE" ${BASE:+-since "$BASE"} || status=$?
             else
-              go -C "$GATE_MODULE" tool lateregate "$gate" -C "$GITHUB_WORKSPACE" || status=$?
+              # With a base, a gate that holds parts of its own skips the parts
+              # the change cannot reach; an empty base passes no flag.
+              go -C "$GATE_MODULE" tool lateregate "$gate" -C "$GITHUB_WORKSPACE" ${BASE:+-since "$BASE"} || status=$?
             fi
             echo "::endgroup::"
             if [ "$status" -eq 0 ]; then

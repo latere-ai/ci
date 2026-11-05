@@ -80,7 +80,12 @@ if [ "$1" = base ]; then
     *) echo "$BASE"; exit 0 ;;
     esac
 fi
-echo "$1 TMPDIR=${TMPDIR:-}" >> "$CALLS"
+gate=$1
+# A gate run by name carries -since only when the plan had a base.
+since=""
+while [ $# -gt 0 ]; do [ "$1" = -since ] && since=" since=$2"; shift; done
+echo "$gate TMPDIR=${TMPDIR:-}$since" >> "$CALLS"
+set -- "$gate"
 case " $FAIL " in *" $1 "*) exit 1 ;; esac
 exit 0
 EOF
@@ -238,6 +243,19 @@ loop_case "every gate runs in plan order, then the wiring check, and a clean run
 loop_case "lint alone runs under the runner process's own TMPDIR" \
     '["lint","vuln","suite"]' "" skipped \
     "lint TMPDIR=/runner/temp;vuln TMPDIR=/tmp;suite TMPDIR=/tmp;contract TMPDIR=/tmp;" 0 ""
+
+# With a base from the plan step, every gate run by name is measured from it,
+# so a gate that holds parts of its own skips the parts the change misses.
+calls=$(mktemp)
+GATES='["suite","lint"]' FAIL="" ENUM_SETUP=skipped CALLS="$calls" GITHUB_STEP_SUMMARY=/dev/null BASE=abc123 \
+    RUNNER_TEMP=/runner/temp TMPDIR=/tmp PATH="$STUB:$PATH" bash -e -c "$LOOP_SCRIPT" >/dev/null 2>&1
+got=$(tr '\n' ';' < "$calls"); rm -f "$calls"
+want="suite TMPDIR=/tmp since=abc123;lint TMPDIR=/runner/temp since=abc123;contract TMPDIR=/tmp since=abc123;"
+if [ "$got" = "$want" ]; then
+    pass "a base reaches every gate run by name"
+else
+    fail "a base reaches every gate run by name: got $got, want $want"
+fi
 
 loop_case "a failed gate does not stop the rest, and each failure is annotated and summarized" \
     '["fmt-check","lint","suite","license"]' "fmt-check suite" skipped \
