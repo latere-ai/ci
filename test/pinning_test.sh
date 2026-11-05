@@ -38,6 +38,10 @@ assert_all_actions_sha_pinned() {
     # (which document how a consumer calls it, at @v1) are not scanned.
     refs=$(grep -rhoE '^ *-? *uses: +[A-Za-z0-9._-]+/[A-Za-z0-9._/-]+@[^ ]+' "${SCANNED[@]}" \
         | sed -E 's/^ *-? *uses: +//' | sort -u)
+    # gate.yml runs the shared per-push gate on this repository the way every
+    # consumer does, at @v1 with contents: read. The daily ci-gate bump finds
+    # that caller by this exact reference, so it cannot name a SHA.
+    refs=$(printf '%s\n' "$refs" | grep -vxF 'latere-ai/ci/.github/workflows/lateregate.yml@v1' || true)
     if [ -z "$refs" ]; then
         fail "$name (no action references found at all)"
         return
