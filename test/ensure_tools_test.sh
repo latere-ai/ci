@@ -20,15 +20,21 @@ fail() { printf "  \033[31mFAIL\033[0m %s\n" "$1"; FAILURES=$((FAILURES + 1)); }
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
-# No tool of the host is on this PATH, so the fetch is what is tested.
-SAFE_PATH="/usr/bin:/bin:/usr/sbin:/sbin"
+# The PATH holds only the utilities the scripts use, linked from the host,
+# so a kubectl or kustomize the host ships cannot answer for the fetch.
+mkdir -p "$TMP/safe"
+for t in bash sh curl tar cat mkdir chmod grep cut head dirname basename rm sed awk tr sort uname; do
+    p=$(command -v "$t") && ln -sf "$p" "$TMP/safe/$t"
+done
+SAFE_PATH="$TMP/safe"
 # macOS's sha256sum cannot check (-c); shasum can, and the runners have the
 # GNU one.
 if ! sha256sum --version 2>&1 | grep -q GNU && command -v shasum > /dev/null 2>&1; then
-    mkdir -p "$TMP/shim"
-    printf '#!/bin/sh\nexec shasum -a 256 "$@"\n' > "$TMP/shim/sha256sum"
-    chmod +x "$TMP/shim/sha256sum"
-    SAFE_PATH="$TMP/shim:$SAFE_PATH"
+    printf '#!/bin/sh\nexec shasum -a 256 "$@"\n' > "$TMP/safe/sha256sum"
+    chmod +x "$TMP/safe/sha256sum"
+    ln -sf "$(command -v shasum)" "$TMP/safe/shasum"
+else
+    ln -sf "$(command -v sha256sum)" "$TMP/safe/sha256sum"
 fi
 sum() { sha256sum "$1" | cut -d' ' -f1; }
 
