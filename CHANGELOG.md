@@ -10,6 +10,25 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- `lateregate.yml` measures the plan from the last green commit. The job that
+  reads the plan runs `lateregate base -since green` and lists from the
+  commit it prints, naming it in the log and the step summary. When the pinned
+  `lateregate` has no `base` command, no run was green, or the API refuses,
+  the whole tree is checked and the log says why. The workflow now asks for
+  `actions: read`; a caller that grants only `contents: read` keeps working and
+  checks the whole tree.
+- The tools a gate installs come from the plan's `needs`: Node and Bun, and
+  Chromium in each `chromium:<dir>`. A hosted gate job installs only what its
+  gate needs. A pinned `lateregate` without `needs` gets the previous rule.
+- The test systems come from the `test` entry's `os`, else `test_os`.
+- The module that pins the tool is found by its `tool` line when
+  `gate_module` is empty: the root, else the one tracked `go.mod` that has it;
+  several nested ones fail the job and ask for `gate_module`.
+- `test_os`, `frontend_browser_package` and `gate_module` are still accepted and
+  documented as superseded by `.lateregate.yaml` and auto-detection.
+
 ## v1.31.0 - 2026-11-05
 
 ### Fixed

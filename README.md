@@ -112,14 +112,52 @@ that applies does not run is a dated waiver in the repository's
 | Input | Default | Meaning |
 | --- | --- | --- |
 | `go_version` | `1.27` | the Go toolchain |
-| `test_os` | empty: the `runs_on` runner | the runners `test` runs on, as a JSON array |
+| `test_os` | empty: the `runs_on` runner | superseded by `test.os` in `.lateregate.yaml`, which the plan carries; used only when the plan has no `os`. The runners `test` runs on, as a JSON array |
 | `runs_on` | the [runner policy](#runners) | the runner label for every other job |
-| `gate_module` | empty: the root | the directory of the module whose `go.mod` pins ci-gate, for a repository that keeps the tool out of its consumers' module graph; lateregate runs from there and checks the whole repository |
-| `frontend_browser_package` | empty: no browser | the directory of a Bun package whose tests drive Chromium; before the `frontend` gate, the package is installed there and Playwright installs Chromium with its system libraries |
+| `gate_module` | empty: found by its `tool` line | superseded by auto-detection (below); a value here wins. The directory of the module whose `go.mod` pins ci-gate, for a repository that keeps the tool out of its consumers' module graph; lateregate runs from there and checks the whole repository |
+| `frontend_browser_package` | empty: no browser | superseded by `frontend.browser` in `.lateregate.yaml`, which the plan carries as a need; used only when the plan carries no needs. The directory of a Bun package whose tests drive Chromium; before the `frontend` gate, the package is installed there and Playwright installs Chromium with its system libraries |
 
 golangci-lint's version is pinned in the binary, so there is no input for
 it. A repository that cannot lint waives `lint` with a reason and a date
 rather than turning the job off.
+
+**The plan is measured from the last green commit.** The job that reads the
+plan (`which gates apply` on a hosted runner, `all gates passed` on the
+self-hosted one) first runs `lateregate base -since green`, which prints the
+newest commit on the default branch with a successful push run of the
+calling workflow that is an ancestor of the pushed commit. It then runs
+`lateregate list -json -since <that commit>`, so a gate whose inputs did not
+change since then is skipped with its reason in the log. The commit is in
+the log and the step summary. Gates run by name, one per job, take no
+`-since`: the plan already chose them.
+
+When the base cannot be had, the whole tree is checked and the log says why.
+That happens when the pinned `lateregate` has no `base` command, no run was
+green, the API answered an error, or the caller grants no `actions: read`
+(the workflow asks for it, and a caller that grants only `contents: read`
+caps it, so the API answers 403). A cancelled run is never a base.
+
+**The plan says what to install.** Each running entry in the plan may carry
+`needs`: `node` and `bun` install Node and Bun, and `chromium:<dir>` runs
+`bun install --frozen-lockfile` and `bunx playwright install --with-deps
+chromium` in `<dir>`. A failed browser install does not fail its step's job:
+the gate fails on the test that needs the browser. A hosted gate job installs
+what its own gate needs; on the self-hosted runner `all gates passed`
+installs what any running gate needs. With a pinned `lateregate` that has no
+`needs`, `enum-typescript` and `frontend` get Node and Bun, and `frontend`
+gets the browser from `frontend_browser_package`. The `test` entry's `os`
+lists the systems `test` runs on; without it, `test_os` does. On the
+self-hosted runner the test matrix needs the probe, which runs only when
+`test_os` names another system, so a plan whose `os` names one the probe did
+not run for fails `all gates passed` instead of dropping that system.
+
+**The module that pins the tool is found.** With `gate_module` empty, each job
+runs from the repository root when its `go.mod` has a `tool` line for
+`latere.ai/x/ci-gate/cmd/lateregate` (alone or in a `tool ( )` block),
+otherwise from the one tracked `go.mod` that does. Several nested modules
+with the line and none at the root fail the job and ask for `gate_module`;
+none at all stays on the root, where `lateregate contract` reports the
+missing pin.
 
 On a hosted runner each gate gets a job:
 
