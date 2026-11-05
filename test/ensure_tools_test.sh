@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
-# Tests for actions/ensure-kubectl and actions/ensure-kustomize against
-# release trees served from file:// URLs: the pinned version is fetched, its
+# Tests for actions/lib/arch.sh and for actions/ensure-gh, ensure-kubectl and
+# ensure-kustomize against release trees served from file:// URLs, one tree
+# per architecture: the pinned version is fetched, its
 # checksum is verified and a bad one refuses, a tool already on PATH at the
 # pinned version is left alone, and the version comes from versions.sh unless
 # the environment names another.
@@ -13,6 +14,8 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 KUBECTL="$REPO_ROOT/actions/ensure-kubectl/run.sh"
 KUSTOMIZE="$REPO_ROOT/actions/ensure-kustomize/run.sh"
 VERSIONS="$REPO_ROOT/actions/lib/versions.sh"
+ARCH="$REPO_ROOT/actions/lib/arch.sh"
+GH="$REPO_ROOT/actions/ensure-gh/run.sh"
 FAILURES=0
 
 pass() { printf "  \033[32mPASS\033[0m %s\n" "$1"; }
@@ -43,29 +46,55 @@ sum() { sha256sum "$1" | cut -d' ' -f1; }
 KV=$KUBECTL_VERSION
 SV=$KUSTOMIZE_VERSION
 
-# The kubectl tree: release/v<version>/bin/linux/amd64/kubectl and its bare
-# sha256 file.
+# The kubectl tree: release/v<version>/bin/linux/<arch>/kubectl and its bare
+# sha256 file. Each binary says which architecture it was built for.
+for arch in amd64 arm64; do
+    kdir="$TMP/k8s/release/v$KV/bin/linux/$arch"
+    mkdir -p "$kdir"
+    printf '#!/bin/sh\necho "Client Version: v%s %s"\n' "$KV" "$arch" > "$kdir/kubectl"
+    sum "$kdir/kubectl" > "$kdir/kubectl.sha256"
+done
 kdir="$TMP/k8s/release/v$KV/bin/linux/amd64"
-mkdir -p "$kdir"
-printf '#!/bin/sh\necho "Client Version: v%s"\n' "$KV" > "$kdir/kubectl"
-sum "$kdir/kubectl" > "$kdir/kubectl.sha256"
 
 # The kustomize tree: <base>/kustomize%2Fv<version>/ is the directory
 # kustomize/v<version> on disk.
 sdir="$TMP/kz/kustomize/v$SV"
-mkdir -p "$sdir" "$TMP/pack"
-printf '#!/bin/sh\necho "v%s"\n' "$SV" > "$TMP/pack/kustomize"
-chmod +x "$TMP/pack/kustomize"
+mkdir -p "$sdir"
+: > "$sdir/checksums.txt"
+for arch in amd64 arm64; do
+    mkdir -p "$TMP/pack-$arch"
+    printf '#!/bin/sh\necho "v%s %s"\n' "$SV" "$arch" > "$TMP/pack-$arch/kustomize"
+    chmod +x "$TMP/pack-$arch/kustomize"
+    tar -czf "$sdir/kustomize_v${SV}_linux_${arch}.tar.gz" -C "$TMP/pack-$arch" kustomize
+    printf '%s  %s\n' "$(sum "$sdir/kustomize_v${SV}_linux_${arch}.tar.gz")" "kustomize_v${SV}_linux_${arch}.tar.gz" >> "$sdir/checksums.txt"
+done
+printf '%s  %s\n' "0000" "kustomize_v${SV}_darwin_arm64.tar.gz" >> "$sdir/checksums.txt"
 archive="kustomize_v${SV}_linux_amd64.tar.gz"
-tar -czf "$sdir/$archive" -C "$TMP/pack" kustomize
-printf '%s  %s\n%s  %s\n' "$(sum "$sdir/$archive")" "$archive" "0000" "kustomize_v${SV}_darwin_arm64.tar.gz" > "$sdir/checksums.txt"
+cp "$sdir/checksums.txt" "$TMP/kz-checksums.txt"
+
+# The gh tree: v<version>/gh_<version>_linux_<arch>.tar.gz holding
+# gh_<version>_linux_<arch>/bin/gh, and the release's checksums file.
+GV=$GH_VERSION
+gdir="$TMP/gh/v$GV"
+mkdir -p "$gdir"
+: > "$gdir/gh_${GV}_checksums.txt"
+for arch in amd64 arm64; do
+    mkdir -p "$TMP/ghpack/gh_${GV}_linux_$arch/bin"
+    printf '#!/bin/sh\necho "gh version %s %s"\n' "$GV" "$arch" > "$TMP/ghpack/gh_${GV}_linux_$arch/bin/gh"
+    chmod +x "$TMP/ghpack/gh_${GV}_linux_$arch/bin/gh"
+    tar -czf "$gdir/gh_${GV}_linux_$arch.tar.gz" -C "$TMP/ghpack" "gh_${GV}_linux_$arch"
+    printf '%s  %s\n' "$(sum "$gdir/gh_${GV}_linux_$arch.tar.gz")" "gh_${GV}_linux_$arch.tar.gz" >> "$gdir/gh_${GV}_checksums.txt"
+done
 
 run() { # run SCRIPT NAME: runs with a fresh RUNNER_TEMP and GITHUB_PATH
     local script=$1 out
     rm -rf "$TMP/rt" && mkdir -p "$TMP/rt"
     : > "$TMP/path"
-    out=$(env -i PATH="$SAFE_PATH" HOME="$TMP" RUNNER_TEMP="$TMP/rt" GITHUB_PATH="$TMP/path" \
-        KUBECTL_BASE_URL="file://$TMP/k8s" KUSTOMIZE_BASE_URL="file://$TMP/kz" "${@:2}" bash "$script" 2>&1)
+    # The machine is x86_64 unless a case says otherwise, so the host's own
+    # architecture does not pick the archive.
+    out=$(env -i PATH="$SAFE_PATH" HOME="$TMP" RUNNER_TEMP="$TMP/rt" GITHUB_PATH="$TMP/path" CI_UNAME_M=x86_64 \
+        KUBECTL_BASE_URL="file://$TMP/k8s" KUSTOMIZE_BASE_URL="file://$TMP/kz" GH_BASE_URL="file://$TMP/gh" \
+        "${@:2}" bash "$script" 2>&1)
     local rc=$?
     printf '%s\n' "$out"
     return $rc
@@ -118,7 +147,7 @@ if [ $? -ne 0 ] && [ ! -s "$TMP/path" ]; then
 else
     fail "ensure-kustomize accepted a bad checksum: $out"
 fi
-printf '%s  %s\n' "$(sum "$sdir/$archive")" "$archive" > "$sdir/checksums.txt"
+cp "$TMP/kz-checksums.txt" "$sdir/checksums.txt"
 
 printf '#!/bin/sh\necho "v%s"\n' "$SV" > "$TMP/have/kustomize"
 chmod +x "$TMP/have/kustomize"
@@ -134,6 +163,47 @@ if [ $? -eq 0 ] && grep -qx "$TMP/rt/kustomize-bin" "$TMP/path"; then
     pass "ensure-kustomize fetches the pinned version over another one"
 else
     fail "ensure-kustomize kept a kustomize at another version: $out"
+fi
+
+# The archive is the one for the machine: arm64 on aarch64 and arm64, amd64
+# on x86_64 and amd64. Each fetched tool reports the architecture it was
+# built for.
+for m in aarch64:arm64 arm64:arm64 x86_64:amd64 amd64:amd64; do
+    machine=${m%%:*}
+    want=${m##*:}
+    out=$(run "$KUBECTL" CI_UNAME_M="$machine") && "$TMP/rt/kubectl-bin/kubectl" | grep -qF " $want"
+    if [ $? -eq 0 ]; then pass "ensure-kubectl fetches the $want build on $machine"; else fail "ensure-kubectl on $machine did not fetch $want: $out"; fi
+    out=$(run "$KUSTOMIZE" CI_UNAME_M="$machine") && "$TMP/rt/kustomize-bin/kustomize" | grep -qF " $want"
+    if [ $? -eq 0 ]; then pass "ensure-kustomize fetches the $want build on $machine"; else fail "ensure-kustomize on $machine did not fetch $want: $out"; fi
+    out=$(run "$GH" CI_UNAME_M="$machine") && "$TMP/rt/gh-bin/gh" --version | grep -qF " $want"
+    if [ $? -eq 0 ]; then pass "ensure-gh fetches the $want build on $machine"; else fail "ensure-gh on $machine did not fetch $want: $out"; fi
+done
+for script in "$GH" "$KUBECTL" "$KUSTOMIZE"; do
+    out=$(run "$script" CI_UNAME_M=riscv64)
+    if [ $? -ne 0 ] && printf '%s' "$out" | grep -qF "riscv64" && [ ! -s "$TMP/path" ]; then
+        pass "$(basename "$(dirname "$script")") refuses an unknown architecture and names it"
+    else
+        fail "$(basename "$(dirname "$script")") did not refuse riscv64: $out"
+    fi
+done
+# A tool already on PATH is used even on a machine the mapping does not know.
+out=$(run "$KUBECTL" PATH="$TMP/have:$SAFE_PATH" CI_UNAME_M=riscv64)
+if [ $? -eq 0 ] && [ ! -s "$TMP/path" ]; then
+    pass "an installed kubectl needs no architecture"
+else
+    fail "an installed kubectl was refused on an unknown architecture: $out"
+fi
+
+# arch.sh itself, sourced: TOOL_ARCH for each spelling, a failure otherwise.
+for m in x86_64:amd64 amd64:amd64 aarch64:arm64 arm64:arm64; do
+    got=$(CI_UNAME_M=${m%%:*} bash -c '. "$1" && echo "$TOOL_ARCH"' _ "$ARCH" 2>&1)
+    if [ "$got" = "${m##*:}" ]; then pass "arch.sh maps ${m%%:*} to ${m##*:}"; else fail "arch.sh mapped ${m%%:*} to '$got'"; fi
+done
+got=$(CI_UNAME_M=sparc64 bash -c '. "$1" && echo "$TOOL_ARCH"' _ "$ARCH" 2>&1)
+if [ $? -ne 0 ] && printf '%s' "$got" | grep -qF sparc64; then
+    pass "arch.sh fails on an unknown machine and names it"
+else
+    fail "arch.sh accepted sparc64: $got"
 fi
 
 # The pins are explicit versions, never latest.

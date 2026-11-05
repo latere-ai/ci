@@ -63,10 +63,11 @@ fi
 # when the runner has none; gh is the publish step's, through ensure-gh. A
 # fetch at `latest` or without a checksum would break the supply-chain rule
 # the README states.
-if grep -qF "name: Ensure kubectl" "$WORKFLOW" \
-    && grep -qF "if command -v kubectl >/dev/null 2>&1; then" "$WORKFLOW" \
-    && grep -qF "inputs.kubectl_version" "$WORKFLOW" \
-    && grep -A22 'name: Ensure kubectl' "$WORKFLOW" | grep -q 'sha256sum -c'; then
+ensure=$(grep -A4 'name: Ensure kubectl' "$WORKFLOW")
+if printf '%s\n' "$ensure" | grep -qF 'uses: ./.latere-ci/actions/ensure-kubectl' \
+    && printf '%s\n' "$ensure" | grep -qF 'version: ${{ inputs.kubectl_version }}' \
+    && grep -qF 'if command -v kubectl >/dev/null 2>&1; then' "$REPO_ROOT/actions/ensure-kubectl/run.sh" \
+    && grep -qF 'sha256sum -c' "$REPO_ROOT/actions/ensure-kubectl/run.sh"; then
     pass "kubectl is fetched at inputs.kubectl_version, verified, only when missing"
 else
     fail "kubectl bootstrap step is missing, unpinned or unverified"

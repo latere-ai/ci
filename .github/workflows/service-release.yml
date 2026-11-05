@@ -433,27 +433,13 @@ jobs:
           cosign_version: ${{ steps.versions.outputs.cosign }}
           syft_version: ${{ steps.versions.outputs.syft }}
 
-      # Hosted runners ship kubectl; the self-hosted VM does not. The pinned
-      # release is fetched with its published sha256 into a directory that
-      # exists for this job alone.
+      # Hosted runners ship kubectl; the self-hosted VM does not. The shared
+      # step fetches the pinned release for the runner's architecture with
+      # its published sha256, into a directory that exists for this job alone.
       - name: Ensure kubectl
-        env:
-          KUBECTL_VERSION: ${{ inputs.kubectl_version }}
-        run: |
-          set -euo pipefail
-          if command -v kubectl >/dev/null 2>&1; then
-            kubectl version --client
-            exit 0
-          fi
-          dir="$RUNNER_TEMP/kubectl-bin"
-          mkdir -p "$dir"
-          base="https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/amd64"
-          curl -sSfL -o "$dir/kubectl" "$base/kubectl"
-          curl -sSfL -o "$dir/kubectl.sha256" "$base/kubectl.sha256"
-          echo "$(cat "$dir/kubectl.sha256")  $dir/kubectl" | sha256sum -c
-          chmod +x "$dir/kubectl"
-          echo "$dir" >> "$GITHUB_PATH"
-          "$dir/kubectl" version --client
+        uses: ./.latere-ci/actions/ensure-kubectl
+        with:
+          version: ${{ inputs.kubectl_version }}
 
       # The kubeconfig lives in this job's temp directory, which the runner
       # empties when the job ends: on a self-hosted runner a file under $HOME

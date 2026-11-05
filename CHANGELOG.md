@@ -10,6 +10,15 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- The tools the shared steps fetch when the runner has none (`gh`,
+  `kubectl`, `kustomize`) are the build for the runner's architecture, x64
+  or arm64, instead of always x64. Every checksum is still verified. A
+  runner of any other architecture fails with a message naming it.
+  Nothing to change in a caller. The "Ensure kubectl" step of
+  `service-release.yml` is now the shared `ensure-kubectl` action.
+
 ### Removed
 
 - `runner-health.yml`, which moved `CI_RUNNER_PRIVATE` to `ubuntu-latest`
