@@ -38,6 +38,11 @@ on:
         required: false
         type: string
         default: ${{ (github.event.repository.private || contains(fromJSON('["push","schedule","workflow_dispatch","release"]'), github.event_name)) && (vars.CI_RUNNER_PRIVATE || vars.CI_RUNNER_PUBLIC) || 'ubuntu-latest' }}
+      gate_module:
+        description: "Superseded by auto-detection, which finds the module whose go.mod has the tool line; a value here wins over it. Directory of the Go module whose go.mod pins latere.ai/x/ci-gate as a tool, relative to the repository root. A module that keeps the tool out of its consumers' module graph pins it in a nested module instead (managed-agents: internal/gate); lateregate runs from there and its gates still check the whole repository."
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -57,6 +62,50 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # Keep in step with the step of the same name in lateregate.yml, and with
+      # test/lateregate_test.sh, which unit-tests a copy of this shell.
+      - name: Find the gate module
+        env:
+          GATE_INPUT: ${{ inputs.gate_module }}
+        run: |
+          set -euo pipefail
+          # A go.mod pins the tool with a line `tool <path>` or a path inside a
+          # `tool ( ... )` block.
+          pins_tool() {
+            awk '
+              /^[[:space:]]*tool[[:space:]]*\(/ { block = 1; next }
+              block && /^[[:space:]]*\)/ { block = 0; next }
+              block && $1 == "latere.ai/x/ci-gate/cmd/lateregate" { found = 1 }
+              /^[[:space:]]*tool[[:space:]]+latere\.ai\/x\/ci-gate\/cmd\/lateregate/ { found = 1 }
+              END { exit !found }
+            ' "$1"
+          }
+          module=.
+          if [ -n "$GATE_INPUT" ]; then
+            module=$GATE_INPUT
+          else
+            cd "$GITHUB_WORKSPACE"
+            if [ -f go.mod ] && pins_tool go.mod; then
+              module=.
+            else
+              found=""
+              count=0
+              while IFS= read -r mod; do
+                case "$mod" in go.mod | */go.mod) ;; *) continue ;; esac
+                if pins_tool "$mod"; then
+                  found=$(dirname "$mod")
+                  count=$((count + 1))
+                fi
+              done < <(git ls-files '*go.mod' 'go.mod')
+              if [ "$count" -gt 1 ]; then
+                echo "::error title=gate module::more than one go.mod pins the tool; set gate_module to the one lateregate runs from"
+                exit 1
+              fi
+              if [ "$count" -eq 1 ]; then module=$found; fi
+            fi
+          fi
+          echo "lateregate runs from the module in $module"
+          echo "GATE_MODULE=$module" >> "$GITHUB_ENV"
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ inputs.go_version }}
@@ -74,9 +123,9 @@ jobs:
           # pin that is one. It reports no update when it could not ask, so the
           # @latest query, which fails when the proxy does not answer, is what
           # makes "current" an answer rather than a lookup that never ran.
-          pin=$(go list -m -u -f '{{.Version}} {{with .Update}}{{.Version}}{{end}}' latere.ai/x/ci-gate)
+          pin=$(go -C "$GATE_MODULE" list -m -u -f '{{.Version}} {{with .Update}}{{.Version}}{{end}}' latere.ai/x/ci-gate)
           read -r current update <<< "$pin"
-          latest=$(go list -m -f '{{.Version}}' latere.ai/x/ci-gate@latest)
+          latest=$(go -C "$GATE_MODULE" list -m -f '{{.Version}}' latere.ai/x/ci-gate@latest)
           semver='^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'
           for v in "$current" "$latest" ${update:+"$update"}; do
             if ! printf '%s' "$v" | grep -Eq "$semver"; then
@@ -156,6 +205,50 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # Keep in step with the step of the same name in lateregate.yml, and with
+      # test/lateregate_test.sh, which unit-tests a copy of this shell.
+      - name: Find the gate module
+        env:
+          GATE_INPUT: ${{ inputs.gate_module }}
+        run: |
+          set -euo pipefail
+          # A go.mod pins the tool with a line `tool <path>` or a path inside a
+          # `tool ( ... )` block.
+          pins_tool() {
+            awk '
+              /^[[:space:]]*tool[[:space:]]*\(/ { block = 1; next }
+              block && /^[[:space:]]*\)/ { block = 0; next }
+              block && $1 == "latere.ai/x/ci-gate/cmd/lateregate" { found = 1 }
+              /^[[:space:]]*tool[[:space:]]+latere\.ai\/x\/ci-gate\/cmd\/lateregate/ { found = 1 }
+              END { exit !found }
+            ' "$1"
+          }
+          module=.
+          if [ -n "$GATE_INPUT" ]; then
+            module=$GATE_INPUT
+          else
+            cd "$GITHUB_WORKSPACE"
+            if [ -f go.mod ] && pins_tool go.mod; then
+              module=.
+            else
+              found=""
+              count=0
+              while IFS= read -r mod; do
+                case "$mod" in go.mod | */go.mod) ;; *) continue ;; esac
+                if pins_tool "$mod"; then
+                  found=$(dirname "$mod")
+                  count=$((count + 1))
+                fi
+              done < <(git ls-files '*go.mod' 'go.mod')
+              if [ "$count" -gt 1 ]; then
+                echo "::error title=gate module::more than one go.mod pins the tool; set gate_module to the one lateregate runs from"
+                exit 1
+              fi
+              if [ "$count" -eq 1 ]; then module=$found; fi
+            fi
+          fi
+          echo "lateregate runs from the module in $module"
+          echo "GATE_MODULE=$module" >> "$GITHUB_ENV"
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ inputs.go_version }}
@@ -173,9 +266,9 @@ jobs:
           logs="$RUNNER_TEMP/ci-gate-bump"
           mkdir -p "$logs"
           echo "logs=$logs" >> "$GITHUB_OUTPUT"
-          directives() { go mod edit -json | jq -r '"go \(.Go // "none"), toolchain \(.Toolchain // "none")"'; }
+          directives() { go -C "$GATE_MODULE" mod edit -json | jq -r '"go \(.Go // "none"), toolchain \(.Toolchain // "none")"'; }
           before=$(directives)
-          if ! { go get -tool "latere.ai/x/ci-gate/cmd/lateregate@$LATEST" && go mod tidy; } > "$logs/pin.log" 2>&1; then
+          if ! { go -C "$GATE_MODULE" get -tool "latere.ai/x/ci-gate/cmd/lateregate@$LATEST" && go -C "$GATE_MODULE" mod tidy; } > "$logs/pin.log" 2>&1; then
             cat "$logs/pin.log"
             echo pin >> "$logs/failed"
             echo "failed=true" >> "$GITHUB_OUTPUT"
@@ -201,7 +294,7 @@ jobs:
           LOGS: ${{ steps.move.outputs.logs }}
         run: |
           set -uo pipefail
-          if ! go tool lateregate list -json > "$LOGS/plan.json" 2> "$LOGS/plan.log"; then
+          if ! go -C "$GATE_MODULE" tool lateregate list -json -C "$GITHUB_WORKSPACE" > "$LOGS/plan.json" 2> "$LOGS/plan.log"; then
             cat "$LOGS/plan.log"
             echo plan >> "$LOGS/failed"
             echo "failed=true" >> "$GITHUB_OUTPUT"
@@ -231,7 +324,7 @@ jobs:
           HOME: ${{ runner.temp }}
       - name: Prepare TypeScript enum projects
         if: ${{ steps.plan.outputs.enum_typescript == 'true' }}
-        run: go tool lateregate enum-typescript-prepare
+        run: go -C "$GATE_MODULE" tool lateregate enum-typescript-prepare -C "$GITHUB_WORKSPACE"
       # The whole bar: every gate the plan runs, in its order, which is what
       # `go tool lateregate` runs, then the wiring check. Each runs whether
       # another failed, so the issue names every gate the release trips. Run
@@ -252,9 +345,9 @@ jobs:
           for gate in $(printf '%s' "$GATES" | jq -r '.[]') contract; do
             echo "::group::$gate"
             if [ "$gate" = lint ]; then
-              TMPDIR="$RUNNER_TEMP" go tool lateregate lint 2>&1 | tee "$LOGS/$gate.log" || failed="$failed $gate"
+              TMPDIR="$RUNNER_TEMP" go -C "$GATE_MODULE" tool lateregate lint -C "$GITHUB_WORKSPACE" 2>&1 | tee "$LOGS/$gate.log" || failed="$failed $gate"
             else
-              go tool lateregate "$gate" 2>&1 | tee "$LOGS/$gate.log" || failed="$failed $gate"
+              go -C "$GATE_MODULE" tool lateregate "$gate" -C "$GITHUB_WORKSPACE" 2>&1 | tee "$LOGS/$gate.log" || failed="$failed $gate"
             fi
             echo "::endgroup::"
           done
@@ -283,7 +376,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           message="gate: ci-gate $LATEST"
-          git add go.mod go.sum
+          git add "$GATE_MODULE/go.mod" "$GATE_MODULE/go.sum"
           git commit -q -m "$message"
           attempts=3
           for attempt in $(seq "$attempts"); do
@@ -303,9 +396,9 @@ jobs:
               # the pin again on top.
               git rebase --abort
               git reset -q --hard "origin/$BRANCH"
-              go get -tool "latere.ai/x/ci-gate/cmd/lateregate@$LATEST"
-              go mod tidy
-              git add go.mod go.sum
+              go -C "$GATE_MODULE" get -tool "latere.ai/x/ci-gate/cmd/lateregate@$LATEST"
+              go -C "$GATE_MODULE" mod tidy
+              git add "$GATE_MODULE/go.mod" "$GATE_MODULE/go.sum"
               if ! git diff --cached --quiet; then
                 git commit -q -m "$message"
               fi
@@ -386,10 +479,20 @@ jobs:
             echo "To reproduce:"
             echo
             echo '```sh'
-            echo "go get -tool latere.ai/x/ci-gate/cmd/lateregate@$LATEST"
-            echo "go mod tidy"
-            echo "go tool lateregate"
-            echo "go tool lateregate contract"
+            # A nested gate module is named in each command, and lateregate is
+            # pointed back at the repository root; a root module reads as it
+            # always has.
+            if [ "$GATE_MODULE" = . ]; then
+              echo "go get -tool latere.ai/x/ci-gate/cmd/lateregate@$LATEST"
+              echo "go mod tidy"
+              echo "go tool lateregate"
+              echo "go tool lateregate contract"
+            else
+              echo "go -C $GATE_MODULE get -tool latere.ai/x/ci-gate/cmd/lateregate@$LATEST"
+              echo "go -C $GATE_MODULE mod tidy"
+              echo "go -C $GATE_MODULE tool lateregate -C \"\$PWD\""
+              echo "go -C $GATE_MODULE tool lateregate contract -C \"\$PWD\""
+            fi
             echo '```'
             echo
             echo "Fix the tree, with or without the pin in the same commit. The next daily run moves the pin once the bar passes, and this issue closes when the pin reaches $LATEST. Until then every run that still fails updates it."
