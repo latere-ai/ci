@@ -29,8 +29,13 @@
 # only just started when the release reads it, or the path filter skipped
 # it. A run that concluded on the commit itself still decides.
 #
+# The release is usually a tag push or a published release. A run started
+# on a branch (a manual rebuild from main) reads that branch's own push run
+# of the commit, since there is no tag push to set apart.
+#
 # Inputs, from the environment: GITHUB_REPOSITORY, GITHUB_SHA,
-# GITHUB_REF_NAME, GITHUB_RUN_ID, VERIFY_WORKFLOW (the workflow file name;
+# GITHUB_REF_NAME, GITHUB_REF_TYPE (tag, or branch; unset reads as tag),
+# GITHUB_RUN_ID, VERIFY_WORKFLOW (the workflow file name;
 # empty takes the one workflow in the checkout's .github/workflows that
 # calls latere-ai/ci's lateregate.yml, the per-push gate), WAIT_MINUTES, SKIP_PATHS (one shell pattern per line, matched against
 # each changed path; * matches across directories), POLL_SECONDS (30;
@@ -38,6 +43,11 @@
 set -euo pipefail
 
 : "${GITHUB_REPOSITORY:?}" "${GITHUB_SHA:?}" "${GITHUB_REF_NAME:?}"
+# The verify run the tag's own push started, if any, carries the tag as its
+# branch; on a branch ref there is no such run to leave out.
+TAG_PUSH=""
+[ "${GITHUB_REF_TYPE:-tag}" = tag ] && TAG_PUSH=$GITHUB_REF_NAME
+export TAG_PUSH
 VERIFY_WORKFLOW=${VERIFY_WORKFLOW:-}
 WAIT_MINUTES=${WAIT_MINUTES:-60}
 POLL_SECONDS=${POLL_SECONDS:-30}
@@ -73,7 +83,7 @@ read_verdict() {
     # $ENV is jq's, which reads the tag from the environment.
     # shellcheck disable=SC2016
     RUNS=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${VERIFY_WORKFLOW}/runs?head_sha=$1&event=push&per_page=20" \
-        --jq '[.workflow_runs[] | select(.head_branch != $ENV.GITHUB_REF_NAME) | .conclusion // "running"] | join(" ")') \
+        --jq '[.workflow_runs[] | select(.head_branch != $ENV.TAG_PUSH) | .conclusion // "running"] | join(" ")') \
         || die "cannot read the $VERIFY_WORKFLOW runs of $1, so nothing was released"
     case " $RUNS " in
         "  ") VERDICT=none ;;

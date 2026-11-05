@@ -46,7 +46,7 @@ new_case() {
 run_case() {
     local name=$1 want=$2 text=$3 out rc
     out=$(cd "${CHECKOUT:-$W}" && PATH="$W/bin:$PATH" STUB_GH_DIR="$W" GITHUB_REPOSITORY=$REPO GITHUB_SHA=$SHA \
-        GITHUB_REF_NAME=$TAG GITHUB_RUN_ID=42 POLL_SECONDS=0 \
+        GITHUB_REF_NAME=${REF_NAME:-$TAG} GITHUB_REF_TYPE=${REF_TYPE:-tag} GITHUB_RUN_ID=42 POLL_SECONDS=0 \
         VERIFY_WORKFLOW=${VERIFY-verify.yml} WAIT_MINUTES=${WAIT:-60} bash "$SCRIPT" 2>&1)
     rc=$?
     if [ "$rc" -eq "$want" ] && printf '%s' "$out" | grep -qF -- "$text"; then
@@ -66,6 +66,16 @@ stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs $TAG:success)"
 stub_gh_fixture "$W" "repos/$REPO/commits/$SHA" "{\"parents\":[{\"sha\":\"$PARENT\"}]}"
 stub_gh_fixture "$W" "repos/$REPO/compare/$PARENT...$SHA" '{"files":[{"filename":"main.go"}]}'
 WAIT=0 run_case "the run of the tag's own push does not count" 1 "has no run on $SHA, which changes main.go"
+
+# A run started on a branch, such as a manual rebuild from main, has no tag
+# push to set apart: the branch's own push run of the commit decides.
+new_case
+stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs main:success)"
+REF_NAME=main REF_TYPE=branch WAIT=0 run_case "a run on a branch reads that branch's push run" 0 "concluded success on $SHA"
+
+new_case
+stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs main:failure)"
+REF_NAME=main REF_TYPE=branch WAIT=0 run_case "a run on a branch whose push run failed refuses" 1 "concluded 'failure'"
 
 new_case
 stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs main:failure)"
