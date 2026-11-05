@@ -1,0 +1,24 @@
+name: ci-gate bump
+
+# Once a day, move the go.mod pin of latere.ai/x/ci-gate to its latest
+# release when this repository's whole bar passes on it, and run the per-push
+# gate (gate.yml) on that commit; when the bar fails, open an issue for the
+# version instead. It calls this repository's own ci-gate-bump.yml from the
+# same commit, the one every consumer calls at @v1.
+#
+# The minute is this repository's own, so the repositories sharing a runner
+# do not start together.
+
+on:
+  schedule:
+    - cron: "57 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  actions: write
+
+jobs:
+  bump:
+    uses: ./.github/workflows/ci-gate-bump.yml
