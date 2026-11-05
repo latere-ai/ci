@@ -474,6 +474,15 @@ else
 fi
 
 new_workflows "$TMP/r"
+printf 'name: ci\non:\n  workflow_dispatch:\njobs:\n  gate:\n    uses: ./.github/workflows/lateregate.yml\n' > "$TMP/r/.github/workflows/ci.yml"
+run_step "$DISPATCH_SCRIPT" "$TMP/r" BRANCH=main
+if [ "$(status)" = 0 ] && grep -q 'actions/workflows/ci.yml/dispatches' "$TMP/calls"; then
+    pass "a caller of the repository's own copy of the pipeline is found"
+else
+    fail "status=$(status) calls=$(cat "$TMP/calls"); log: $(cat "$TMP/log")"
+fi
+
+new_workflows "$TMP/r"
 printf '# uses: latere-ai/ci/.github/workflows/lateregate.yml@v1\nname: none\non: push\n' > "$TMP/r/.github/workflows/note.yml"
 run_step "$DISPATCH_SCRIPT" "$TMP/r" BRANCH=main
 if [ "$(status)" = 1 ] && [ ! -s "$TMP/calls" ] && grep -q 'expected one workflow calling lateregate.yml under .github/workflows, found: none' "$TMP/log"; then

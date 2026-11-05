@@ -1,0 +1,28 @@
+name: ci
+
+# The bar lives in latere-ai/ci-gate, pinned in go.mod, and the shared
+# workflow runs it. What this repository decides is in .lateregate.yaml.
+# `lateregate init` writes this file, the same in every repository but this
+# one: it calls its own copy of the shared workflow, so a change to the gate
+# is tested by the commit that makes it.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A newer push to the same ref supersedes this run: its commit carries every
+# change this one would verify.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+# actions: read lets the gate find the last commit whose CI passed, which it
+# measures the change from.
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  gate:
+    uses: ./.github/workflows/lateregate.yml
