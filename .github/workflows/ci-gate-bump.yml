@@ -329,9 +329,8 @@ jobs:
           # repository to exactly one. `lateregate release` refuses to cut
           # while it cannot read green CI, so the new commit gets its run.
           # Only a `uses:` line counts: a header comment or an example that
-          # names the pipeline is not a caller. latere-ai/ci itself calls its own
-          # copy by path.
-          callers=$(grep -lE '^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]*(latere-ai/ci/\.github/workflows/lateregate\.yml@v1|\./\.github/workflows/lateregate\.yml)([[:space:]]|$)' .github/workflows/*.yml .github/workflows/*.yaml 2>/dev/null || true)
+          # names the pipeline is not a caller.
+          callers=$(grep -lE '^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]*latere-ai/ci/\.github/workflows/lateregate\.yml@v1' .github/workflows/*.yml .github/workflows/*.yaml 2>/dev/null || true)
           if [ "$(printf '%s' "$callers" | grep -c .)" -ne 1 ]; then
             echo "::error::expected one workflow calling lateregate.yml under .github/workflows, found: ${callers:-none}"
             exit 1

@@ -10,13 +10,6 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
-### Fixed
-
-- `ci-gate-bump.yml` finds a per-push caller that calls the repository's own
-  copy, `uses: ./.github/workflows/lateregate.yml`, as it finds one that calls
-  `latere-ai/ci/.github/workflows/lateregate.yml@v1`. latere-ai/ci is the one
-  repository that calls its own copy.
-
 ## v1.33.0 - 2026-11-05
 
 ### Changed

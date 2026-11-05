@@ -2,9 +2,7 @@ name: ci
 
 # The bar lives in latere-ai/ci-gate, pinned in go.mod, and the shared
 # workflow runs it. What this repository decides is in .lateregate.yaml.
-# `lateregate init` writes this file, the same in every repository but this
-# one: it calls its own copy of the shared workflow, so a change to the gate
-# is tested by the commit that makes it.
+# `lateregate init` writes this file, the same in every repository.
 on:
   push:
     branches: [main]
@@ -25,4 +23,4 @@ permissions:
 
 jobs:
   gate:
-    uses: ./.github/workflows/lateregate.yml
+    uses: latere-ai/ci/.github/workflows/lateregate.yml@v1
