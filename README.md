@@ -431,6 +431,7 @@ pipeline can `kubectl set image` without reading the manifests.
 | `namespace` | required | the Kubernetes namespace |
 | `url` | required | the public production URL; the smoke's `BASE_URL` |
 | `title` | required | the release title prefix: `Lux` gives `Lux v1.2.3` |
+| `platforms` | `linux/amd64` | the platform the image is built for, which is the production cluster's, whatever the runner is; `split` mode takes exactly one `linux/<arch>` entry, since the binary is compiled on the runner for it |
 | `build_mode` | `split` | `split` or `dockerfile`; see below |
 | `has_frontend` | `true` | `split` only: build the frontend and pin the served asset hash |
 | `frontend_dir` | `frontend` | the frontend directory |
@@ -956,9 +957,12 @@ changes.
   that fans out wider than the runner's slots serializes. A repository
   that releases often, or fans out wide, is better off on hosted runners.
 - **The runner must already have what the pipeline expects.** The machine
-  ships docker, git, jq and curl. `service-release.yml` fetches kubectl
-  and gh at `kubectl_version` and `gh_version`, checksum-verified, when
-  they are missing, and sets up Node beside Bun.
+  ships docker, git, jq and curl, and may be x64 or arm64. `service-release.yml`
+  fetches kubectl and gh at `kubectl_version` and `gh_version`,
+  checksum-verified, when they are missing, and sets up Node beside Bun;
+  every tool it fetches is the build for the runner's own architecture.
+  The image is built for `platforms` (default `linux/amd64`, the
+  cluster's) whatever the runner is.
 - **The secrets still have to reach it.** `runs_on` changes where a job
   runs, not what it can read: the caller keeps `secrets: inherit` (or its
   explicit mapping), and the runner needs network reach to the cluster and

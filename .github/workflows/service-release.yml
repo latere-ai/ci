@@ -77,6 +77,11 @@ on:
         required: false
         type: string
         default: ""
+      platforms:
+        description: "The platform the image is built for, which is the production cluster's, whatever the runner's architecture. One platform in split mode, since the binary is compiled on the runner for it: exactly one linux/<arch> entry, for example linux/amd64 or linux/arm64."
+        required: false
+        type: string
+        default: "linux/amd64"
       build_mode:
         description: "split = build frontend + Go binary in CI, then Dockerfile.ci packages the prebuilt binary (asset-hash pinned smoke). dockerfile = one Dockerfile builds everything (no asset pin; smoke proves liveness only)."
         required: false
@@ -364,8 +369,17 @@ jobs:
         if: ${{ inputs.build_mode == 'split' }}
         env:
           CGO_ENABLED: "0"
+          PLATFORMS: ${{ inputs.platforms }}
         run: |
           set -euo pipefail
+          # The binary goes into the image, so it is built for the image's
+          # platform, not the runner's.
+          if ! [[ "$PLATFORMS" =~ ^linux/[a-z0-9]+$ ]]; then
+            echo "::error::split mode builds one Linux platform (linux/<arch>), got '$PLATFORMS'"
+            exit 1
+          fi
+          GOARCH="${PLATFORMS#linux/}"
+          export GOOS=linux GOARCH
           go build -trimpath \
             -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" \
             -o "out/${{ inputs.service }}" "${{ inputs.main_package }}"
@@ -399,6 +413,7 @@ jobs:
         with:
           context: .
           file: ${{ inputs.dockerfile }}
+          platforms: ${{ inputs.platforms }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

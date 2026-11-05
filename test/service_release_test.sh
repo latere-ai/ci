@@ -78,10 +78,49 @@ if grep -qF 'bash "$GITHUB_ACTION_PATH/../ensure-gh/run.sh"' "$REPO_ROOT/actions
 else
     fail "the publish step does not bring its own gh"
 fi
-if grep -E 'dl.k8s.io|cli/cli/releases' "$WORKFLOW" | grep -q 'latest'; then
+if grep -E 'dl.k8s.io|cli/cli/releases' "$WORKFLOW" "$REPO_ROOT"/actions/ensure-*/run.sh | grep -q 'latest'; then
     fail "a tool is fetched at latest"
 else
     pass "no tool is fetched at latest"
+fi
+
+# The image is built for the cluster's platform, not the runner's: the input
+# defaults to linux/amd64 and reaches the build-push step, and the split
+# build compiles the binary for it. It takes one linux/<arch> entry; a list,
+# another OS or a variant fails the step naming the value.
+if grep -A4 '^      platforms:' "$WORKFLOW" | grep -qF 'default: "linux/amd64"' \
+    && grep -A8 'name: Build and push' "$WORKFLOW" | grep -qF 'platforms: ${{ inputs.platforms }}'; then
+    pass "platforms defaults to linux/amd64 and reaches the image build"
+else
+    fail "platforms is not declared with a linux/amd64 default or not passed to the image build"
+fi
+STUB=$(mktemp -d)
+trap 'rm -rf "$STUB"' EXIT
+printf '#!/bin/sh\necho "go $* GOOS=$GOOS GOARCH=$GOARCH CGO=$CGO_ENABLED"\n' > "$STUB/go"
+chmod +x "$STUB/go"
+awk '/name: Build shippable binary/{f=1} f&&/run: \|/{r=1;next} r&&/^$/{exit} r{sub(/^          /,"");print}' "$WORKFLOW" \
+    | sed 's/\${{ inputs.service }}/svc/; s/\${{ inputs.main_package }}/./' > "$STUB/build.sh"
+for p in linux/amd64:amd64 linux/arm64:arm64; do
+    out=$(PATH="$STUB:$PATH" PLATFORMS=${p%%:*} CGO_ENABLED=0 GITHUB_REF_NAME=v1 bash "$STUB/build.sh" 2>&1)
+    if [ $? -eq 0 ] && printf '%s' "$out" | grep -qF "GOOS=linux GOARCH=${p##*:} CGO=0"; then
+        pass "split mode compiles for ${p%%:*}"
+    else
+        fail "split mode did not compile for ${p%%:*}: $out"
+    fi
+done
+for p in "linux/amd64,linux/arm64" "darwin/arm64" "linux/arm/v7" "amd64" ""; do
+    out=$(PATH="$STUB:$PATH" PLATFORMS=$p CGO_ENABLED=0 GITHUB_REF_NAME=v1 bash "$STUB/build.sh" 2>&1)
+    if [ $? -ne 0 ] && printf '%s' "$out" | grep -qF "::error::split mode builds one Linux platform" \
+        && printf '%s' "$out" | grep -qF "'$p'" && ! printf '%s' "$out" | grep -qF "go build"; then
+        pass "split mode rejects platforms '$p'"
+    else
+        fail "split mode accepted platforms '$p': $out"
+    fi
+done
+if grep -A6 'name: Build shippable binary' "$WORKFLOW" | grep -qF 'CGO_ENABLED: "0"'; then
+    pass "the split build stays pure Go"
+else
+    fail "the split build lost CGO_ENABLED=0"
 fi
 
 # A release is one job. On a busy self-hosted runner each job waits for a

@@ -10,6 +10,15 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Added
+
+- `service-release.yml` takes a `platforms` input, default `linux/amd64`:
+  the platform the image is built for. A release now ships an x64 image
+  from an arm64 runner as well as from an x64 one. Pass another value
+  to build for a different cluster; in `split` mode it must be exactly one
+  `linux/<arch>` entry (for example `linux/arm64`), which is also what the
+  binary is compiled for, and anything else fails the build step.
+
 ### Changed
 
 - The tools the shared steps fetch when the runner has none (`gh`,
