@@ -50,6 +50,8 @@ step_script() {
     ' "$WORKFLOW"
 }
 
+MODULE_SCRIPT=$(step_script "Find the gate module")
+INSTALL_SCRIPT=$(step_script "Install the browsers a frontend's tests drive")
 PLAN_SCRIPT=$(step_script "Read the plan")
 LIST_SCRIPT=$(step_script "List the running gates")
 LOOP_SCRIPT=$(step_script "Run the gates")
@@ -60,24 +62,36 @@ trap 'rm -rf "$STUB"' EXIT
 # every step; the steps read both under set -u.
 export GATE_MODULE=. GITHUB_WORKSPACE=/workspace
 
-# The stub go answers `go tool lateregate list -json` with $PLAN, records
-# every other gate it is asked to run with the TMPDIR it saw, and fails the
-# gates named in $FAIL.
+# The stub go answers `go tool lateregate list -json` with $PLAN and logs the
+# arguments it was given to $LISTLOG. It answers `base` as $BASE says: a
+# commit, "none" for no base with the reason on stderr (exit 0), or "old" for
+# a lateregate that does not have the command. Every other gate it is asked to
+# run is recorded with the TMPDIR it saw, and the gates named in $FAIL fail.
 cat > "$STUB/go" <<'EOF'
 #!/usr/bin/env bash
 # go -C <gate module> tool lateregate <gate> -C <root>
 [ "$1" = -C ] && shift 2
 shift 2
-if [ "$1" = list ]; then printf '%s\n' "$PLAN"; exit 0; fi
+if [ "$1" = list ]; then echo "$*" >> "${LISTLOG:-/dev/null}"; printf '%s\n' "$PLAN"; exit 0; fi
+if [ "$1" = base ]; then
+    case "${BASE:-old}" in
+    old) echo 'lateregate: unknown command "base"' >&2; exit 2 ;;
+    none) echo 'no green run of this workflow on the default branch' >&2; exit 0 ;;
+    *) echo "$BASE"; exit 0 ;;
+    esac
+fi
 echo "$1 TMPDIR=${TMPDIR:-}" >> "$CALLS"
 case " $FAIL " in *" $1 "*) exit 1 ;; esac
 exit 0
 EOF
 chmod +x "$STUB/go"
 
+# The environment both plan steps read; BROWSER is the superseded
+# frontend_browser_package input, and BASE picks the stub's base answer.
 plan_outputs() { # plan hosted runs_on test_os
     out=$(mktemp)
-    PLAN="$1" HOSTED="$2" RUNS_ON="$3" TEST_OS="$4" GITHUB_OUTPUT="$out" PATH="$STUB:$PATH" \
+    PLAN="$1" HOSTED="$2" RUNS_ON="$3" TEST_OS="$4" BROWSER="${BROWSER:-}" GITHUB_OUTPUT="$out" \
+        GITHUB_STEP_SUMMARY=/dev/null GITHUB_TOKEN=t PATH="$STUB:$PATH" \
         bash -e -c "$PLAN_SCRIPT" >/dev/null
     cat "$out"; rm -f "$out"
 }
@@ -165,7 +179,8 @@ echo "gate list step, self-hosted runner"
 list_case() {
     name="$1"; plan="$2"; want="$3"
     out=$(mktemp)
-    log=$(PLAN="$plan" GITHUB_OUTPUT="$out" PATH="$STUB:$PATH" bash -e -c "$LIST_SCRIPT" 2>&1)
+    log=$(PLAN="$plan" RUNS_ON="${RUNS_ON:-linux-vm}" PROBE_RESULT="${PROBE_RESULT:-success}" BROWSER="${BROWSER:-}" \
+        GITHUB_OUTPUT="$out" GITHUB_STEP_SUMMARY=/dev/null GITHUB_TOKEN=t PATH="$STUB:$PATH" bash -e -c "$LIST_SCRIPT" 2>&1)
     status=$?
     got=$(sed -n 's/^gates=//p' "$out"); rm -f "$out"
     if [ "$status" -eq 0 ] && [ "$got" = "$want" ]; then
@@ -412,7 +427,7 @@ else
     fail "the passed job must set RUN_GATES: \${{ !($HOSTED_EXPR) }}"
 fi
 
-for target in 'uses: actions/checkout@' 'uses: actions/setup-go@' '- name: List the running gates'; do
+for target in 'uses: actions/checkout@' '- name: Find the gate module' 'uses: actions/setup-go@' '- name: List the running gates'; do
     if job_step "$passed_block" "$target" | grep -qxF "        if: \${{ env.RUN_GATES == 'true' }}"; then
         pass "passed: $target runs only where the job runs the gates"
     else
@@ -438,19 +453,21 @@ fi
 # tools exist before the gates and the result check reads them all.
 order=$(printf '%s\n' "$passed_block" | awk '
     /uses: actions\/checkout@/ { print "checkout" }
+    /- name: Find the gate module$/ { print "module" }
     /uses: actions\/setup-go@/ { print "setup-go" }
     /- name: List the running gates$/ { print "list" }
     /uses: actions\/setup-node@/ { print "setup-node" }
     /uses: oven-sh\/setup-bun@/ { print "setup-bun" }
+    /- name: Install the browsers/ { print "browsers" }
     /tool lateregate enum-typescript-prepare -C/ { print "prepare" }
     /- name: Run the gates$/ { print "gates" }
     /uses: actions\/upload-artifact@/ { print "upload" }
     /- name: Check every job.s result$/ { print "check" }
 ' | tr '\n' ' ')
-if [ "$order" = "checkout setup-go list setup-node setup-bun prepare gates upload check " ]; then
+if [ "$order" = "checkout module setup-go list setup-node setup-bun browsers prepare gates upload check " ]; then
     pass "the passed job sets up, lists, prepares, runs the gates, keeps coverage and checks, in that order"
 else
-    fail "the passed job's steps are [$order], want checkout setup-go list setup-node setup-bun prepare gates upload check"
+    fail "the passed job's steps are [$order], want checkout module setup-go list setup-node setup-bun browsers prepare gates upload check"
 fi
 
 upload=$(job_step "$passed_block" 'uses: actions/upload-artifact@')
@@ -483,7 +500,11 @@ for expr in \
     'go -C "$GATE_MODULE" tool lateregate contract -C "$GITHUB_WORKSPACE"' \
     'go -C "$GATE_MODULE" tool lateregate ${{ matrix.gate }} -C "$GITHUB_WORKSPACE"' \
     'go -C "$GATE_MODULE" tool lateregate test -C "$GITHUB_WORKSPACE"' \
-    "GATE_MODULE: \${{ inputs.gate_module || '.' }}"
+    'GATE_INPUT: ${{ inputs.gate_module }}' \
+    'echo "GATE_MODULE=$module" >> "$GITHUB_ENV"' \
+    'base: ${{ steps.plan.outputs.base }}' \
+    'gate_needs: ${{ steps.plan.outputs.gate_needs }}' \
+    'GITHUB_TOKEN: ${{ github.token }}'
 do
     if grep -qF -- "$expr" "$WORKFLOW"; then
         pass "workflow carries: $expr"
@@ -492,10 +513,10 @@ do
     fi
 done
 
-if [ -n "$PLAN_SCRIPT" ] && [ -n "$LIST_SCRIPT" ] && [ -n "$LOOP_SCRIPT" ] && [ -n "$PASSED_SCRIPT" ]; then
+if [ -n "$MODULE_SCRIPT" ] && [ -n "$INSTALL_SCRIPT" ] && [ -n "$PLAN_SCRIPT" ] && [ -n "$LIST_SCRIPT" ] && [ -n "$LOOP_SCRIPT" ] && [ -n "$PASSED_SCRIPT" ]; then
     pass "every step under test was found in the workflow"
 else
-    fail "a step under test was not found in the workflow (plan=${#PLAN_SCRIPT} list=${#LIST_SCRIPT} loop=${#LOOP_SCRIPT} passed=${#PASSED_SCRIPT})"
+    fail "a step under test was not found in the workflow (module=${#MODULE_SCRIPT} install=${#INSTALL_SCRIPT} plan=${#PLAN_SCRIPT} list=${#LIST_SCRIPT} loop=${#LOOP_SCRIPT} passed=${#PASSED_SCRIPT})"
 fi
 
 # Both plan steps print the plan the same way, so the reason a gate does not
@@ -541,19 +562,22 @@ fi
 # an adjacent step would still install Node/Bun for every Go gate. Both jobs
 # that can run the TypeScript enum or frontend gate set up the runtimes for
 # either, and prepare enum projects only for the enum gate.
-check_enum_setup() { # job runtime-condition prepare-condition run-step
+check_enum_setup() { # job node-condition bun-condition prepare-condition run-step
     block=$(job_block "$1")
-    for target in 'uses: actions/setup-node@' 'uses: oven-sh/setup-bun@'; do
-        if job_step "$block" "$target" | grep -qxF "        if: \${{ $2 }}"; then
-            pass "$1: $target runs only for the TypeScript enum and frontend gates"
-        else
-            fail "$1: $target must be conditional on $2"
-        fi
-    done
-    if job_step "$block" 'run: go -C "$GATE_MODULE" tool lateregate enum-typescript-prepare -C "$GITHUB_WORKSPACE"' | grep -qxF "        if: \${{ $3 }}"; then
+    if job_step "$block" 'uses: actions/setup-node@' | grep -qxF "        if: \${{ $2 }}"; then
+        pass "$1: Node is installed only where the plan needs it"
+    else
+        fail "$1: setup-node must be conditional on $2"
+    fi
+    if job_step "$block" 'uses: oven-sh/setup-bun@' | grep -qxF "        if: \${{ $3 }}"; then
+        pass "$1: Bun is installed only where the plan needs it"
+    else
+        fail "$1: setup-bun must be conditional on $3"
+    fi
+    if job_step "$block" 'run: go -C "$GATE_MODULE" tool lateregate enum-typescript-prepare -C "$GITHUB_WORKSPACE"' | grep -qxF "        if: \${{ $4 }}"; then
         pass "$1: enum projects are prepared only for the TypeScript enum gate"
     else
-        fail "$1: enum-typescript-prepare must be conditional on $3"
+        fail "$1: enum-typescript-prepare must be conditional on $4"
     fi
     if job_step "$block" 'uses: actions/setup-node@' | grep -qxE '          node-version: "[0-9]+"'; then
         pass "$1: the TypeScript enum gate pins a Node major"
@@ -570,7 +594,7 @@ check_enum_setup() { # job runtime-condition prepare-condition run-step
     else
         fail "$1: Bun must install under HOME: \${{ runner.temp }}"
     fi
-    if printf '%s\n' "$block" | awk -v check="$4" '
+    if printf '%s\n' "$block" | awk -v check="$5" '
         /uses: actions\/setup-node@/ { node = NR }
         /uses: oven-sh\/setup-bun@/ { bun = NR }
         /tool lateregate enum-typescript-prepare -C/ { prepare = NR }
@@ -591,11 +615,264 @@ for target in 'uses: actions/setup-node@' 'uses: oven-sh/setup-bun@' 'run: go -C
         fail "$target appears $count times, want 2"
     fi
 done
-check_enum_setup gate "matrix.gate == 'enum-typescript' || matrix.gate == 'frontend'" \
+GATE_NEEDS="fromJSON(needs.probe.outputs.gate_needs)[matrix.gate] || fromJSON('[]')"
+check_enum_setup gate "contains($GATE_NEEDS, 'node')" "contains($GATE_NEEDS, 'bun')" \
     "matrix.gate == 'enum-typescript'" 'tool lateregate ${{ matrix.gate }} -C'
-check_enum_setup passed \
-    "contains(fromJSON(steps.plan.outputs.gates || '[]'), 'enum-typescript') || contains(fromJSON(steps.plan.outputs.gates || '[]'), 'frontend')" \
+PASSED_NEEDS="fromJSON(steps.plan.outputs.needs || '[]')"
+check_enum_setup passed "contains($PASSED_NEEDS, 'node')" "contains($PASSED_NEEDS, 'bun')" \
     "contains(fromJSON(steps.plan.outputs.gates || '[]'), 'enum-typescript')" '- name: Run the gates'
+
+# ---------------------------------------------------------------------------
+# The base of the plan. Both steps that read the plan resolve it once with
+# `lateregate base -since green`. A pin without the command, a failure, or an
+# empty answer lists the whole tree and says why; a commit is passed to list
+# as -since, and the base is in the log and the step summary.
+# ---------------------------------------------------------------------------
+echo "plan base"
+
+BASE_PLAN='[{"name":"fmt-check","status":"run"},{"name":"test","status":"run"}]'
+
+base_case() { # name script base want-list-args want-log-fragment
+    name="$1"; script="$2"; base="$3"; want_args="$4"; want_log="$5"
+    listlog=$(mktemp); out=$(mktemp); summary=$(mktemp)
+    log=$(PLAN="$BASE_PLAN" BASE="$base" LISTLOG="$listlog" HOSTED=true RUNS_ON=ubuntu-latest TEST_OS="$UB" \
+        PROBE_RESULT=success BROWSER= GITHUB_OUTPUT="$out" GITHUB_STEP_SUMMARY="$summary" GITHUB_TOKEN=t \
+        PATH="$STUB:$PATH" bash -e -c "$script" 2>&1)
+    status=$?
+    got_args=$(cat "$listlog"); got_base=$(sed -n 's/^base=//p' "$out"); got_summary=$(cat "$summary")
+    rm -f "$listlog" "$out" "$summary"
+    want_base=""; case "$base" in old | none) ;; *) want_base=$base ;; esac
+    if [ "$status" -eq 0 ] && [ "$got_args" = "$want_args" ] && [ "$got_base" = "$want_base" ] \
+        && printf '%s\n' "$log" | grep -qF -- "$want_log" && printf '%s\n' "$got_summary" | grep -qF -- "$want_log"; then
+        pass "$name"
+    else
+        fail "$name: status=$status list args=[$got_args] base=[$got_base], want args=[$want_args] base=[$want_base] log containing [$want_log]; log: $log; summary: $got_summary"
+    fi
+}
+
+for which in plan list; do
+    if [ "$which" = plan ]; then script=$PLAN_SCRIPT; else script=$LIST_SCRIPT; fi
+    base_case "$which: a lateregate without the base command lists the whole tree and says so" "$script" old \
+        "list -json -C /workspace" 'lateregate base failed: lateregate: unknown command "base"'
+    base_case "$which: no base lists the whole tree with the reason base gave" "$script" none \
+        "list -json -C /workspace" "The whole tree is checked: no green run of this workflow on the default branch"
+    base_case "$which: a base is passed to list as -since and named" "$script" 0123abcd \
+        "list -json -since 0123abcd -C /workspace" "last green commit 0123abcd"
+done
+
+# Without GITHUB_STEP_SUMMARY writable the plan still reads.
+if out=$(PLAN="$BASE_PLAN" BASE=none HOSTED=true RUNS_ON=ubuntu-latest TEST_OS="$UB" BROWSER= GITHUB_OUTPUT=/dev/null \
+    GITHUB_STEP_SUMMARY=/nonexistent/summary GITHUB_TOKEN=t PATH="$STUB:$PATH" bash -e -c "$PLAN_SCRIPT" 2>&1) \
+    && printf '%s\n' "$out" | grep -qF '::warning::cannot write the step summary'; then
+    pass "an unwritable step summary warns and the plan still reads"
+else
+    fail "an unwritable step summary must warn, not stop the plan: $out"
+fi
+
+# ---------------------------------------------------------------------------
+# What a gate installs comes from the plan's needs. A pin that predates the
+# field gets today's rule: Node and Bun for enum-typescript and frontend, and
+# the browser package the caller names for frontend.
+# ---------------------------------------------------------------------------
+echo "needs"
+
+needs_case() { # name plan browser want-gate-needs
+    name="$1"; plan="$2"; browser="$3"; want="$4"
+    got=$(BROWSER="$browser" plan_outputs "$plan" true ubuntu-latest "$UB" | sed -n 's/^gate_needs=//p')
+    if [ "$got" = "$want" ]; then pass "$name"; else fail "$name: gate_needs=$got, want $want"; fi
+}
+
+needs_case "needs in the plan are handed to each gate by name" \
+    '[{"name":"frontend","status":"run","needs":["node","bun","chromium:web"]},{"name":"enum-typescript","status":"run","needs":["node","bun"]},{"name":"lint","status":"run"}]' \
+    "" '{"frontend":["node","bun","chromium:web"],"enum-typescript":["node","bun"],"lint":[]}'
+
+needs_case "a plan with needs ignores the superseded browser input" \
+    '[{"name":"frontend","status":"run","needs":["node","bun"]},{"name":"lint","status":"run"}]' \
+    "web" '{"frontend":["node","bun"],"lint":[]}'
+
+needs_case "a skipped gate hands out nothing" \
+    '[{"name":"frontend","status":"skip","reason":"unchanged","needs":["node","bun"]},{"name":"lint","status":"run"}]' \
+    "" '{"lint":[]}'
+
+needs_case "without the field, enum-typescript and frontend get node and bun" \
+    '[{"name":"frontend","status":"run"},{"name":"enum-typescript","status":"run"},{"name":"lint","status":"run"}]' \
+    "" '{"frontend":["node","bun"],"enum-typescript":["node","bun"],"lint":[]}'
+
+needs_case "without the field, the browser package input gives frontend its browser" \
+    '[{"name":"frontend","status":"run"},{"name":"enum-typescript","status":"run"}]' \
+    "app/web" '{"frontend":["node","bun","chromium:app/web"],"enum-typescript":["node","bun"]}'
+
+needs_case "without the field and without a frontend, nothing is installed" \
+    '[{"name":"lint","status":"run"},{"name":"suite","status":"run"}]' \
+    "app/web" '{"lint":[],"suite":[]}'
+
+list_needs_case() { # name plan browser want-needs
+    name="$1"; plan="$2"; browser="$3"; want="$4"
+    out=$(mktemp)
+    BROWSER="$browser" PLAN="$plan" RUNS_ON=linux-vm PROBE_RESULT=skipped BASE=none GITHUB_OUTPUT="$out" \
+        GITHUB_STEP_SUMMARY=/dev/null GITHUB_TOKEN=t PATH="$STUB:$PATH" bash -e -c "$LIST_SCRIPT" >/dev/null 2>&1
+    got=$(sed -n 's/^needs=//p' "$out"); rm -f "$out"
+    if [ "$got" = "$want" ]; then pass "$name"; else fail "$name: needs=$got, want $want"; fi
+}
+
+list_needs_case "self-hosted: the job installs the union of what the running gates need" \
+    '[{"name":"frontend","status":"run","needs":["node","bun","chromium:web"]},{"name":"enum-typescript","status":"run","needs":["node","bun"]},{"name":"lint","status":"run"},{"name":"vuln","status":"skip","needs":["x"]}]' \
+    "" '["bun","chromium:web","node"]'
+list_needs_case "self-hosted: a pin without the field gets node, bun and the named browser" \
+    '[{"name":"frontend","status":"run"},{"name":"lint","status":"run"}]' \
+    "web" '["bun","chromium:web","node"]'
+list_needs_case "self-hosted: no frontend gate installs nothing" \
+    '[{"name":"lint","status":"run"}]' "web" '[]'
+
+# The install step runs bun in each named directory, keeps going after a
+# failure, and fails the step so the caller sees it, with the gate failing on
+# its own test.
+mkdir -p "$STUB/ws/web" "$STUB/ws/app/e2e"
+cat > "$STUB/bun" <<'EOF'
+#!/usr/bin/env bash
+echo "bun $* in ${PWD#"$WS"/}" >> "$CALLS"
+[ -n "$BAD" ] && case "$PWD" in *"$BAD") exit 1 ;; esac
+exit 0
+EOF
+cat > "$STUB/bunx" <<'EOF'
+#!/usr/bin/env bash
+echo "bunx $* in ${PWD#"$WS"/}" >> "$CALLS"
+EOF
+chmod +x "$STUB/bun" "$STUB/bunx"
+
+install_case() { # name needs bad want-calls want-status
+    name="$1"; needs="$2"; bad="$3"; want_calls="$4"; want_status="$5"
+    calls=$(mktemp)
+    NEEDS="$needs" BAD="$bad" WS="$STUB/ws" CALLS="$calls" GITHUB_WORKSPACE="$STUB/ws" PATH="$STUB:$PATH" \
+        bash -e -c "$INSTALL_SCRIPT" >/dev/null 2>&1
+    status=$?
+    got=$(tr '\n' ';' < "$calls"); rm -f "$calls"
+    if [ "$got" = "$want_calls" ] && [ "$status" -eq "$want_status" ]; then
+        pass "$name"
+    else
+        fail "$name: calls=$got status=$status, want calls=$want_calls status=$want_status"
+    fi
+}
+
+install_case "each chromium need installs its package, then the browser" \
+    '["node","bun","chromium:web","chromium:app/e2e"]' "" \
+    "bun install --frozen-lockfile in web;bunx playwright install --with-deps chromium in web;bun install --frozen-lockfile in app/e2e;bunx playwright install --with-deps chromium in app/e2e;" 0
+install_case "needs with no browser install nothing" '["node","bun"]' "" "" 0
+install_case "a gate that needs nothing installs nothing" '[]' "" "" 0
+install_case "a gate with no needs entry installs nothing" 'null' "" "" 0
+install_case "a failed install is reported, skips that browser, and the others still install" \
+    '["chromium:web","chromium:app/e2e"]' "web" \
+    "bun install --frozen-lockfile in web;bun install --frozen-lockfile in app/e2e;bunx playwright install --with-deps chromium in app/e2e;" 1
+
+# ---------------------------------------------------------------------------
+# The systems test runs on come from the test entry's os, else test_os.
+# ---------------------------------------------------------------------------
+echo "test systems"
+
+OS_PLAN_SUITE='[{"name":"test","status":"folded","into":"suite","os":["ubuntu-latest","macos-latest"]},{"name":"suite","status":"run"}]'
+run_case "os in the plan beats test_os; the matrix keeps the other systems" \
+    "$OS_PLAN_SUITE" true ubuntu-latest '["ubuntu-latest","windows-latest"]' '["suite"]' '["macos-latest"]'
+run_case "os in the plan runs a plain test on each system when there is no suite" \
+    '[{"name":"test","status":"run","os":["ubuntu-latest","macos-latest"]}]' \
+    true ubuntu-latest "$UB" '[]' '["ubuntu-latest","macos-latest"]'
+run_case "an empty os in the plan falls back to test_os" \
+    '[{"name":"test","status":"run","os":[]}]' \
+    true ubuntu-latest '["macos-latest"]' '[]' '["macos-latest"]'
+run_case "no os in the plan falls back to test_os" \
+    '[{"name":"test","status":"run"}]' \
+    true ubuntu-latest '["ubuntu-latest","macos-latest"]' '[]' '["ubuntu-latest","macos-latest"]'
+run_case "self-hosted: os in the plan gives the matrix its other systems" \
+    "$OS_PLAN_SUITE" false linux-vm '["linux-vm"]' '[]' '["ubuntu-latest","macos-latest"]'
+
+os_guard_case() { # name plan probe want-status
+    name="$1"; plan="$2"; probe="$3"; want="$4"
+    out=$(mktemp)
+    log=$(PLAN="$plan" RUNS_ON=linux-vm PROBE_RESULT="$probe" BASE=none BROWSER= GITHUB_OUTPUT="$out" \
+        GITHUB_STEP_SUMMARY=/dev/null GITHUB_TOKEN=t PATH="$STUB:$PATH" bash -e -c "$LIST_SCRIPT" 2>&1)
+    status=$?; rm -f "$out"
+    if [ "$status" -eq "$want" ]; then pass "$name"; else fail "$name: status=$status, want $want; $log"; fi
+}
+os_guard_case "self-hosted: a plan naming another system fails when the probe did not run for it" \
+    '[{"name":"test","status":"run","os":["linux-vm","macos-latest"]}]' skipped 1
+os_guard_case "self-hosted: the same plan passes when the probe ran" \
+    '[{"name":"test","status":"run","os":["linux-vm","macos-latest"]}]' success 0
+os_guard_case "self-hosted: a waived test needs no other system" \
+    '[{"name":"test","status":"waived","reason":"r","until":"2026-12-01","os":["macos-latest"]}]' skipped 0
+os_guard_case "self-hosted: a plan naming only runs_on passes" \
+    '[{"name":"test","status":"run","os":["linux-vm"]}]' skipped 0
+
+# ---------------------------------------------------------------------------
+# The module that pins the tool: the input, else the root go.mod when it has
+# a tool line for lateregate, else the one tracked go.mod that does.
+# ---------------------------------------------------------------------------
+echo "gate module"
+
+TOOL=latere.ai/x/ci-gate/cmd/lateregate
+module_case() { # name input want-module want-status files...
+    name="$1"; input="$2"; want="$3"; want_status="$4"; shift 4
+    repo=$(mktemp -d); env_file=$(mktemp)
+    git -C "$repo" init -q
+    while [ $# -gt 0 ]; do
+        mkdir -p "$repo/$(dirname "$1")"
+        printf '%b' "$2" > "$repo/$1"
+        git -C "$repo" add "$1"
+        shift 2
+    done
+    out=$(GATE_INPUT="$input" GITHUB_WORKSPACE="$repo" GITHUB_ENV="$env_file" bash -e -c "$MODULE_SCRIPT" 2>&1)
+    status=$?
+    got=$(sed -n 's/^GATE_MODULE=//p' "$env_file")
+    rm -rf "$repo" "$env_file"
+    if [ "$status" -eq "$want_status" ] && [ "$got" = "$want" ]; then
+        pass "$name"
+    else
+        fail "$name: status=$status module=[$got], want status=$want_status module=[$want]; $out"
+    fi
+}
+
+NO_TOOL="module example.com/m\n\ngo 1.27\n"
+module_case "root: a single-line tool directive" "" "." 0 \
+    go.mod "module m\n\ntool $TOOL\n"
+module_case "root: a tool block" "" "." 0 \
+    go.mod "module m\n\ntool (\n\texample.com/x/other/cmd/x\n\t$TOOL\n)\n"
+module_case "root: a tool line beside other tools" "" "." 0 \
+    go.mod "module m\n\ntool example.com/other\ntool $TOOL\n"
+module_case "root wins over a nested module that also pins it" "" "." 0 \
+    go.mod "module m\ntool $TOOL\n" internal/gate/go.mod "module g\ntool $TOOL\n"
+module_case "nested: the one tracked go.mod with the tool line" "" "internal/gate" 0 \
+    go.mod "$NO_TOOL" internal/gate/go.mod "module g\n\ntool (\n\t$TOOL\n)\n" other/go.mod "$NO_TOOL"
+module_case "nested: no root go.mod at all" "" "tools/gate" 0 \
+    tools/gate/go.mod "module g\ntool $TOOL\n"
+module_case "a comment or a require is not a tool line" "" "." 0 \
+    go.mod "module m\n// tool $TOOL\nrequire $TOOL v1.0.0\n"
+module_case "a file merely named like go.mod is not a module" "" "." 0 \
+    go.mod "$NO_TOOL" mygo.mod "tool $TOOL\n"
+module_case "none: no go.mod pins the tool, so the root stays and the contract check says why" "" "." 0 \
+    go.mod "$NO_TOOL" sub/go.mod "$NO_TOOL"
+module_case "no go.mod at all stays on the root" "" "." 0 \
+    README.md "hi\n"
+module_case "several nested modules pin it: the run fails and names the input" "" "" 1 \
+    a/go.mod "module a\ntool $TOOL\n" b/go.mod "module b\ntool $TOOL\n"
+module_case "the input wins over a root pin" "internal/gate" "internal/gate" 0 \
+    go.mod "module m\ntool $TOOL\n"
+module_case "the input wins when nothing is detectable" "x/y" "x/y" 0 \
+    README.md "hi\n"
+
+# Every job finds the module in a step of its own before any lateregate call.
+for job in probe test gate contract passed; do
+    block=$(job_block "$job")
+    first_call=$(printf '%s\n' "$block" | grep -n 'go -C "$GATE_MODULE"' | head -1 | cut -d: -f1)
+    find_line=$(printf '%s\n' "$block" | grep -n -- '- name: Find the gate module' | cut -d: -f1)
+    if [ -n "$find_line" ] && [ -n "$first_call" ] && [ "$find_line" -lt "$first_call" ]; then
+        pass "$job finds the gate module before it runs lateregate"
+    else
+        fail "$job must find the gate module (line [$find_line]) before its first lateregate call (line [$first_call])"
+    fi
+done
+if grep -qE '^permissions:$' "$WORKFLOW" && awk '/^permissions:$/ { p = 1; next } p && /^[^ ]/ { exit } p' "$WORKFLOW" | grep -qxF '  actions: read'; then
+    pass "the workflow asks for actions: read so the plan can name the last green run"
+else
+    fail "the workflow permissions must include actions: read"
+fi
 
 if [ "$FAILURES" -gt 0 ]; then
     echo "$FAILURES failure(s)"

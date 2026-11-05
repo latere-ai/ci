@@ -17,6 +17,15 @@ name: lateregate
 # waived or inapplicable gate does not run, and its reason is in the plan's
 # log rather than a green step over nothing.
 #
+# The plan is measured from the last green commit: the job asks the binary
+# for that base (`lateregate base -since green`) and lists the plan from it,
+# so a push runs only the gates whose inputs changed. When the base cannot be
+# had, because the pin predates the command, no run was green, or the caller
+# grants no `actions: read`, the whole tree is checked and the log says why.
+# What a gate installs (Node, Bun, a browser) and which systems `test` runs on
+# also come from the plan, and the module that pins the tool is found by its
+# `tool` line, so a caller passes no inputs.
+#
 # There is no golangci-lint version input: the binary pins it. There is no
 # run_lint input: a repository that cannot lint waives `lint` in its
 # .lateregate.yaml with a reason and a date, and the plan reads that.
@@ -30,7 +39,7 @@ on:
         type: string
         default: "1.27"
       test_os:
-        description: "JSON array of runners for the test job. Empty means the runner runs_on resolves to: every service deploys on Linux, and macOS bills at ten times the Linux rate. A repository with darwin build tags or a macOS artifact lists macos-latest here; the suite already covers the runs_on runner."
+        description: "Superseded by `test.os` in .lateregate.yaml, which the plan carries; used only when the plan has no os. JSON array of runners for the test job. Empty means the runner runs_on resolves to: every service deploys on Linux, and macOS bills at ten times the Linux rate. A repository with darwin build tags or a macOS artifact lists macos-latest here; the suite already covers the runs_on runner."
         required: false
         type: string
         default: ""
@@ -40,24 +49,27 @@ on:
         type: string
         default: ${{ (github.event.repository.private || contains(fromJSON('["push","schedule","workflow_dispatch","release"]'), github.event_name)) && (vars.CI_RUNNER_PRIVATE || vars.CI_RUNNER_PUBLIC) || 'ubuntu-latest' }}
       gate_module:
-        description: "Directory of the Go module whose go.mod pins latere.ai/x/ci-gate as a tool, relative to the repository root. Empty is the root. A module that keeps the tool out of its consumers' module graph pins it in a nested module instead (managed-agents: internal/gate); lateregate runs from there and its gates still check the whole repository."
+        description: "Superseded by auto-detection, which finds the module whose go.mod has the tool line; a value here wins over it. Directory of the Go module whose go.mod pins latere.ai/x/ci-gate as a tool, relative to the repository root. A module that keeps the tool out of its consumers' module graph pins it in a nested module instead (managed-agents: internal/gate); lateregate runs from there and its gates still check the whole repository."
         required: false
         type: string
         default: ""
       frontend_browser_package:
-        description: "Directory of a Bun package whose tests drive Chromium. Before the frontend gate, the package is installed there and Playwright installs Chromium with its system libraries. Empty installs no browser."
+        description: "Superseded by `frontend.browser` in .lateregate.yaml, which the plan carries as a need; used only when the plan carries no needs. Directory of a Bun package whose tests drive Chromium. Before the frontend gate, the package is installed there and Playwright installs Chromium with its system libraries. Empty installs no browser."
         required: false
         type: string
         default: ""
 
+# actions: read lets the plan name the last green run. A caller that grants
+# only contents: read caps this, the API answers 403, and the run checks the
+# whole tree.
 permissions:
   contents: read
+  actions: read
 
 # Every job runs lateregate from the module that pins it, pointed at the
 # repository root with -C, so a nested gate module checks the same tree a
-# root pin does.
-env:
-  GATE_MODULE: ${{ inputs.gate_module || '.' }}
+# root pin does. Each job finds that module once, in its Find the gate module
+# step, which exports GATE_MODULE.
 
 jobs:
   # The plan. Its outputs are the job sets, so the jobs are exactly the gates
@@ -72,10 +84,58 @@ jobs:
       # -trimpath on a self-hosted runner: see the gate job.
       GOFLAGS: ${{ !(startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-')) && '-trimpath' || '' }}
     outputs:
+      # The last green commit the plan was measured from; empty when the whole
+      # tree was checked.
+      base: ${{ steps.plan.outputs.base }}
       gates: ${{ steps.plan.outputs.gates }}
+      gate_needs: ${{ steps.plan.outputs.gate_needs }}
       tests: ${{ steps.plan.outputs.tests }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Keep in step with test/lateregate_test.sh, which unit-tests a copy of
+      # this shell against repositories of each shape.
+      - name: Find the gate module
+        env:
+          GATE_INPUT: ${{ inputs.gate_module }}
+        run: |
+          set -euo pipefail
+          # A go.mod pins the tool with a line `tool <path>` or a path inside a
+          # `tool ( ... )` block.
+          pins_tool() {
+            awk '
+              /^[[:space:]]*tool[[:space:]]*\(/ { block = 1; next }
+              block && /^[[:space:]]*\)/ { block = 0; next }
+              block && $1 == "latere.ai/x/ci-gate/cmd/lateregate" { found = 1 }
+              /^[[:space:]]*tool[[:space:]]+latere\.ai\/x\/ci-gate\/cmd\/lateregate/ { found = 1 }
+              END { exit !found }
+            ' "$1"
+          }
+          module=.
+          if [ -n "$GATE_INPUT" ]; then
+            module=$GATE_INPUT
+          else
+            cd "$GITHUB_WORKSPACE"
+            if [ -f go.mod ] && pins_tool go.mod; then
+              module=.
+            else
+              found=""
+              count=0
+              while IFS= read -r mod; do
+                case "$mod" in go.mod | */go.mod) ;; *) continue ;; esac
+                if pins_tool "$mod"; then
+                  found=$(dirname "$mod")
+                  count=$((count + 1))
+                fi
+              done < <(git ls-files '*go.mod' 'go.mod')
+              if [ "$count" -gt 1 ]; then
+                echo "::error title=gate module::more than one go.mod pins the tool; set gate_module to the one lateregate runs from"
+                exit 1
+              fi
+              if [ "$count" -eq 1 ]; then module=$found; fi
+            fi
+          fi
+          echo "lateregate runs from the module in $module"
+          echo "GATE_MODULE=$module" >> "$GITHUB_ENV"
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ inputs.go_version }}
@@ -91,10 +151,49 @@ jobs:
           HOSTED: ${{ startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-') }}
           RUNS_ON: ${{ inputs.runs_on }}
           TEST_OS: ${{ inputs.test_os || format('["{0}"]', inputs.runs_on) }}
+          BROWSER: ${{ inputs.frontend_browser_package }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          plan=$(go -C "$GATE_MODULE" tool lateregate list -json -C "$GITHUB_WORKSPACE")
+          summary() {
+            printf '%s\n' "$1" >> "$GITHUB_STEP_SUMMARY" || echo "::warning::cannot write the step summary"
+          }
+          # The plan is measured from the last green commit. lateregate base
+          # prints that commit, or nothing when the whole tree must be checked
+          # and the reason on stderr. A pin that predates the command exits
+          # non-zero, and so does an API or fetch error; each checks the whole
+          # tree and says why, so a push is never judged on less than the bar.
+          err=$(mktemp)
+          base=""
+          failed=false
+          if out=$(go -C "$GATE_MODULE" tool lateregate base -since green -C "$GITHUB_WORKSPACE" 2>"$err"); then
+            base=$(printf '%s' "$out" | tr -d '[:space:]')
+          else
+            failed=true
+          fi
+          why=$(tr '\n' ' ' < "$err" | sed 's/ *$//')
+          if [ -n "$base" ]; then
+            echo "The plan is measured from the last green commit $base"
+            summary "The plan is measured from the last green commit $base"
+            plan=$(go -C "$GATE_MODULE" tool lateregate list -json -since "$base" -C "$GITHUB_WORKSPACE")
+          else
+            if [ "$failed" = true ]; then
+              why="lateregate base failed: ${why:-no output}"
+            fi
+            echo "The whole tree is checked: ${why:-no last green commit}"
+            summary "The whole tree is checked: ${why:-no last green commit}"
+            plan=$(go -C "$GATE_MODULE" tool lateregate list -json -C "$GITHUB_WORKSPACE")
+          fi
           printf '%s\n' "$plan" | jq -r '.[] | "\(.status)\t\(.name)\t\(.reason // "")\(.until // "" | if . == "" then "" else " until " + . end)\(.into // "" | if . == "" then "" else "into " + . end)"'
+          # A pin that predates needs says nothing about what a gate installs,
+          # so the gates that always needed Node and Bun get them, and the
+          # frontend gets the browser package the caller names.
+          plan=$(printf '%s\n' "$plan" | jq -c --arg browser "$BROWSER" '
+            if any(.[]; has("needs")) then .
+            else map(if .name == "enum-typescript" or .name == "frontend"
+              then .needs = ["node", "bun"] + (if .name == "frontend" and $browser != "" then ["chromium:" + $browser] else [] end)
+              else . end)
+            end')
           # A hosted runner gives every gate a job of its own, side by side. On
           # the self-hosted runner a job is a turn on one of a few runner slots,
           # so the all gates passed job runs every gate itself and none gets a
@@ -103,6 +202,14 @@ jobs:
             gates=$(printf '%s\n' "$plan" | jq -c '[.[] | select(.status == "run" and .name != "test") | .name]')
           else
             gates='[]'
+          fi
+          # What each gate job installs, by gate name.
+          gate_needs=$(printf '%s\n' "$plan" | jq -c '[.[] | select(.status == "run") | {key: .name, value: (.needs // [])}] | from_entries')
+          # The test entry carries the systems test runs on; without them the
+          # caller's test_os decides.
+          plan_os=$(printf '%s\n' "$plan" | jq -c '[.[] | select(.name == "test" and ((.os // []) | length) > 0)][0].os // empty')
+          if [ -n "$plan_os" ]; then
+            TEST_OS=$plan_os
           fi
           # test has its own OS matrix. When suite runs, it carries the test run on
           # runs_on, so the matrix keeps only the other systems, and they run plain
@@ -119,7 +226,9 @@ jobs:
             tests='[]'
           fi
           {
+            echo "base=$base"
             echo "gates=$gates"
+            echo "gate_needs=$gate_needs"
             echo "tests=$tests"
           } >> "$GITHUB_OUTPUT"
 
@@ -137,6 +246,50 @@ jobs:
         os: ${{ fromJSON(needs.probe.outputs.tests) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Keep in step with test/lateregate_test.sh, which unit-tests a copy of
+      # this shell against repositories of each shape.
+      - name: Find the gate module
+        env:
+          GATE_INPUT: ${{ inputs.gate_module }}
+        run: |
+          set -euo pipefail
+          # A go.mod pins the tool with a line `tool <path>` or a path inside a
+          # `tool ( ... )` block.
+          pins_tool() {
+            awk '
+              /^[[:space:]]*tool[[:space:]]*\(/ { block = 1; next }
+              block && /^[[:space:]]*\)/ { block = 0; next }
+              block && $1 == "latere.ai/x/ci-gate/cmd/lateregate" { found = 1 }
+              /^[[:space:]]*tool[[:space:]]+latere\.ai\/x\/ci-gate\/cmd\/lateregate/ { found = 1 }
+              END { exit !found }
+            ' "$1"
+          }
+          module=.
+          if [ -n "$GATE_INPUT" ]; then
+            module=$GATE_INPUT
+          else
+            cd "$GITHUB_WORKSPACE"
+            if [ -f go.mod ] && pins_tool go.mod; then
+              module=.
+            else
+              found=""
+              count=0
+              while IFS= read -r mod; do
+                case "$mod" in go.mod | */go.mod) ;; *) continue ;; esac
+                if pins_tool "$mod"; then
+                  found=$(dirname "$mod")
+                  count=$((count + 1))
+                fi
+              done < <(git ls-files '*go.mod' 'go.mod')
+              if [ "$count" -gt 1 ]; then
+                echo "::error title=gate module::more than one go.mod pins the tool; set gate_module to the one lateregate runs from"
+                exit 1
+              fi
+              if [ "$count" -eq 1 ]; then module=$found; fi
+            fi
+          fi
+          echo "lateregate runs from the module in $module"
+          echo "GATE_MODULE=$module" >> "$GITHUB_ENV"
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ inputs.go_version }}
@@ -166,6 +319,50 @@ jobs:
       GOFLAGS: ${{ !(startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-')) && '-trimpath' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Keep in step with test/lateregate_test.sh, which unit-tests a copy of
+      # this shell against repositories of each shape.
+      - name: Find the gate module
+        env:
+          GATE_INPUT: ${{ inputs.gate_module }}
+        run: |
+          set -euo pipefail
+          # A go.mod pins the tool with a line `tool <path>` or a path inside a
+          # `tool ( ... )` block.
+          pins_tool() {
+            awk '
+              /^[[:space:]]*tool[[:space:]]*\(/ { block = 1; next }
+              block && /^[[:space:]]*\)/ { block = 0; next }
+              block && $1 == "latere.ai/x/ci-gate/cmd/lateregate" { found = 1 }
+              /^[[:space:]]*tool[[:space:]]+latere\.ai\/x\/ci-gate\/cmd\/lateregate/ { found = 1 }
+              END { exit !found }
+            ' "$1"
+          }
+          module=.
+          if [ -n "$GATE_INPUT" ]; then
+            module=$GATE_INPUT
+          else
+            cd "$GITHUB_WORKSPACE"
+            if [ -f go.mod ] && pins_tool go.mod; then
+              module=.
+            else
+              found=""
+              count=0
+              while IFS= read -r mod; do
+                case "$mod" in go.mod | */go.mod) ;; *) continue ;; esac
+                if pins_tool "$mod"; then
+                  found=$(dirname "$mod")
+                  count=$((count + 1))
+                fi
+              done < <(git ls-files '*go.mod' 'go.mod')
+              if [ "$count" -gt 1 ]; then
+                echo "::error title=gate module::more than one go.mod pins the tool; set gate_module to the one lateregate runs from"
+                exit 1
+              fi
+              if [ "$count" -eq 1 ]; then module=$found; fi
+            fi
+          fi
+          echo "lateregate runs from the module in $module"
+          echo "GATE_MODULE=$module" >> "$GITHUB_ENV"
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ inputs.go_version }}
@@ -173,16 +370,16 @@ jobs:
           # starts empty. A self-hosted runner keeps its own between jobs,
           # and restoring a tarball over it fails on every file that exists.
           cache: ${{ runner.environment == 'github-hosted' }}
-      # Enum checking resolves each configured project's TypeScript compiler,
-      # and the frontend gate installs and builds each named Bun package; both
-      # need Node and Bun. Enum checking also prepares its committed lockfile
-      # first. Go gates need neither a JavaScript runtime nor an install.
+      # A gate installs what the plan says it needs: Node and Bun for enum
+      # checking and the frontend gate, which install and build each named Bun
+      # package. Enum checking also prepares its committed lockfile first. Go
+      # gates need neither a JavaScript runtime nor an install.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        if: ${{ matrix.gate == 'enum-typescript' || matrix.gate == 'frontend' }}
+        if: ${{ contains(fromJSON(needs.probe.outputs.gate_needs)[matrix.gate] || fromJSON('[]'), 'node') }}
         with:
           node-version: "26"
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        if: ${{ matrix.gate == 'enum-typescript' || matrix.gate == 'frontend' }}
+        if: ${{ contains(fromJSON(needs.probe.outputs.gate_needs)[matrix.gate] || fromJSON('[]'), 'bun') }}
         with:
           bun-version: "1.4.4"
         # bun goes to $HOME/.bun/bin. Runner slots on one machine share a
@@ -192,13 +389,24 @@ jobs:
           HOME: ${{ runner.temp }}
       # A failed install is not its own failure: the frontend gate then fails
       # on the test that needs the browser, and the other gates still report.
-      - name: Install the browser a frontend's tests drive
-        if: ${{ matrix.gate == 'frontend' && inputs.frontend_browser_package != '' }}
+      # Keep in step with test/lateregate_test.sh, which runs a copy of this
+      # shell against stub tools.
+      - name: Install the browsers a frontend's tests drive
+        if: ${{ contains(toJSON(fromJSON(needs.probe.outputs.gate_needs)[matrix.gate]), 'chromium:') }}
         continue-on-error: true
-        working-directory: ${{ inputs.frontend_browser_package || '.' }}
+        env:
+          NEEDS: ${{ toJSON(fromJSON(needs.probe.outputs.gate_needs)[matrix.gate]) }}
         run: |
-          bun install --frozen-lockfile
-          bunx playwright install --with-deps chromium
+          set -uo pipefail
+          failed=0
+          dirs=$(printf '%s\n' "$NEEDS" | jq -r '(. // [])[] | select(startswith("chromium:")) | sub("^chromium:"; "")') || exit 1
+          while IFS= read -r dir; do
+            [ -n "$dir" ] || continue
+            echo "::group::chromium for $dir"
+            (cd "$GITHUB_WORKSPACE/$dir" && bun install --frozen-lockfile && bunx playwright install --with-deps chromium) || failed=1
+            echo "::endgroup::"
+          done <<< "$dirs"
+          exit "$failed"
       - name: Prepare TypeScript enum projects
         if: ${{ matrix.gate == 'enum-typescript' }}
         run: go -C "$GATE_MODULE" tool lateregate enum-typescript-prepare -C "$GITHUB_WORKSPACE"
@@ -239,6 +447,50 @@ jobs:
       GOFLAGS: ${{ !(startsWith(inputs.runs_on, 'ubuntu-') || startsWith(inputs.runs_on, 'macos-') || startsWith(inputs.runs_on, 'windows-')) && '-trimpath' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Keep in step with test/lateregate_test.sh, which unit-tests a copy of
+      # this shell against repositories of each shape.
+      - name: Find the gate module
+        env:
+          GATE_INPUT: ${{ inputs.gate_module }}
+        run: |
+          set -euo pipefail
+          # A go.mod pins the tool with a line `tool <path>` or a path inside a
+          # `tool ( ... )` block.
+          pins_tool() {
+            awk '
+              /^[[:space:]]*tool[[:space:]]*\(/ { block = 1; next }
+              block && /^[[:space:]]*\)/ { block = 0; next }
+              block && $1 == "latere.ai/x/ci-gate/cmd/lateregate" { found = 1 }
+              /^[[:space:]]*tool[[:space:]]+latere\.ai\/x\/ci-gate\/cmd\/lateregate/ { found = 1 }
+              END { exit !found }
+            ' "$1"
+          }
+          module=.
+          if [ -n "$GATE_INPUT" ]; then
+            module=$GATE_INPUT
+          else
+            cd "$GITHUB_WORKSPACE"
+            if [ -f go.mod ] && pins_tool go.mod; then
+              module=.
+            else
+              found=""
+              count=0
+              while IFS= read -r mod; do
+                case "$mod" in go.mod | */go.mod) ;; *) continue ;; esac
+                if pins_tool "$mod"; then
+                  found=$(dirname "$mod")
+                  count=$((count + 1))
+                fi
+              done < <(git ls-files '*go.mod' 'go.mod')
+              if [ "$count" -gt 1 ]; then
+                echo "::error title=gate module::more than one go.mod pins the tool; set gate_module to the one lateregate runs from"
+                exit 1
+              fi
+              if [ "$count" -eq 1 ]; then module=$found; fi
+            fi
+          fi
+          echo "lateregate runs from the module in $module"
+          echo "GATE_MODULE=$module" >> "$GITHUB_ENV"
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ inputs.go_version }}
@@ -283,6 +535,51 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: ${{ env.RUN_GATES == 'true' }}
+      # Keep in step with test/lateregate_test.sh, which unit-tests a copy of
+      # this shell against repositories of each shape.
+      - name: Find the gate module
+        if: ${{ env.RUN_GATES == 'true' }}
+        env:
+          GATE_INPUT: ${{ inputs.gate_module }}
+        run: |
+          set -euo pipefail
+          # A go.mod pins the tool with a line `tool <path>` or a path inside a
+          # `tool ( ... )` block.
+          pins_tool() {
+            awk '
+              /^[[:space:]]*tool[[:space:]]*\(/ { block = 1; next }
+              block && /^[[:space:]]*\)/ { block = 0; next }
+              block && $1 == "latere.ai/x/ci-gate/cmd/lateregate" { found = 1 }
+              /^[[:space:]]*tool[[:space:]]+latere\.ai\/x\/ci-gate\/cmd\/lateregate/ { found = 1 }
+              END { exit !found }
+            ' "$1"
+          }
+          module=.
+          if [ -n "$GATE_INPUT" ]; then
+            module=$GATE_INPUT
+          else
+            cd "$GITHUB_WORKSPACE"
+            if [ -f go.mod ] && pins_tool go.mod; then
+              module=.
+            else
+              found=""
+              count=0
+              while IFS= read -r mod; do
+                case "$mod" in go.mod | */go.mod) ;; *) continue ;; esac
+                if pins_tool "$mod"; then
+                  found=$(dirname "$mod")
+                  count=$((count + 1))
+                fi
+              done < <(git ls-files '*go.mod' 'go.mod')
+              if [ "$count" -gt 1 ]; then
+                echo "::error title=gate module::more than one go.mod pins the tool; set gate_module to the one lateregate runs from"
+                exit 1
+              fi
+              if [ "$count" -eq 1 ]; then module=$found; fi
+            fi
+          fi
+          echo "lateregate runs from the module in $module"
+          echo "GATE_MODULE=$module" >> "$GITHUB_ENV"
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         if: ${{ env.RUN_GATES == 'true' }}
         with:
@@ -296,24 +593,79 @@ jobs:
       - name: List the running gates
         id: plan
         if: ${{ env.RUN_GATES == 'true' }}
+        env:
+          RUNS_ON: ${{ inputs.runs_on }}
+          PROBE_RESULT: ${{ needs.probe.result }}
+          BROWSER: ${{ inputs.frontend_browser_package }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          plan=$(go -C "$GATE_MODULE" tool lateregate list -json -C "$GITHUB_WORKSPACE")
+          summary() {
+            printf '%s\n' "$1" >> "$GITHUB_STEP_SUMMARY" || echo "::warning::cannot write the step summary"
+          }
+          # The plan is measured from the last green commit. lateregate base
+          # prints that commit, or nothing when the whole tree must be checked
+          # and the reason on stderr. A pin that predates the command exits
+          # non-zero, and so does an API or fetch error; each checks the whole
+          # tree and says why, so a push is never judged on less than the bar.
+          err=$(mktemp)
+          base=""
+          failed=false
+          if out=$(go -C "$GATE_MODULE" tool lateregate base -since green -C "$GITHUB_WORKSPACE" 2>"$err"); then
+            base=$(printf '%s' "$out" | tr -d '[:space:]')
+          else
+            failed=true
+          fi
+          why=$(tr '\n' ' ' < "$err" | sed 's/ *$//')
+          if [ -n "$base" ]; then
+            echo "The plan is measured from the last green commit $base"
+            summary "The plan is measured from the last green commit $base"
+            plan=$(go -C "$GATE_MODULE" tool lateregate list -json -since "$base" -C "$GITHUB_WORKSPACE")
+          else
+            if [ "$failed" = true ]; then
+              why="lateregate base failed: ${why:-no output}"
+            fi
+            echo "The whole tree is checked: ${why:-no last green commit}"
+            summary "The whole tree is checked: ${why:-no last green commit}"
+            plan=$(go -C "$GATE_MODULE" tool lateregate list -json -C "$GITHUB_WORKSPACE")
+          fi
           printf '%s\n' "$plan" | jq -r '.[] | "\(.status)\t\(.name)\t\(.reason // "")\(.until // "" | if . == "" then "" else " until " + . end)\(.into // "" | if . == "" then "" else "into " + . end)"'
+          # A pin that predates needs says nothing about what a gate installs,
+          # so the gates that always needed Node and Bun get them, and the
+          # frontend gets the browser package the caller names.
+          plan=$(printf '%s\n' "$plan" | jq -c --arg browser "$BROWSER" '
+            if any(.[]; has("needs")) then .
+            else map(if .name == "enum-typescript" or .name == "frontend"
+              then .needs = ["node", "bun"] + (if .name == "frontend" and $browser != "" then ["chromium:" + $browser] else [] end)
+              else . end)
+            end')
           # Every running gate in plan order, test included: with no suite in
           # the plan this job is the test run on runs_on, and the matrix keeps
           # the other systems.
           gates=$(printf '%s\n' "$plan" | jq -c '[.[] | select(.status == "run") | .name]')
-          echo "gates=$gates" >> "$GITHUB_OUTPUT"
-      # Node and Bun for enum checking and the frontend gate, as in the gate
-      # job; enum checking also prepares its committed lockfile first. A
-      # failed runtime setup leaves frontend to fail on the missing tool.
+          # Every tool a running gate needs, once.
+          needs=$(printf '%s\n' "$plan" | jq -c '[.[] | select(.status == "run") | (.needs // [])[]] | unique')
+          # The matrix legs on other systems need the probe, which this runner
+          # skips unless test_os names one. A plan that names one the probe did
+          # not run for would drop that system silently, so it fails here.
+          others=$(printf '%s\n' "$plan" | jq -c --arg on "$RUNS_ON" '[.[] | select(.name == "test" and (.status == "run" or .status == "folded")) | (.os // [])[] | select(. != $on)]')
+          if [ "$PROBE_RESULT" = skipped ] && [ "$others" != "[]" ]; then
+            echo "::error title=test_os::the plan runs test on $others, which needs the test matrix; set test_os to those systems and runs_on"
+            exit 1
+          fi
+          {
+            echo "base=$base"
+            echo "gates=$gates"
+            echo "needs=$needs"
+          } >> "$GITHUB_OUTPUT"
+      # Node and Bun when a running gate needs them, as in the gate job. A
+      # failed runtime setup leaves the gate to fail on the missing tool.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        if: ${{ contains(fromJSON(steps.plan.outputs.gates || '[]'), 'enum-typescript') || contains(fromJSON(steps.plan.outputs.gates || '[]'), 'frontend') }}
+        if: ${{ contains(fromJSON(steps.plan.outputs.needs || '[]'), 'node') }}
         with:
           node-version: "26"
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        if: ${{ contains(fromJSON(steps.plan.outputs.gates || '[]'), 'enum-typescript') || contains(fromJSON(steps.plan.outputs.gates || '[]'), 'frontend') }}
+        if: ${{ contains(fromJSON(steps.plan.outputs.needs || '[]'), 'bun') }}
         with:
           bun-version: "1.4.4"
         # bun goes to $HOME/.bun/bin. Runner slots on one machine share a
@@ -323,13 +675,24 @@ jobs:
           HOME: ${{ runner.temp }}
       # A failed install is not its own failure: the frontend gate then fails
       # on the test that needs the browser, and the other gates still report.
-      - name: Install the browser a frontend's tests drive
-        if: ${{ contains(fromJSON(steps.plan.outputs.gates || '[]'), 'frontend') && inputs.frontend_browser_package != '' }}
+      # Keep in step with test/lateregate_test.sh, which runs a copy of this
+      # shell against stub tools.
+      - name: Install the browsers a frontend's tests drive
+        if: ${{ contains(steps.plan.outputs.needs || '[]', 'chromium:') }}
         continue-on-error: true
-        working-directory: ${{ inputs.frontend_browser_package || '.' }}
+        env:
+          NEEDS: ${{ steps.plan.outputs.needs }}
         run: |
-          bun install --frozen-lockfile
-          bunx playwright install --with-deps chromium
+          set -uo pipefail
+          failed=0
+          dirs=$(printf '%s\n' "$NEEDS" | jq -r '(. // [])[] | select(startswith("chromium:")) | sub("^chromium:"; "")') || exit 1
+          while IFS= read -r dir; do
+            [ -n "$dir" ] || continue
+            echo "::group::chromium for $dir"
+            (cd "$GITHUB_WORKSPACE/$dir" && bun install --frozen-lockfile && bunx playwright install --with-deps chromium) || failed=1
+            echo "::endgroup::"
+          done <<< "$dirs"
+          exit "$failed"
       - name: Prepare TypeScript enum projects
         id: prepare
         if: ${{ contains(fromJSON(steps.plan.outputs.gates || '[]'), 'enum-typescript') }}
