@@ -1,0 +1,13 @@
+name: deploy-by-digest
+description: Pin a core's images by digest in its deploy overlay, apply it, wait for its Deployments to roll, or smoke the live service until it serves the tag.
+inputs:
+  step:
+    description: "pin, apply, rollout or smoke."
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        STEP: ${{ inputs.step }}
+      run: bash "$GITHUB_ACTION_PATH/run.sh" "$STEP"

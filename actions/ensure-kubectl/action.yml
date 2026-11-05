@@ -1,0 +1,14 @@
+name: ensure-kubectl
+description: Put kubectl on PATH, fetching the pinned release and verifying it where the runner has none.
+inputs:
+  version:
+    description: "kubectl release (without the v) to fetch when the runner has none. Empty takes the version in actions/lib/versions.sh."
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        KUBECTL_VERSION: ${{ inputs.version }}
+      run: bash "$GITHUB_ACTION_PATH/run.sh"
