@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v1.32.1 - 2026-11-05
+
 ### Fixed
 
 - `lateregate.yml` no longer asks for `actions: read`. A reusable workflow
