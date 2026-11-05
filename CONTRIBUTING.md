@@ -53,12 +53,17 @@ version is cut.
 ## Pinning
 
 Every `uses:` is pinned to a full commit SHA with the version in a
-trailing comment, and no step fetches a tool at `latest`. Dependabot
-opens a weekly pull request per action so the pins do not rot:
-first-party `actions/*` and `docker/*` updates are grouped, and
-third-party actions land individually so each gets its own review. A
-tool version the workflows fetch is an input with a pinned default, so a
-caller can move ahead of the default without a change here.
+trailing comment, and no step fetches a tool at `latest`. A third-party
+action's commit is the organization's one commit for it, from the list
+ci-gate embeds (`internal/actionpins/action.yml` in latere-ai/ci-gate);
+its `action-pins` gate holds this repository to that list as it does
+every other. A version moves there first: Dependabot in ci-gate opens the
+update, the ci-gate release carries it, and here `go tool lateregate
+action-pins -w` rewrites the pins in the same commit that moves the gate.
+This repository runs no Dependabot of its own for actions, since one
+repository moving one action alone would fail the gate. A tool version the
+workflows fetch is an input with a pinned default, so a caller can move
+ahead of the default without a change here.
 
 ## Writing
 

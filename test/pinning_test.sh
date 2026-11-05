@@ -84,21 +84,24 @@ assert_pins_are_annotated() {
     fi
 }
 
-# Pins go stale silently without an updater watching them.
-assert_dependabot_watches_actions() {
-    local name="dependabot keeps the action pins current"
+# The commits are the organization's one list, which ci-gate embeds and its
+# action-pins gate holds this repository to, as it does every other. An
+# updater here would move one action in one repository and fail that gate,
+# so the list's own Dependabot, in latere-ai/ci-gate, is the only one.
+assert_no_updater_of_its_own() {
+    local name="no per-repository updater moves the action pins"
     local cfg="$REPO_ROOT/.github/dependabot.yml"
-    if [ -f "$cfg" ] && grep -q 'github-actions' "$cfg" && grep -qF '"/actions/*"' "$cfg"; then
-        pass "$name"
+    if [ -f "$cfg" ] && grep -q 'github-actions' "$cfg"; then
+        fail "$name (.github/dependabot.yml watches github-actions; ci-gate's list is where a version moves)"
     else
-        fail "$name (no .github/dependabot.yml with a github-actions ecosystem over / and /actions/*)"
+        pass "$name"
     fi
 }
 
 assert_all_actions_sha_pinned
 assert_no_latest_tool_versions
 assert_pins_are_annotated
-assert_dependabot_watches_actions
+assert_no_updater_of_its_own
 
 if [ "$FAILURES" -gt 0 ]; then
     printf "\n%d failure(s)\n" "$FAILURES"
