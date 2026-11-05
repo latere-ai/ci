@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v1.30.0 - 2026-11-05
+
 ### Added
 
 - `service-release.yml` and `notes-release.yml` refuse a tag whose commit did
