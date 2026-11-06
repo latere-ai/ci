@@ -595,6 +595,25 @@ else
     fail "status=$(status) calls=$(cat "$TMP/calls"); log: $(cat "$TMP/log")"
 fi
 
+new_workflows "$TMP/r"
+printf 'ship:\n  image:\n    name: ghcr.io/latere-ai/x\n' > "$TMP/r/.lateregate.yaml"
+run_step "$DISPATCH_SCRIPT" "$TMP/r" BRANCH=main
+if [ "$(status)" = 0 ] && [ ! -s "$TMP/calls" ] && grep -q 'ships from a workstation' "$TMP/summary"; then
+    pass "a repository that ships from a workstation has no caller and dispatches nothing"
+else
+    fail "status=$(status) calls=$(cat "$TMP/calls"); log: $(cat "$TMP/log")"
+fi
+
+new_workflows "$TMP/r"
+printf 'ship:\n  image:\n    name: ghcr.io/latere-ai/x\n' > "$TMP/r/.lateregate.yaml"
+caller "$TMP/r/.github/workflows/ci.yml" yes
+run_step "$DISPATCH_SCRIPT" "$TMP/r" BRANCH=main
+if [ "$(status)" = 0 ] && grep -q 'actions/workflows/ci.yml/dispatches' "$TMP/calls"; then
+    pass "a repository that ships from a workstation and keeps a caller still gets its run"
+else
+    fail "status=$(status) calls=$(cat "$TMP/calls"); log: $(cat "$TMP/log")"
+fi
+
 # ---------------------------------------------------------------------------
 echo "open or update the issue"
 

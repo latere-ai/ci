@@ -424,6 +424,13 @@ jobs:
           # Only a `uses:` line counts: a header comment or an example that
           # names the pipeline is not a caller.
           callers=$(grep -lE '^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]*latere-ai/ci/\.github/workflows/lateregate\.yml@v1' .github/workflows/*.yml .github/workflows/*.yaml 2>/dev/null || true)
+          # A repository that ships from a workstation (`ship:` in
+          # .lateregate.yaml) has no per-push gate to dispatch: the bar above
+          # ran on the new pin, and its owner's next build runs it again.
+          if [ -z "$callers" ] && grep -q '^ship:' .lateregate.yaml 2>/dev/null; then
+            echo "No per-push gate to dispatch: this repository ships from a workstation, and the bar above ran on the new pin." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           if [ "$(printf '%s' "$callers" | grep -c .)" -ne 1 ]; then
             echo "::error::expected one workflow calling lateregate.yml under .github/workflows, found: ${callers:-none}"
             exit 1

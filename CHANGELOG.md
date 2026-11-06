@@ -10,6 +10,14 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- `ci-gate-bump.yml` dispatches no per-push run in a repository that
+  ships from a workstation (`ship:` in `.lateregate.yaml`, ci-gate
+  v0.68.0) and has no workflow calling `lateregate.yml`: the bump has
+  already run the whole bar on the new pin. Every other repository still
+  needs exactly one caller.
+
 ## v1.36.0 - 2026-11-06
 
 ### Added
