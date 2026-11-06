@@ -44,7 +44,7 @@ on:
         type: string
         default: ""
       runs_on:
-        description: "Runner for every job except the test matrix: the probe, the gates and the wiring check. By default the organization's runner policy picks the label (README, Runners): a private repository runs on the self-hosted runner, or on ubuntu-latest while that runner is offline; a public one on ubuntu-latest, and never on the self-hosted runner for a pull request. A label passed here overrides the policy and its fallback."
+        description: "Runner for every job except the test matrix: the probe, the gates and the wiring check. By default the organization's runner policy picks the label (README, Runners): ubuntu-latest for every repository, and never a self-hosted label for a pull request. A label passed here overrides the policy."
         required: false
         type: string
         default: ${{ (github.event.repository.private || contains(fromJSON('["push","schedule","workflow_dispatch","release"]'), github.event_name)) && (vars.CI_RUNNER_PRIVATE || vars.CI_RUNNER_PUBLIC) || 'ubuntu-latest' }}
