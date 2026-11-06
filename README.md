@@ -893,20 +893,30 @@ same one `service-release.yml` and `image-publish.yml` run.
 
 ## Runners
 
-Where a job runs is the organization's policy, and every pipeline here
-applies it as the default of its `runs_on` input:
+Every pipeline here runs on GitHub-hosted runners. Where a job runs is the
+organization's policy, and every pipeline applies it as the default of its
+`runs_on` input:
 
-| Repository | Runs on | Falls back to |
+| Repository | Runs on | What runs there |
 | --- | --- | --- |
-| private | the self-hosted runner, `linux-vm` | nothing: a job waits for the runner |
-| public | `ubuntu-latest` | `linux-vm`, while hosted runners are down, for events only the repository starts |
+| private | `ubuntu-latest` | scheduled and hand-started jobs only, such as the pin bumps, CodeQL and drift checks |
+| public | `ubuntu-latest` | every pipeline |
 
-A caller that passes nothing gets the policy and its fallback. A label
-passed as `runs_on` overrides both. `test_os` in `lateregate.yml`
-defaults to the runner `runs_on` resolves to; the suite already runs
-there, so a repository that adds macOS passes
-`test_os: '["macos-latest"]'`. In `cli-release.yml` it lists only the
-extra runners the release tests on.
+A private repository starts nothing on a push or a tag. Its bar, its image,
+its release and its deploy run on a workstation through `lateregate build`,
+`release`, `push` and `deploy`, which ci-gate's
+[releasing guide](https://github.com/latere-ai/ci-gate/blob/main/docs/releasing.md)
+describes. Its hosted minutes bill against the organization's Actions
+budget, and a spent budget fails every hosted job at zero steps with no
+log, in every private repository at once, until the month ends; keeping
+push and tag runs off hosted runners is what keeps the scheduled jobs
+inside the budget. A public repository pays nothing for hosted runners.
+
+A caller that passes nothing gets the policy. A label passed as `runs_on`
+overrides it. `test_os` in `lateregate.yml` defaults to the runner
+`runs_on` resolves to; the suite already runs there, so a repository that
+adds macOS passes `test_os: '["macos-latest"]'`. In `cli-release.yml` it
+lists only the extra runners the release tests on.
 
 The policy is one expression, and a repository's own jobs use it too:
 
@@ -918,55 +928,21 @@ It reads two organization variables:
 
 | Variable | Visible to | Value |
 | --- | --- | --- |
-| `CI_RUNNER_PRIVATE` | private repositories | `linux-vm` |
-| `CI_RUNNER_PUBLIC` | every repository | `ubuntu-latest`, or `linux-vm` while hosted runners are down |
+| `CI_RUNNER_PRIVATE` | private repositories | `ubuntu-latest` |
+| `CI_RUNNER_PUBLIC` | every repository | `ubuntu-latest` |
 
 A public repository reads `CI_RUNNER_PRIVATE` as empty, so the
 variable's visibility is what tells the two kinds of repository apart, on
 every event: a scheduled run's payload names no repository. With neither
 variable set, every job runs on `ubuntu-latest`.
 
-A private repository has no fallback to hosted runners. Its hosted
-minutes bill against the organization's Actions budget, and a spent budget
-fails every hosted job at zero steps with no log, in every private
-repository at once, until the month ends. A job aimed at `linux-vm` while
-the runner is offline or busy waits in the queue instead, and GitHub drops
-it after a day unclaimed. The variable can still be moved by hand, for one
-job that cannot wait and is worth the minutes:
-
-```sh
-gh api -X PATCH /orgs/latere-ai/actions/variables/CI_RUNNER_PRIVATE -f value=ubuntu-latest
-gh api -X PATCH /orgs/latere-ai/actions/variables/CI_RUNNER_PRIVATE -f value=linux-vm
-```
-
-A public repository pays nothing for hosted runners, so its fallback is
-for a GitHub outage, which a check on a hosted runner cannot see while it
-lasts: `CI_RUNNER_PUBLIC` is moved by hand.
-
-A public repository's job reaches the self-hosted runner only on `push`,
-`schedule`, `workflow_dispatch` and `release`, events only the
-repository itself can start. A pull request, from a fork or not, stays on
-`ubuntu-latest`, so a fork's code never runs on the machine. The
-organization's runner group must also allow public repositories; while it
-does not, a public job routed to `linux-vm` waits in the queue forever,
-so `CI_RUNNER_PUBLIC` moves to `linux-vm` only after that setting
-changes.
-
-- **The self-hosted runners are shared by every repository.** Two
-  releases that both ask for `linux-vm` queue behind each other, and a job
-  that fans out wider than the runner's slots serializes. A repository
-  that releases often, or fans out wide, is better off on hosted runners.
-- **The runner must already have what the pipeline expects.** The machine
-  ships docker, git, jq and curl, and may be x64 or arm64. `service-release.yml`
-  fetches kubectl and gh at `kubectl_version` and `gh_version`,
-  checksum-verified, when they are missing, and sets up Node beside Bun;
-  every tool it fetches is the build for the runner's own architecture.
-  The image is built for `platforms` (default `linux/amd64`, the
-  cluster's) whatever the runner is.
-- **The secrets still have to reach it.** `runs_on` changes where a job
-  runs, not what it can read: the caller keeps `secrets: inherit` (or its
-  explicit mapping), and the runner needs network reach to the cluster and
-  to the registry.
+A variable may name a self-hosted label, though the organization runs no
+self-hosted runner. A job aimed at a label no runner serves waits in the
+queue, and GitHub drops it after a day unclaimed. A public repository's
+job follows the variables only on `push`, `schedule`, `workflow_dispatch`
+and `release`, events only the repository itself can start. A pull
+request, from a fork or not, stays on `ubuntu-latest`, so a fork's code
+never runs on a machine the organization owns.
 
 `actions/setup-go` restores the module cache only on a hosted runner
 (`runner.environment == 'github-hosted'`), because a self-hosted runner keeps its own between jobs and restoring a

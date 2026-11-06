@@ -10,6 +10,10 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+- The runner policy in the README now reads hosted runners for every
+  repository: private repositories run only scheduled and hand-started jobs
+  there, and their push, release and deploy run from a workstation.
+
 ## v1.37.0 - 2026-11-06
 
 ### Changed
