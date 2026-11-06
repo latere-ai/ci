@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v1.37.0 - 2026-11-06
+
 ### Changed
 
 - `ci-gate-bump.yml` dispatches no per-push run in a repository that
