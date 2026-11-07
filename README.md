@@ -21,7 +21,7 @@ repository, by convention rather than through a long list of inputs.
 | Workflow | Runs on | For | Jobs |
 | --- | --- | --- | --- |
 | [`lateregate.yml`](.github/workflows/lateregate.yml) | every push and pull request | a Go repository | the plan, the gates (a job each on a hosted runner, one job on the self-hosted one), the test matrix, the wiring check |
-| [`ci-gate-bump.yml`](.github/workflows/ci-gate-bump.yml) | once a day | a Go repository that pins `latere.ai/x/ci-gate` | move the pin to the latest release when the bar passes on it, or open an issue |
+| [`ci-gate-bump.yml`](.github/workflows/ci-gate-bump.yml) | once a day | a public Go repository that pins `latere.ai/x/ci-gate` | move the pin to the latest release when the bar passes on it, or open an issue |
 | [`service-release.yml`](.github/workflows/service-release.yml) | a `v*` tag | a Kubernetes service | build the image, deploy, smoke the live surface, publish the release |
 | [`image-build.yml`](.github/workflows/image-build.yml), [`image-publish.yml`](.github/workflows/image-publish.yml), [`release-verify.yml`](.github/workflows/release-verify.yml) | a `v*` tag | a service that publishes signed images and lets others install them | build and sign the images by digest; then, after the repository's own jobs, tag them and publish the release; then verify what was published |
 | [`image-deploy.yml`](.github/workflows/image-deploy.yml) | a `v*` tag, between build and publish | a core that deploys its own release | apply `deploy/prod` with the images pinned by digest, wait for the rollout, smoke the live service |
@@ -61,7 +61,7 @@ For a new Go repository:
    `go tool lateregate contract` says whether the wiring is in shape, and
    `go tool lateregate` runs the bar locally exactly as CI will.
 
-2. **The daily pin move.** Copy
+2. **The daily pin move**, in a public repository. Copy
    [`examples/ci-gate-bump.yml`](examples/ci-gate-bump.yml) to
    `.github/workflows/ci-gate-bump.yml`, give its cron a minute no other
    repository on the same runner uses, and add `workflow_dispatch:` to the
@@ -235,7 +235,10 @@ install no JavaScript tooling. Domain configuration is documented in
 A repository pins `latere.ai/x/ci-gate` by exact version in its `go.mod`
 tool directive, so the hooks on a laptop and CI run the same `lateregate`.
 The pin moves only in a commit, and this pipeline makes that commit once a
-day:
+day in a public repository. A private repository runs no GitHub Actions,
+so its pin moves from a workstation after each ci-gate release, through
+ci-gate's `scripts/bump-private.sh` (its
+[releasing guide](https://github.com/latere-ai/ci-gate/blob/main/docs/releasing.md#moving-the-pin)):
 
 ```yaml
 # .github/workflows/ci-gate-bump.yml
@@ -899,12 +902,13 @@ organization's policy, and every pipeline applies it as the default of its
 
 | Repository | Runs on | What runs there |
 | --- | --- | --- |
-| private | `ubuntu-latest` | scheduled and hand-started jobs only, such as the pin bumps, CodeQL and drift checks |
+| private | `ubuntu-latest` | scheduled and hand-started jobs only, such as CodeQL and drift checks |
 | public | `ubuntu-latest` | every pipeline |
 
 A private repository starts nothing on a push or a tag. Its bar, its image,
-its release and its deploy run on a workstation through `lateregate build`,
-`release`, `push` and `deploy`, which ci-gate's
+its release, its deploy and the move of its ci-gate pin run on a
+workstation through `lateregate build`, `release`, `push` and `deploy` and
+ci-gate's `scripts/bump-private.sh`, which ci-gate's
 [releasing guide](https://github.com/latere-ai/ci-gate/blob/main/docs/releasing.md)
 describes. Its hosted minutes bill against the organization's Actions
 budget, and a spent budget fails every hosted job at zero steps with no
