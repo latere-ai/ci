@@ -57,6 +57,9 @@ committed: the commit log already holds that.
   older release that finishes late, after a newer `vX.Y.Z` was tagged, now
   stops there instead of rolling production back; the build it paid for is
   lost.
+- Pushing a `v1.MINOR.PATCH` tag moves `v1` only after the tagged commit
+  passed this repository's own `test.yml` on its push, so a tag cut on a
+  red or unverified commit no longer reaches the callers that pin `@v1`.
 
 ### Fixed
 

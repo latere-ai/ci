@@ -22,6 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -29,15 +30,33 @@ jobs:
 
       # A prerelease (v1.2.3-rc1) is not something consumers should pick up by
       # pinning @v1, so only a plain vMAJOR.MINOR.PATCH tag moves it.
+      - name: Is ${{ github.ref_name }} a release tag
+        id: shape
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          if printf '%s' "$TAG" | grep -Eq '^v1\.[0-9]+\.[0-9]+$'; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "$TAG is a prerelease or non-standard tag; leaving v1 alone."
+          fi
+
+      # Consumers build against v1 at once, so it moves only once the tagged
+      # commit passed this repository's own per-push check, the same rule
+      # release.yml publishes under. This repository's shared steps are in
+      # the checkout, so the check runs from there.
+      - name: The tagged commit passed CI
+        if: ${{ steps.shape.outputs.release == 'true' }}
+        uses: ./actions/verified-commit
+        with:
+          verify_workflow: test.yml
+
       - name: Move v1 to ${{ github.ref_name }}
+        if: ${{ steps.shape.outputs.release == 'true' }}
         env:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          if ! printf '%s' "$TAG" | grep -Eq '^v1\.[0-9]+\.[0-9]+$'; then
-            echo "$TAG is a prerelease or non-standard tag; leaving v1 alone."
-            exit 0
-          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -f v1 "$TAG"^{}
