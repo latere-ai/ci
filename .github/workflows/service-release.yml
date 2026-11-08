@@ -220,6 +220,19 @@ jobs:
       name: production
       url: ${{ inputs.url }}
     steps:
+      # The CLI build is the last step, after the deploy has gone out. An
+      # inputs combination that cannot reach it is refused before anything
+      # is checked out, built or deployed.
+      - name: Refuse build_cli without cli_build_cmd
+        env:
+          BUILD_CLI: ${{ inputs.build_cli }}
+          CLI_BUILD_CMD: ${{ inputs.cli_build_cmd }}
+        run: |
+          if [ "$BUILD_CLI" = true ] && [ -z "$CLI_BUILD_CMD" ]; then
+            echo "::error::build_cli is true but cli_build_cmd is empty, so there is nothing to build the CLI with. Nothing was built or deployed. Set cli_build_cmd, or set build_cli to false."
+            exit 1
+          fi
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The CLI build may read the tag history; the rest needs one commit.

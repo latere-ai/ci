@@ -288,6 +288,40 @@ else
     fail "DEPLOY_KUBECONFIG is not declared, so 'secrets: inherit' cannot deliver it"
 fi
 
+# build_cli without cli_build_cmd cannot publish, and its CLI build is the
+# last step, after the deploy. The first step of the job refuses that
+# combination, so nothing is checked out, built or deployed first.
+first_name=$(sed -n '/^    steps:$/,$p' "$WORKFLOW" | grep -m1 -E '^      - ' )
+cli_script=$(awk '
+    $0 == "      - name: Refuse build_cli without cli_build_cmd" { instep = 1; next }
+    instep && /^        run: \|$/ { inrun = 1; next }
+    inrun && /^          / { sub(/^          /, ""); print; next }
+    inrun { exit }
+' "$WORKFLOW")
+if [ "$first_name" = "      - name: Refuse build_cli without cli_build_cmd" ] && [ -n "$cli_script" ]; then
+    pass "the first step refuses build_cli without cli_build_cmd"
+else
+    fail "the first step of the release job is not the build_cli check (first: $first_name)"
+fi
+cli_check() {
+    local name=$1 want=$2 build=$3 cmd=$4 out rc
+    out=$(BUILD_CLI=$build CLI_BUILD_CMD=$cmd bash -c "$cli_script" 2>&1)
+    rc=$?
+    if [ "$rc" -eq "$want" ]; then
+        pass "$name"
+    else
+        fail "$name (exit $rc, want $want; output: $out)"
+    fi
+}
+cli_check "build_cli with no cli_build_cmd is refused" 1 true ""
+cli_check "build_cli with a cli_build_cmd goes on" 0 true "make cli"
+cli_check "no build_cli needs no cli_build_cmd" 0 false ""
+if printf '%s' "$cli_script" | grep -qF 'Nothing was built or deployed'; then
+    pass "the refusal says nothing was built or deployed"
+else
+    fail "the refusal does not say that nothing was built or deployed"
+fi
+
 if [ "$FAILURES" -gt 0 ]; then
     exit 1
 fi

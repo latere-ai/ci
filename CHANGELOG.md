@@ -69,6 +69,9 @@ committed: the commit log already holds that.
 - **Breaking**: `cli-release.yml` publishes only when every leg of the
   `test_os` matrix succeeded. A canceled leg used to let the release
   through; it now stops it.
+- **Breaking**: `service-release.yml` refuses `build_cli: true` with no
+  `cli_build_cmd` in its first step. It used to fail only at the publish,
+  after the build and the deploy had gone out.
 
 ### Fixed
 
