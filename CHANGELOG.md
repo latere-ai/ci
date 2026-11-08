@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v1.38.0 - 2026-11-08
+
 ### Changed
 
 - **Breaking**: a release now stops when any push run of the verify
