@@ -76,6 +76,25 @@ check "a tag off the default branch is refused" v1.0.1 latere-ai "" 1 "v1.0.1 is
 check "a tag with no CHANGELOG section is refused" v9.9.9 latere-ai "" 1 "has no section for v9.9.9"
 check "the namespace override wins, lowered" v1.0.0 latere-ai "Example/Images" 0 "" "owner=example/images"
 check "an invalid namespace is refused" v1.0.0 latere-ai "bad..name" 1 "is not a valid image namespace"
+check "a doubled hyphen, which a reference allows, is accepted" v1.0.0 latere-ai "my--org" 0 "" "owner=my--org"
+check "a doubled underscore, which a reference allows, is accepted" v1.0.0 latere-ai "my__org/img_x" 0 "" "owner=my__org/img_x"
+check "a hyphen next to a period is refused" v1.0.0 latere-ai "my-.org" 1 "is not a valid image namespace"
+check "a trailing separator is refused" v1.0.0 latere-ai "my-" 1 "is not a valid image namespace"
+
+# A value with a newline is refused whole and writes nothing: the first line
+# alone is a valid namespace, and the rest would become further outputs.
+nl_dir=$(mktemp -d "$TMP/clone.XXXX")
+git clone -q --depth 1 --branch v1.0.0 "file://$ORIGIN" "$nl_dir/w" 2>/dev/null
+: > "$nl_dir/out"
+nl_out=$(cd "$nl_dir/w" && PATH="$TMP/bin:$PATH" GITHUB_OUTPUT="$nl_dir/out" GITHUB_REF_NAME=v1.0.0 \
+    GITHUB_REPOSITORY_OWNER=latere-ai NAMESPACE_OVERRIDE=$'acme\nprerelease=false\nowner=evil' DEFAULT_BRANCH=main \
+    bash "$SCRIPT" 2>&1)
+nl_rc=$?
+if [ "$nl_rc" -eq 1 ] && printf '%s' "$nl_out" | grep -qF "is not a valid image namespace" && [ ! -s "$nl_dir/out" ]; then
+    pass "a namespace with a newline is refused and writes no output"
+else
+    fail "a namespace with a newline is refused and writes no output (exit $nl_rc; out: $nl_out; file: $(tr '\n' ' ' < "$nl_dir/out"))"
+fi
 
 # A self-hosted runner reuses its workspace: an earlier run left the branch's
 # tip as a shallow commit, so the fetch brings nothing and the history between

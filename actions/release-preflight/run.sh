@@ -12,7 +12,10 @@
 #      reader at the version in actions/lib/versions.sh.
 #   4. The image namespace: NAMESPACE_OVERRIDE when set, else the repository
 #      owner, lowered, so a fork's tag publishes under the fork. It must be a
-#      valid reference prefix, because an image reference is lowercase.
+#      valid reference prefix, because an image reference is lowercase: path
+#      components of lowercase letters and digits, joined by '.', '_', '__'
+#      or a run of '-', and separated by '/'. A value with a newline is
+#      refused.
 #
 # Writes owner, commit (short), date (the commit's, UTC) and prerelease
 # (true when the version core carries a hyphen) to $GITHUB_OUTPUT.
@@ -80,7 +83,11 @@ echo "CHANGELOG.md has a section for $TAG"
 
 owner=${NAMESPACE_OVERRIDE:-${GITHUB_REPOSITORY_OWNER:?}}
 owner=$(printf '%s' "$owner" | tr '[:upper:]' '[:lower:]')
-if ! printf '%s' "$owner" | grep -Eq '^[a-z0-9]+([._-][a-z0-9]+)*(/[a-z0-9]+([._-][a-z0-9]+)*)*$'; then
+# The whole value is matched, so a value with a newline is refused. A
+# component is lowercase alphanumerics joined by one separator: a period, an
+# underscore, two underscores, or any run of hyphens, as a reference allows.
+ns_part='[a-z0-9]+(([._]|__|-+)[a-z0-9]+)*'
+if ! [[ $owner =~ ^${ns_part}(/${ns_part})*$ ]]; then
     die "'$owner' is not a valid image namespace; set the repository variable RELEASE_IMAGE_NAMESPACE to one"
 fi
 
