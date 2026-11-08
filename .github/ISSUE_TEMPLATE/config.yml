@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security problem
+    url: https://github.com/latere-ai/ci/security/advisories/new
+    about: Report a vulnerability privately; do not open a public issue.
+  - name: Documentation
+    url: https://github.com/latere-ai/ci/tree/main/docs
+    about: How to call each pipeline; a question the docs do not answer is a documentation bug.

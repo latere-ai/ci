@@ -1,0 +1,21 @@
+name: Feature request
+description: Something a pipeline should do that it does not.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: What your repository needs
+      description: What you build, release or check, and where the pipelines get in the way.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you would like your caller to look like
+      render: yaml
+  - type: textarea
+    id: workaround
+    attributes:
+      label: What you do today instead
+      description: The extra job or step you run yourself, if any.

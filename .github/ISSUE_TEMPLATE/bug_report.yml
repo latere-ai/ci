@@ -1,0 +1,37 @@
+name: Bug report
+description: A pipeline or action does not do what the README says.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not report a security vulnerability here. Follow
+        [SECURITY.md](https://github.com/latere-ai/ci/blob/main/SECURITY.md).
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Which workflow or action, what you expected, and what it did instead. Paste the failing step's log lines and the run's annotations.
+    validations:
+      required: true
+  - type: textarea
+    id: caller
+    attributes:
+      label: Your caller workflow
+      description: The `uses:` line and the inputs you pass. Leave out secret values and tokens.
+      render: yaml
+  - type: input
+    id: version
+    attributes:
+      label: The ref you call
+      description: The tag after `@` in your `uses:` line.
+      placeholder: v1 or vX.Y.Z
+    validations:
+      required: true
+  - type: input
+    id: run
+    attributes:
+      label: Link to the run
+      description: If the repository is public.
+      placeholder: https://github.com/<owner>/<repo>/actions/runs/<id>
