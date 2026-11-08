@@ -157,7 +157,8 @@ read_others() {
 }
 
 # Sets PARENT and CODE for commit $1: its first parent, and the paths it
-# changes that no SKIP_PATHS pattern matches. CODE is empty when the commit
+# changes that no SKIP_PATHS pattern matches. A rename changes both its new
+# path and its old one, so each is matched. CODE is empty when the commit
 # changes only skipped paths.
 read_change() {
     local files f pat matched
@@ -168,7 +169,7 @@ read_change() {
         CODE="(the first commit)"
         return
     fi
-    files=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${PARENT}...$1" --jq '.files[].filename') \
+    files=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${PARENT}...$1" --jq '.files[] | .filename, (.previous_filename // empty)') \
         || die "cannot read what $1 changes, so nothing was released"
     while IFS= read -r f; do
         [ -n "$f" ] || continue

@@ -205,6 +205,22 @@ stub_gh_fixture "$W" "repos/$REPO/compare/$PARENT...$SHA" '{"files":[{"filename"
 stub_gh_fixture "$W" "$(runs_url $PARENT)" "$(runs main:success)"
 WAIT=0 run_case "a commit verify skipped is read through to its parent" 0 "concluded success on $PARENT"
 
+# A rename out of a code path removes code from the build, so its old path is
+# read as well as the new one.
+new_case
+stub_gh_fixture "$W" "$(runs_url $SHA)" '{"workflow_runs":[]}'
+stub_gh_fixture "$W" "repos/$REPO/commits/$SHA" "{\"parents\":[{\"sha\":\"$PARENT\"}]}"
+stub_gh_fixture "$W" "repos/$REPO/compare/$PARENT...$SHA" '{"files":[{"filename":"notes/main.md","previous_filename":"cmd/main.go","status":"renamed"}]}'
+stub_gh_fixture "$W" "$(runs_url $PARENT)" "$(runs main:success)"
+WAIT=0 run_case "a rename out of a code path is not read through" 1 "has no run on $SHA, which changes cmd/main.go"
+
+new_case
+stub_gh_fixture "$W" "$(runs_url $SHA)" '{"workflow_runs":[]}'
+stub_gh_fixture "$W" "repos/$REPO/commits/$SHA" "{\"parents\":[{\"sha\":\"$PARENT\"}]}"
+stub_gh_fixture "$W" "repos/$REPO/compare/$PARENT...$SHA" '{"files":[{"filename":"docs/b.md","previous_filename":"docs/a.md","status":"renamed"}]}'
+stub_gh_fixture "$W" "$(runs_url $PARENT)" "$(runs main:success)"
+WAIT=0 run_case "a rename between skipped paths is read through" 0 "concluded success on $PARENT"
+
 new_case
 stub_gh_fixture "$W" "$(runs_url $SHA)" '{"workflow_runs":[]}'
 stub_gh_fixture "$W" "repos/$REPO/commits/$SHA" "{\"parents\":[{\"sha\":\"$PARENT\"}]}"
