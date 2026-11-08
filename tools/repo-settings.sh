@@ -44,11 +44,14 @@ usage() {
 # deleting someone's projects to force the write through.
 policy_without_projects() { jq 'del(.has_projects)' "$POLICY_FILE"; }
 
-# True when the PATCH error in $1 is GitHub refusing to disable Projects (an
-# HTTP 422 that names projects). Any other failure is not worth a retry: it
-# would only repeat, or hide a real error behind a half-applied policy.
+# True when the PATCH error in $1 is a validation refusal (HTTP 422), the
+# answer GitHub gives when Projects cannot be disabled. gh may print only
+# "Validation Failed" for it, so the wording is not matched; another 422
+# fails the retry too and ends as FAIL. Any other failure is not worth a
+# retry: it would only repeat, or hide a real error behind a half-applied
+# policy.
 is_projects_refusal() {
-    printf '%s' "$1" | grep -q '422' && printf '%s' "$1" | grep -qi 'project'
+    printf '%s' "$1" | grep -q 'HTTP 422'
 }
 
 # Prints one "key: want=X got=Y" line per field that differs. Empty output

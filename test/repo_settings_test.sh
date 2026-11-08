@@ -81,6 +81,11 @@ if [ "$method" = "PATCH" ]; then
         echo "stub gh: HTTP 422 Projects are still open on this repository" >&2
         exit 1
     fi
+    # The same refusal as gh may print it, with no word of what failed.
+    if [ -f "${file%.json}.projects_fail_terse" ] && printf '%s' "$body" | grep -q has_projects; then
+        echo "gh: Validation Failed (HTTP 422)" >&2
+        exit 1
+    fi
     # A flagged repo refuses every write, whatever the body.
     if [ -f "${file%.json}.patch_fail" ]; then
         echo "stub gh: HTTP 403 Resource not accessible by integration" >&2
@@ -126,6 +131,8 @@ touch "$FIXTURES/testorg__limited.read_fail"
 make_repo locked
 touch "$FIXTURES/testorg__locked.patch_fail"
 touch "$FIXTURES/testorg__projecty.projects_fail"
+make_repo terse
+touch "$FIXTURES/testorg__terse.projects_fail_terse"
 jq -n '[{full_name: "testorg/compliant", archived: false},
         {full_name: "testorg/drifted",   archived: false},
         {full_name: "testorg/archived",  archived: true}]' > "$FIXTURES/_org.json"
@@ -210,6 +217,13 @@ if printf '%s' "$sent" | jq -e 'has("has_projects") | not' > /dev/null \
 else
     fail "the retry drops only has_projects (sent: ${sent:-nothing})"
 fi
+
+# gh may word the projects refusal only as a validation failure, so the
+# retry keys on the status, not the text.
+reset_patches
+rc=$(run apply terse)
+[ "$rc" = 0 ] && pass "a projects refusal gh words only as Validation Failed is retried" || fail "a projects refusal gh words only as Validation Failed is retried (got $rc)"
+assert_out "a tersely worded projects refusal is PARTIAL" 'PARTIAL.*terse'
 
 # Only the projects refusal earns the retry; any other failure is a FAIL and
 # nothing is re-sent.
