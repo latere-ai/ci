@@ -136,10 +136,10 @@ jobs:
       - run: go test -race -timeout 10m ./...
 
   goreleaser:
-    # A skipped test job (no test_os) satisfies `needs`; a failed one, or
-    # an unverified commit, stops the release.
+    # A skipped test job (no test_os) satisfies `needs`; a failed or
+    # canceled leg of the matrix, or an unverified commit, stops the release.
     needs: [verified, test]
-    if: ${{ always() && !cancelled() && needs.verified.result == 'success' && needs.test.result != 'failure' }}
+    if: ${{ always() && !cancelled() && needs.verified.result == 'success' && (needs.test.result == 'success' || needs.test.result == 'skipped') }}
     runs-on: ${{ inputs.runs_on }}
     permissions:
       contents: write

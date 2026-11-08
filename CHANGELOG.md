@@ -66,6 +66,9 @@ committed: the commit log already holds that.
   with a token that can write to the repository. A caller's
   `.goreleaser.yaml` hook that read workflow runs from the release job
   needs its own grant.
+- **Breaking**: `cli-release.yml` publishes only when every leg of the
+  `test_os` matrix succeeded. A canceled leg used to let the release
+  through; it now stops it.
 
 ### Fixed
 

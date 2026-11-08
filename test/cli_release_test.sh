@@ -80,10 +80,15 @@ else
     fail "the verified job does not run verified-commit"
 fi
 if grep -qF "needs: [verified, test]" "$WORKFLOW" \
-    && grep -qF "needs.verified.result == 'success' && needs.test.result != 'failure'" "$WORKFLOW"; then
-    pass "goreleaser runs only on a verified commit whose extra tests did not fail"
+    && grep -qF "needs.verified.result == 'success' && (needs.test.result == 'success' || needs.test.result == 'skipped')" "$WORKFLOW"; then
+    pass "goreleaser runs only on a verified commit whose extra tests all succeeded or were skipped"
 else
-    fail "goreleaser can run without a verified commit"
+    fail "goreleaser can run without a verified commit or after a test leg that did not succeed"
+fi
+if grep -F "needs.test.result" "$WORKFLOW" | grep -qE "!= '(failure|cancelled)'"; then
+    fail "goreleaser tolerates a test result other than success or skipped"
+else
+    pass "no test result is let through by exclusion"
 fi
 if grep -qF 'golangci/golangci-lint-action@' "$WORKFLOW"; then
     fail "cli-release still runs golangci-lint itself"
