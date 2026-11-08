@@ -1,6 +1,7 @@
 # Copy to a service repo as .github/workflows/release.yml and adjust the inputs.
-# Pushing a vX.Y.Z tag builds, deploys to latere-k8s, smokes the live surface,
-# and publishes the GitHub release with notes + smoke evidence.
+# Pushing a vX.Y.Z tag builds, deploys to the cluster the kubeconfig names,
+# smokes the live surface, and publishes the GitHub release with its notes
+# and the smoke evidence.
 name: Release
 
 on:
@@ -22,15 +23,15 @@ jobs:
   release:
     uses: latere-ai/ci/.github/workflows/service-release.yml@v1
     with:
-      service: platformd
-      image: ghcr.io/latere-ai/platformd
-      namespace: latere
-      url: https://platform.latere.ai
-      title: Latere Platform
+      service: exampled
+      image: ghcr.io/latere-ai/exampled
+      namespace: example
+      url: https://example.latere.ai
+      title: Example
       has_frontend: true
       spa_embed_dir: internal/web/spa/dist
-      main_package: ./cmd/platformd
-      # preflight: go run ./tools/deploy -manifest deploy/base/deployment.yaml -namespace latere
+      main_package: ./cmd/exampled
+      # preflight: go run ./tools/deploy -manifest deploy/base/deployment.yaml -namespace example
     # Delivers the repository secret DEPLOY_KUBECONFIG, the kubeconfig of the
     # service's rollout identity (deploy/bootstrap/rollout-identity.yaml).
     secrets: inherit

@@ -20,11 +20,11 @@ jobs:
   release:
     uses: latere-ai/ci/.github/workflows/service-release.yml@v1
     with:
-      service: fs
-      image: ghcr.io/latere-ai/fs
-      namespace: latere
-      url: https://fs.latere.ai
-      title: FS
+      service: exampled
+      image: ghcr.io/latere-ai/exampled
+      namespace: example
+      url: https://example.latere.ai
+      title: Example
       build_mode: dockerfile
       dockerfile: Dockerfile
       has_frontend: false
