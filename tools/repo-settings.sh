@@ -44,6 +44,13 @@ usage() {
 # deleting someone's projects to force the write through.
 policy_without_projects() { jq 'del(.has_projects)' "$POLICY_FILE"; }
 
+# True when the PATCH error in $1 is GitHub refusing to disable Projects (an
+# HTTP 422 that names projects). Any other failure is not worth a retry: it
+# would only repeat, or hide a real error behind a half-applied policy.
+is_projects_refusal() {
+    printf '%s' "$1" | grep -q '422' && printf '%s' "$1" | grep -qi 'project'
+}
+
 # Prints one "key: want=X got=Y" line per field that differs. Empty output
 # means the repo already matches the policy.
 diff_settings() {
@@ -70,6 +77,8 @@ resolve_targets() {
     done
 }
 
+# Returns 0 for OK and SKIP, 2 for PARTIAL (every setting but has_projects
+# landed, which is not a failure) and 1 for FAIL.
 apply_one() {
     local slug="$1" actual err
     actual=$(gh api "/repos/$slug" 2>/dev/null)
@@ -89,9 +98,10 @@ apply_one() {
         pass OK "$slug"
         return 0
     fi
-    if policy_without_projects | gh api -X PATCH "/repos/$slug" --input - --silent 2>/dev/null; then
+    if is_projects_refusal "$err" \
+       && policy_without_projects | gh api -X PATCH "/repos/$slug" --input - --silent 2>/dev/null; then
         warn PARTIAL "$slug (projects left enabled: close its classic projects first)"
-        return 0
+        return 2
     fi
     bad FAIL "$slug :: $(printf '%s' "$err" | tr '\n' ' ')"
     return 1
@@ -146,7 +156,7 @@ main() {
         exit 1
     fi
 
-    local targets failed=0 total=0 slug
+    local targets failed=0 partial=0 total=0 slug rc
     # A failed page would leave the earlier pages audited and the run green.
     if ! targets=$(resolve_targets "$@"); then
         bad FAIL "cannot list the repositories"
@@ -162,7 +172,13 @@ main() {
         [ -n "$slug" ] || continue
         total=$((total + 1))
         if [ "$cmd" = "apply" ]; then
-            apply_one "$slug" || failed=$((failed + 1))
+            apply_one "$slug"
+            rc=$?
+            case "$rc" in
+                0) ;;
+                2) partial=$((partial + 1)) ;;
+                *) failed=$((failed + 1)) ;;
+            esac
         else
             check_one "$slug" || failed=$((failed + 1))
         fi
@@ -177,6 +193,11 @@ EOF
             printf "\n\033[31m%d of %d repo(s) failed\033[0m\n" "$failed" "$total"
         fi
         exit 1
+    fi
+    if [ "$partial" -gt 0 ]; then
+        printf "\n\033[33m%d repo(s) match the policy, %d partial (projects left enabled)\033[0m\n" \
+            "$((total - partial))" "$partial"
+        return
     fi
     printf "\n\033[32m%d repo(s) match the policy\033[0m\n" "$total"
 }

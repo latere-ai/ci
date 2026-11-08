@@ -69,8 +69,14 @@ file="$FIXTURES/${slug%%/*}__${slug#*/}.json"
 
 if [ "$method" = "PATCH" ]; then
     if [ "$input" = "-" ]; then body="$(cat)"; else body="$(cat "$input")"; fi
+    printf '%s %s\n' "$slug" "$(printf '%s' "$body" | jq -c 'has("has_projects")')" >> "$FIXTURES/_attempts.log"
     if [ -f "${file%.json}.projects_fail" ] && printf '%s' "$body" | grep -q has_projects; then
         echo "stub gh: HTTP 422 Projects are still open on this repository" >&2
+        exit 1
+    fi
+    # A flagged repo refuses every write, whatever the body.
+    if [ -f "${file%.json}.patch_fail" ]; then
+        echo "stub gh: HTTP 403 Resource not accessible by integration" >&2
         exit 1
     fi
     printf '%s %s\n' "$slug" "$(printf '%s' "$body" | jq -c .)" >> "$FIXTURES/_patches.log"
@@ -90,7 +96,7 @@ make_repo() {
     jq ". + $overlay + {archived: false}" "$POLICY" > "$FIXTURES/testorg__$name.json"
 }
 
-reset_patches() { : > "$FIXTURES/_patches.log"; }
+reset_patches() { : > "$FIXTURES/_patches.log"; : > "$FIXTURES/_attempts.log"; }
 
 run() { "$SCRIPT" "$@" > "$WORK/out" 2>&1; printf '%s' $?; }
 
@@ -108,6 +114,8 @@ make_repo drifted '{allow_merge_commit: true, has_wiki: true}'
 make_repo archived '{archived: true}'
 jq '. + {archived: true}' "$POLICY" > "$FIXTURES/testorg__archived.json"
 make_repo projecty
+make_repo locked
+touch "$FIXTURES/testorg__locked.patch_fail"
 touch "$FIXTURES/testorg__projecty.projects_fail"
 jq -n '[{full_name: "testorg/compliant", archived: false},
         {full_name: "testorg/drifted",   archived: false},
@@ -180,12 +188,30 @@ reset_patches
 rc=$(run apply projecty)
 [ "$rc" = 0 ] && pass "apply survives a repo that refuses has_projects" || fail "apply survives a projects refusal (got $rc)"
 assert_out "apply flags the repo whose projects stayed on" 'PARTIAL.*projecty'
+if grep 'match the policy' "$WORK/out" | grep -qv partial; then
+    fail "apply's summary says every repo matches when one is partial"
+else
+    pass "apply's summary does not say every repo matches when one is partial"
+fi
+assert_out "apply's summary counts the partial repo separately" '0 repo\(s\) match the policy, 1 partial'
 sent=$(awk '$1 == "testorg/projecty" {print $2}' "$FIXTURES/_patches.log" | tail -1)
 if printf '%s' "$sent" | jq -e 'has("has_projects") | not' > /dev/null \
    && printf '%s' "$sent" | jq -e '.allow_merge_commit == false and .has_wiki == false and .delete_branch_on_merge == true' > /dev/null; then
     pass "the retry drops only has_projects and keeps every other field"
 else
     fail "the retry drops only has_projects (sent: ${sent:-nothing})"
+fi
+
+# Only the projects refusal earns the retry; any other failure is a FAIL and
+# nothing is re-sent.
+reset_patches
+rc=$(run apply locked)
+[ "$rc" = 1 ] && pass "apply fails on a write refused for another reason" || fail "apply fails on a write refused for another reason (got $rc)"
+assert_out "a refused write is a FAIL with GitHub's message" 'FAIL.*locked.*HTTP 403'
+if [ "$(wc -l < "$FIXTURES/_attempts.log" | tr -d ' ')" = 1 ]; then
+    pass "a write refused for another reason is not retried without has_projects"
+else
+    fail "a write refused for another reason was retried ($(tr '\n' ';' < "$FIXTURES/_attempts.log"))"
 fi
 
 reset_patches
