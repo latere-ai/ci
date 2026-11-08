@@ -24,6 +24,9 @@ PARENT=bbbb
 GRANDPARENT=cccc
 
 runs_url() { echo "repos/$REPO/actions/workflows/verify.yml/runs?head_sha=$1&event=push&per_page=20"; }
+# The verify workflow's workflow_dispatch runs of commit $1, which a pin commit
+# has in place of a push run.
+dispatch_url() { echo "repos/$REPO/actions/workflows/verify.yml/runs?head_sha=$1&event=workflow_dispatch&per_page=20"; }
 # Every workflow's push runs of commit $1, which the check reads once verify
 # passed.
 others_url() { echo "repos/$REPO/actions/runs?head_sha=$1&event=push&per_page=100"; }
@@ -63,13 +66,14 @@ new_case() {
     local c
     for c in $SHA $PARENT $GRANDPARENT; do
         stub_gh_fixture "$W" "$(others_url $c)" '{"workflow_runs":[]}'
+        stub_gh_fixture "$W" "$(dispatch_url $c)" '{"workflow_runs":[]}'
     done
 }
 run_case() {
     local name=$1 want=$2 text=$3 out rc
     out=$(cd "${CHECKOUT:-$W}" && PATH="$W/bin:$PATH" STUB_GH_DIR="$W" GITHUB_REPOSITORY=$REPO GITHUB_SHA=$SHA \
         GITHUB_REF_NAME=${REF_NAME:-$TAG} GITHUB_REF_TYPE=${REF_TYPE:-tag} GITHUB_RUN_ID=42 POLL_SECONDS=0 \
-        RUNNER_ENVIRONMENT=${RUNNER_ENV:-github-hosted} \
+        RUNNER_ENVIRONMENT=${RUNNER_ENV:-github-hosted} DEFAULT_BRANCH=main \
         VERIFY_WORKFLOW=${VERIFY-verify.yml} WAIT_MINUTES=${WAIT-60} bash "$SCRIPT" 2>&1)
     rc=$?
     if [ "$rc" -eq "$want" ] && printf '%s' "$out" | grep -qF -- "$text"; then
@@ -344,6 +348,70 @@ new_case
 stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs main:success)"
 stub_gh_fixture "$W" "$(others_url $SHA)" "FAIL"
 WAIT=60 run_case "an API error on the other workflows refuses" 1 "cannot read the other workflows"
+
+# A pin commit is pushed with the job's token, which starts no push run, and
+# its verify run is dispatched on the default branch instead.
+new_case
+stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs)"
+stub_gh_fixture "$W" "$(dispatch_url $SHA)" "$(runs main:success)"
+WAIT=0 run_case "a successful dispatched run on the default branch verifies a commit with no push run" 0 "concluded success on $SHA"
+
+new_case
+stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs main:null)"
+stub_gh_fixture "$W" "$(dispatch_url $SHA)" "$(runs main:failure main:success)"
+WAIT=0 run_case "a successful dispatched run stands in for a push run still going" 0 "concluded success on $SHA"
+
+new_case
+stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs main:failure)"
+stub_gh_fixture "$W" "$(dispatch_url $SHA)" "$(runs main:success)"
+WAIT=0 run_case "a failed push run still refuses when a dispatched run passed" 1 "concluded 'failure'"
+
+new_case
+stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs scratch:failure)"
+stub_gh_fixture "$W" "$(dispatch_url $SHA)" "$(runs main:success)"
+WAIT=0 run_case "a failed push run on another branch still refuses when a dispatched run passed" 1 "concluded 'failure'"
+
+new_case
+stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs)"
+stub_gh_fixture "$W" "$(dispatch_url $SHA)" "$(runs scratch:success)"
+stub_gh_fixture "$W" "repos/$REPO/commits/$SHA" "{\"parents\":[{\"sha\":\"$PARENT\"}]}"
+stub_gh_fixture "$W" "repos/$REPO/compare/$PARENT...$SHA" '{"files":[{"filename":"main.go"}]}'
+WAIT=0 run_case "a dispatched run on another branch does not verify the commit" 1 "has no run on $SHA"
+
+new_case
+stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs)"
+stub_gh_fixture "$W" "$(dispatch_url $SHA)" "$(runs main:failure main:cancelled main:null)"
+stub_gh_fixture "$W" "repos/$REPO/commits/$SHA" "{\"parents\":[{\"sha\":\"$PARENT\"}]}"
+stub_gh_fixture "$W" "repos/$REPO/compare/$PARENT...$SHA" '{"files":[{"filename":"main.go"}]}'
+WAIT=0 run_case "a dispatched run that did not succeed does not verify the commit" 1 "has no run on $SHA"
+
+# The dispatched run is for the exact commit: a docs-only commit reads its
+# parent's dispatched run only through the skipped-paths walk, as for a push.
+new_case
+stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs)"
+stub_gh_fixture "$W" "$(runs_url $PARENT)" "$(runs)"
+stub_gh_fixture "$W" "$(dispatch_url $SHA)" "$(runs)"
+stub_gh_fixture "$W" "$(dispatch_url $PARENT)" "$(runs main:success)"
+stub_gh_fixture "$W" "repos/$REPO/commits/$SHA" "{\"parents\":[{\"sha\":\"$PARENT\"}]}"
+stub_gh_fixture "$W" "repos/$REPO/compare/$PARENT...$SHA" '{"files":[{"filename":"CHANGELOG.md"}]}'
+WAIT=0 run_case "a docs-only commit reads its parent's dispatched run" 0 "concluded success on $PARENT"
+
+# An empty DEFAULT_BRANCH is read from the repository.
+new_case
+stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs)"
+stub_gh_fixture "$W" "$(dispatch_url $SHA)" "$(runs trunk:success)"
+stub_gh_fixture "$W" "repos/$REPO" '{"default_branch":"trunk"}'
+W_SAVE=$W
+out=$(cd "$W" && PATH="$W/bin:$PATH" STUB_GH_DIR="$W" GITHUB_REPOSITORY=$REPO GITHUB_SHA=$SHA GITHUB_REF_NAME=$TAG \
+    GITHUB_REF_TYPE=tag GITHUB_RUN_ID=42 POLL_SECONDS=0 DEFAULT_BRANCH="" VERIFY_WORKFLOW=verify.yml WAIT_MINUTES=0 bash "$SCRIPT" 2>&1)
+rc=$?
+if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -qF "concluded success on $SHA"; then
+    pass "an empty default branch is read from the repository"
+else
+    fail "an empty default branch is read from the repository (exit $rc; output: $out)"
+fi
+rm -rf "$W_SAVE"
+unset W_SAVE
 
 if [ "$FAILURES" -gt 0 ]; then
     printf "\n%d failure(s)\n" "$FAILURES"

@@ -753,7 +753,12 @@ runner once:
    canceled, its parent is read instead. That covers the commit
    `lateregate release` cuts, which changes `CHANGELOG.md` alone and is
    pushed with its tag, so its own run has only just started. A run that
-   concluded on the commit itself still decides. Every other workflow the
+   concluded on the commit itself still decides. Where the push runs are
+   missing, still going or canceled, a successful `workflow_dispatch` run
+   of the same workflow on the default branch for that exact commit
+   verifies it; that is the run the ci-gate bump starts for its pin
+   commit, which a push made with the job's token does not run. A failed
+   push run still refuses whatever a dispatched run concluded. Every other workflow the
    same branch push ran must have passed too, such as one holding a check
    the shared gate cannot host yet: one still running is waited for the
    same way, and a failed or canceled one refuses. A workflow whose run

@@ -45,6 +45,15 @@
 # only just started when the release reads it, or the path filter skipped
 # it. A run that concluded on the commit itself still decides.
 #
+# A run of the verify workflow that was started by hand or by a bot with
+# workflow_dispatch, on the default branch and for exactly this commit, counts
+# as a success where the push runs did not decide: they are missing, still
+# going or cancelled. The ci-gate bump pushes its pin commit with the job's
+# token, which starts no push run, and dispatches the workflow instead. The
+# push rules above are not loosened: a failed push run still refuses the
+# release whatever a dispatched run concluded, and a dispatched run on any
+# other branch, or one that did not succeed, counts for nothing.
+#
 # The release is usually a tag push or a published release. A run started
 # on a branch (a manual rebuild from main) reads the push runs of the commit
 # as they are, since there is no tag push to set apart.
@@ -53,7 +62,9 @@
 # GITHUB_REF_NAME, GITHUB_REF_TYPE (tag, or branch; unset reads as tag),
 # GITHUB_RUN_ID, RUNNER_ENVIRONMENT, VERIFY_WORKFLOW (the workflow file name;
 # empty takes the one workflow in the checkout's .github/workflows that
-# calls latere-ai/ci's lateregate.yml, the per-push gate), WAIT_MINUTES, SKIP_PATHS (one shell pattern per line, matched against
+# calls latere-ai/ci's lateregate.yml, the per-push gate), WAIT_MINUTES,
+# DEFAULT_BRANCH (the branch a dispatched run must be on; empty reads it
+# from the repository), SKIP_PATHS (one shell pattern per line, matched against
 # each changed path; * matches across directories), POLL_SECONDS (30;
 # the tests set 0).
 set -euo pipefail
@@ -75,6 +86,7 @@ if [ -z "${WAIT_MINUTES:-}" ]; then
     fi
 fi
 POLL_SECONDS=${POLL_SECONDS:-30}
+DEFAULT_BRANCH=${DEFAULT_BRANCH:-}
 SKIP_PATHS=${SKIP_PATHS-$'specs/*\n*.md'}
 # How many skipped commits are read through before giving up. Far past any
 # run of documentation-only commits between two that change code.
@@ -105,6 +117,23 @@ fi
 # read_others leaves the verify workflow out by its file name.
 export VERIFY_WORKFLOW
 
+# Succeeds when the verify workflow has a successful workflow_dispatch run on
+# the default branch for commit $1.
+dispatched_success() {
+    local n
+    if [ -z "$DEFAULT_BRANCH" ]; then
+        DEFAULT_BRANCH=$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.default_branch') \
+            || die "cannot read the default branch of ${GITHUB_REPOSITORY}, so nothing was released"
+    fi
+    export DEFAULT_BRANCH
+    # $ENV is jq's, which reads the default branch from the environment.
+    # shellcheck disable=SC2016
+    n=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${VERIFY_WORKFLOW}/runs?head_sha=$1&event=workflow_dispatch&per_page=20" \
+        --jq '[.workflow_runs[] | select(.head_branch == $ENV.DEFAULT_BRANCH and .conclusion == "success")] | length') \
+        || die "cannot read the dispatched $VERIFY_WORKFLOW runs of $1, so nothing was released"
+    [ "$n" -gt 0 ]
+}
+
 # Sets VERDICT to success, failure, pending, cancelled or none for the verify
 # runs of commit $1, and RUNS to their conclusions.
 read_verdict() {
@@ -121,6 +150,15 @@ read_verdict() {
         *" running "*) VERDICT=pending ;;
         *" cancelled "*) VERDICT=cancelled ;;
         *) VERDICT=failure ;;
+    esac
+    # Where the push runs did not decide, a dispatched run that passed does.
+    case "$VERDICT" in
+        none | pending | cancelled)
+            if dispatched_success "$1"; then
+                RUNS="${RUNS:+$RUNS }dispatch:success"
+                VERDICT=success
+            fi
+            ;;
     esac
 }
 

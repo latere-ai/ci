@@ -72,6 +72,13 @@ committed: the commit log already holds that.
 - **Breaking**: `service-release.yml` refuses `build_cli: true` with no
   `cli_build_cmd` in its first step. It used to fail only at the publish,
   after the build and the deploy had gone out.
+- A release on a commit whose verify workflow has no push run now counts a
+  successful `workflow_dispatch` run of that workflow on the default branch
+  for the exact commit, as verified. This is the run `ci-gate-bump.yml`
+  dispatches for its pin commit, which a push with the job's token does not
+  start, so a release on a pin commit is no longer blocked. A failed push
+  run of the commit, on any branch, still blocks the release, and so does a
+  dispatched run on another branch or one that did not succeed.
 
 ### Fixed
 
