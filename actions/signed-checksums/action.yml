@@ -1,5 +1,5 @@
 name: signed-checksums
-description: Write checksums.txt over every file in a directory and sign it with the workflow's identity.
+description: Write checksums.txt over every file in a directory (a subdirectory is refused) and sign it with the workflow's identity.
 inputs:
   dir:
     description: "Directory whose files are summed; checksums.txt and its bundle land beside them."
