@@ -32,7 +32,12 @@ die() {
 # Appends to the array named $1 every path the lines of $2 name.
 expand() {
     local var=$1 line matches m
+    # A line is one path or pattern, so a space inside it is part of the name:
+    # only a newline may split the expansion (which a line never holds).
+    local IFS=$'\n'
     while IFS= read -r line; do
+        line=${line#"${line%%[![:space:]]*}"}
+        line=${line%"${line##*[![:space:]]}"}
         [ -n "$line" ] || continue
         # The line is a pattern, expanded here on purpose.
         # shellcheck disable=SC2206

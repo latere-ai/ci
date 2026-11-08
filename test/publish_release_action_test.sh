@@ -174,6 +174,21 @@ else
     fail "a file name with # is refused ($out)"
 fi
 
+# One path or pattern per line: a space is part of the name.
+new_repo
+echo spaced > "$TMP/w/dist/my app.txt"
+mkdir -p "$TMP/w/my dir"
+echo nested > "$TMP/w/my dir/a b.txt"
+if out=$(publish env GITHUB_REF_NAME=v1.2.0 FILES=$'dist/my app.txt\nmy dir/*.txt'); then
+    if [ "$(sort "$TMP/release/assets" | tr '\n' ' ')" = "a b.txt my app.txt " ]; then
+        pass "a path or pattern with a space is one path or pattern per line"
+    else
+        fail "a path or pattern with a space is one path or pattern per line ($(tr '\n' ' ' < "$TMP/release/assets"))"
+    fi
+else
+    fail "a path or pattern with a space is one path or pattern per line ($out)"
+fi
+
 if [ "$FAILURES" -gt 0 ]; then
     printf "\n%d failure(s)\n" "$FAILURES"
     exit 1
