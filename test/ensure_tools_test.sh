@@ -157,6 +157,24 @@ if [ $? -eq 0 ] && [ ! -s "$TMP/path" ]; then
 else
     fail "ensure-kustomize fetched over the pinned version: $out"
 fi
+# The installed version is matched whole: a pin of 5.8.3 is not 5.8.30.
+: > "$TMP/path"
+printf '#!/bin/sh\necho "v%s0"\n' "$SV" > "$TMP/have/kustomize"
+out=$(run "$KUSTOMIZE" PATH="$TMP/have:$SAFE_PATH")
+if [ $? -eq 0 ] && grep -qx "$TMP/rt/kustomize-bin" "$TMP/path"; then
+    pass "ensure-kustomize fetches the pinned version over a longer one that starts with it"
+else
+    fail "ensure-kustomize kept a kustomize at v${SV}0: $out"
+fi
+: > "$TMP/path"
+printf '#!/bin/sh\necho "{Version:kustomize/v%s GitCommit:abc BuildDate:x GoOs:linux GoArch:amd64}"\n' "$SV" > "$TMP/have/kustomize"
+out=$(run "$KUSTOMIZE" PATH="$TMP/have:$SAFE_PATH")
+if [ $? -eq 0 ] && [ ! -s "$TMP/path" ]; then
+    pass "ensure-kustomize accepts the pinned version in the tool's own version line"
+else
+    fail "ensure-kustomize fetched over the pinned version in its own version line: $out"
+fi
+: > "$TMP/path"
 printf '#!/bin/sh\necho "v1.0.0"\n' > "$TMP/have/kustomize"
 out=$(run "$KUSTOMIZE" PATH="$TMP/have:$SAFE_PATH")
 if [ $? -eq 0 ] && grep -qx "$TMP/rt/kustomize-bin" "$TMP/path"; then

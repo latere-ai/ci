@@ -10,7 +10,13 @@ set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=../lib/versions.sh
 . "$(dirname "${BASH_SOURCE[0]}")/../lib/versions.sh"
 
-if command -v kustomize >/dev/null 2>&1 && kustomize version 2>/dev/null | grep -qF "v${KUSTOMIZE_VERSION}"; then
+# The version must end where the pin ends: v5.8.3 is not v5.8.30 or v5.8.3.1.
+# The output is read into a variable first so grep -q cannot close a pipe early.
+have=""
+if command -v kustomize >/dev/null 2>&1; then
+    have=$(kustomize version 2>/dev/null || true)
+fi
+if printf '%s\n' "$have" | grep -qE "v${KUSTOMIZE_VERSION//./\\.}([^0-9.]|\$)"; then
     kustomize version
     exit 0
 fi
