@@ -60,8 +60,10 @@ its file under `test/` and its title.
   so a caller writes them as constants and never builds them from event
   data.
 - **`secrets: inherit` passes every secret.** A called workflow then sees
-  every secret of the caller, not only the ones it declares. Map the
-  secrets a stage names instead.
+  every secret of the caller, not only the ones it declares. The starter
+  callers use it because the service stage declares several optional
+  secrets; a caller that wants a stage to see only what it names maps each
+  one instead.
 - **`@v1` is trust in this repository's tags.** Whoever can push a
   `v1.MINOR.PATCH` tag to latere-ai/ci changes what every `@v1` caller
   runs, with that caller's permissions and secrets, and the tag move does
