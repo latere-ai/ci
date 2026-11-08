@@ -77,19 +77,30 @@ resolve_targets() {
     done
 }
 
+# Reads the repository into $REPO_JSON. When gh fails, or answers with
+# something that is not an object, it reports a FAIL with the error and
+# returns 1: gh prints an HTTP error's body on stdout too, so the output alone
+# proves nothing. It is not called in a command substitution, which would
+# swallow the FAIL line.
+read_repo() {
+    local slug="$1" out
+    if ! out=$(gh api "/repos/$slug" 2>&1); then
+        bad FAIL "$slug :: cannot read repository: $(printf '%s' "$out" | tr '\n' ' ')"
+        return 1
+    fi
+    if ! printf '%s' "$out" | jq -e 'type == "object"' > /dev/null 2>&1; then
+        bad FAIL "$slug :: the answer for the repository is not JSON"
+        return 1
+    fi
+    REPO_JSON="$out"
+}
+
 # Returns 0 for OK and SKIP, 2 for PARTIAL (every setting but has_projects
 # landed, which is not a failure) and 1 for FAIL.
 apply_one() {
     local slug="$1" actual err
-    actual=$(gh api "/repos/$slug" 2>/dev/null)
-    if [ -z "$actual" ]; then
-        bad FAIL "$slug :: cannot read repository"
-        return 1
-    fi
-    if ! printf '%s' "$actual" | jq -e 'type == "object"' > /dev/null 2>&1; then
-        bad FAIL "$slug :: the answer for the repository is not JSON"
-        return 1
-    fi
+    read_repo "$slug" || return 1
+    actual="$REPO_JSON"
     if [ "$(printf '%s' "$actual" | jq -r '.archived')" = "true" ]; then
         warn SKIP "$slug (archived, settings are read-only)"
         return 0
@@ -109,15 +120,8 @@ apply_one() {
 
 check_one() {
     local slug="$1" actual drift
-    actual=$(gh api "/repos/$slug" 2>/dev/null)
-    if [ -z "$actual" ]; then
-        bad FAIL "$slug :: cannot read repository"
-        return 1
-    fi
-    if ! printf '%s' "$actual" | jq -e 'type == "object"' > /dev/null 2>&1; then
-        bad FAIL "$slug :: the answer for the repository is not JSON"
-        return 1
-    fi
+    read_repo "$slug" || return 1
+    actual="$REPO_JSON"
     if [ "$(printf '%s' "$actual" | jq -r '.archived')" = "true" ]; then
         warn SKIP "$slug (archived, settings are read-only)"
         return 0
@@ -136,12 +140,14 @@ check_one() {
 }
 
 main() {
+    case "${1:-}" in
+        -h|--help) usage 0 ;;
+    esac
     [ $# -ge 1 ] || usage
     local cmd="$1"; shift
     [ $# -ge 1 ] || usage
     case "$cmd" in
         apply|check) ;;
-        -h|--help)   usage 0 ;;
         *)           usage ;;
     esac
     if [ ! -f "$POLICY_FILE" ]; then

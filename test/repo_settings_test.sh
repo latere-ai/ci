@@ -65,6 +65,13 @@ esac
 
 slug="${path#/repos/}"
 file="$FIXTURES/${slug%%/*}__${slug#*/}.json"
+# A flagged repo answers a read the way gh does for an HTTP error: the error
+# body on stdout, the status on stderr, exit 1.
+if [ -f "${file%.json}.read_fail" ]; then
+    echo '{"message":"API rate limit exceeded","status":"403"}'
+    echo "gh: API rate limit exceeded (HTTP 403)" >&2
+    exit 1
+fi
 [ -f "$file" ] || { echo "stub gh: HTTP 404 Not Found" >&2; exit 1; }
 
 if [ "$method" = "PATCH" ]; then
@@ -114,6 +121,8 @@ make_repo drifted '{allow_merge_commit: true, has_wiki: true}'
 make_repo archived '{archived: true}'
 jq '. + {archived: true}' "$POLICY" > "$FIXTURES/testorg__archived.json"
 make_repo projecty
+make_repo limited
+touch "$FIXTURES/testorg__limited.read_fail"
 make_repo locked
 touch "$FIXTURES/testorg__locked.patch_fail"
 touch "$FIXTURES/testorg__projecty.projects_fail"
@@ -228,7 +237,23 @@ else
     fail "apply --all wrote to: $(cut -d' ' -f1 "$FIXTURES/_patches.log" | sort -u | tr '\n' ' ')"
 fi
 
+for cmd in check apply; do
+    reset_patches
+    rc=$(run "$cmd" limited)
+    if [ "$rc" = 1 ] && grep -q 'FAIL.*limited.*rate limit' "$WORK/out" && ! grep -q 'DRIFT\|OK' "$WORK/out"; then
+        pass "$cmd reports an unreadable repository with gh's error, not drift"
+    else
+        fail "$cmd reports an unreadable repository with gh's error (got $rc)"
+        sed 's/^/        /' "$WORK/out"
+    fi
+done
+
 # --- usage ------------------------------------------------------------------
+rc=$(run --help)
+[ "$rc" = 0 ] && pass "a bare --help exits 0" || fail "a bare --help exits 0 (got $rc)"
+assert_out "--help prints the usage" 'repo-settings.sh apply <repo>'
+rc=$(run -h)
+[ "$rc" = 0 ] && pass "a bare -h exits 0" || fail "a bare -h exits 0 (got $rc)"
 rc=$(run)
 [ "$rc" = 2 ] && pass "no arguments prints usage and exits 2" || fail "no arguments exits 2 (got $rc)"
 rc=$(run apply)
