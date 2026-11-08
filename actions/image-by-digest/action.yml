@@ -1,5 +1,5 @@
 name: image-by-digest
-description: Build one image, push it by digest under no tag, and check it reports the version the tag pins.
+description: Build one image, push it by digest under no tag, and check it reports the version the tag pins, exactly (v1.2.30 and v1.2.3-dirty do not pass for v1.2.3). Only the runner's platform of the image is run for the check.
 inputs:
   owner:
     description: "Image namespace, from release-preflight."
@@ -32,7 +32,7 @@ inputs:
     required: false
     default: ""
   version_expect:
-    description: "How that output starts, with {name} and {tag} replaced."
+    description: "How that output starts, with {name} and {tag} replaced. What follows it must be whitespace or nothing."
     required: false
     default: "{name} {tag}"
   commit:

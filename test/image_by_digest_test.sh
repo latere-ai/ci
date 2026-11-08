@@ -94,6 +94,12 @@ fi
 
 VERSION_ARGS=version STUB_VERSION="ponsd v1.1.9 (old)" run_case "a candidate reporting another version is refused" 1 "reports 'ponsd v1.1.9 (old)', and the tag pins 'ponsd v1.2.0'"
 
+# The tag must end where the output says it does: at the end or at whitespace.
+VERSION_ARGS=version STUB_VERSION="ponsd v1.2.00" run_case "a candidate reporting v1.2.00 for tag v1.2.0 is refused" 1 "reports 'ponsd v1.2.00', and the tag pins 'ponsd v1.2.0'"
+VERSION_ARGS=version STUB_VERSION="ponsd v1.2.0-dirty" run_case "a candidate reporting v1.2.0-dirty for tag v1.2.0 is refused" 1 "reports 'ponsd v1.2.0-dirty'"
+VERSION_ARGS=version STUB_VERSION="ponsd v1.2.0" run_case "a candidate whose output ends at the tag passes" 0 "it reports: ponsd v1.2.0"
+VERSION_ARGS=version STUB_VERSION=$'ponsd v1.2.0\nbuilt 2026-11-01' run_case "a candidate whose tag is followed by a newline passes" 0 "it reports: ponsd v1.2.0"
+
 VERSION_ARGS=-version VERSION_EXPECT="luxd {tag}" STUB_VERSION="luxd v1.2.0" run_case "version_expect names a binary other than the image" 0 "it reports: luxd v1.2.0"
 
 VERSION_ARGS="" run_case "an empty version_args skips the check" 0 "the candidate is ghcr.io/latere-ai/ponsd@sha256:abc123"

@@ -14,7 +14,7 @@
 # PLATFORMS, BUILD_ARGS (KEY=VALUE per line), VERSION_ARGS (the arguments
 # that make the image print its version; empty skips the check),
 # VERSION_EXPECT (the start of that output, with {name} and {tag} replaced;
-# default "{name} {tag}"), GITHUB_REF_NAME, COMMIT, DATE. Writes ref and
+# default "{name} {tag}"; it must end the output or be followed by whitespace), GITHUB_REF_NAME, COMMIT, DATE. Writes ref and
 # digest to $GITHUB_OUTPUT.
 set -euo pipefail
 
@@ -59,10 +59,23 @@ if [ -n "${VERSION_ARGS:-}" ]; then
     # shellcheck disable=SC2086
     got=$(docker run --rm "${ref}@${digest}" $VERSION_ARGS 2>&1) \
         || die "${ref}@${digest} exited non-zero when asked for its version: $got"
+    # The output starts with the expected text and the tag ends there, at the
+    # end of the output or at whitespace: v1.2.30 and v1.2.3-dirty are not
+    # v1.2.3.
+    ok=""
     case "$got" in
-        "$expect"*) echo "it reports: $got" ;;
-        *) die "${ref}@${digest} reports '$got', and the tag pins '$expect'" ;;
+        "$expect"*)
+            rest=${got#"$expect"}
+            case "$rest" in
+                '' | [[:space:]]*) ok=1 ;;
+            esac
+            ;;
     esac
+    if [ -n "$ok" ]; then
+        echo "it reports: $got"
+    else
+        die "${ref}@${digest} reports '$got', and the tag pins '$expect'"
+    fi
 fi
 
 {
