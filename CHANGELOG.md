@@ -29,9 +29,11 @@ committed: the commit log already holds that.
   name with `#` is refused, since `gh` reads it as a label.
 - **Breaking**: `tools/repo-settings.sh` fails when the repository listing
   fails partway, when the policy file or a repository answer is not JSON,
-  and when a write is refused for any reason other than open classic
-  projects. A repository left with projects enabled is still `PARTIAL`,
-  counted apart in the summary, and leaves the exit status 0.
+  and when a write is refused with anything but the validation error
+  (HTTP 422) GitHub gives for open classic projects, which alone is
+  retried without `has_projects`. A repository left with projects enabled
+  is still `PARTIAL`, counted apart in the summary, and leaves the exit
+  status 0.
 - A re-run of a publish over an existing release restates its title and
   prerelease flag along with the notes.
 - Each attempt of an image deploy's smoke is stopped when `smoke_timeout`
