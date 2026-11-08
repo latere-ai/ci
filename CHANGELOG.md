@@ -83,8 +83,8 @@ committed: the commit log already holds that.
 - The release check (`verified-commit`, run by `image-build.yml`,
   `service-release.yml`, `cli-release.yml` and `notes-release.yml`) also
   reads every other workflow the tagged commit's branch push ran. A check a
-  repository keeps in a workflow of its own, such as a device session under
-  a real sandbox, now blocks a release when it failed or was cancelled, and
+  repository keeps in a workflow of its own, such as one that needs a host
+  this workflow cannot provide, now blocks a release when it failed or was canceled, and
   is waited for while it runs, as the per-push gate is. A workflow whose run
   skipped every job, or that did not run on the commit, has no say.
 
@@ -128,13 +128,6 @@ committed: the commit log already holds that.
 
 ## v1.31.0 - 2026-11-05
 
-### Fixed
-
-- `ci-gate-bump.yml` finds the per-push caller by its `uses:` line. A comment
-  or a header example that names `lateregate.yml@v1` is no longer counted as a
-  second caller, so a repository that documents the pipeline in a comment no
-  longer fails the dispatch of the gate on the pin commit.
-
 ### Added
 
 - `image-deploy.yml`, a stage a core calls between `image-build.yml` and
@@ -158,6 +151,13 @@ committed: the commit log already holds that.
   `KUBECTL_VERSION` and `KUSTOMIZE_VERSION` in `actions/lib/versions.sh`
   (`kubectl` and `kustomize` outputs).
 
+### Fixed
+
+- `ci-gate-bump.yml` finds the per-push caller by its `uses:` line. A comment
+  or a header example that names `lateregate.yml@v1` is no longer counted as a
+  second caller, so a repository that documents the pipeline in a comment no
+  longer fails the dispatch of the gate on the pin commit.
+
 ## v1.30.0 - 2026-11-05
 
 ### Added
@@ -166,7 +166,7 @@ committed: the commit log already holds that.
   not pass CI. Their first step is the shared `verified-commit` check that
   `image-build.yml` and `cli-release.yml` already run: the tagged commit's
   per-push gate run on its branch push must have succeeded, so a tag on a
-  commit whose CI failed, was cancelled or never ran builds, deploys and
+  commit whose CI failed, was canceled or never ran builds, deploys and
   publishes nothing. Both take the same `verify_workflow` (empty: the
   workflow that calls `lateregate.yml`), `wait_minutes` and `skip_paths`
   (`specs/*`, `*.md`) inputs. A `notes-release.yml` caller
@@ -237,7 +237,7 @@ committed: the commit log already holds that.
   deploys before it fails; `sign-image` signs the image and writes its
   SBOM; `publish-release` publishes the release as a draft until its files
   are attached. The image SBOM asset is now `sbom-<image>.cdx.json`
-  (`sbom-platformd.cdx.json`), not `sbom-image.cdx.json`. Still one job,
+  (`sbom-exampled.cdx.json`), not `sbom-image.cdx.json`. Still one job,
   and the deploy is unchanged.
 - `cli-release.yml` no longer runs lint and the tests again on the tag:
   it checks that the tagged commit passed its per-push gate (the workflow
@@ -331,9 +331,9 @@ committed: the commit log already holds that.
   summary with its result and time. A `test_os` that names a runner other
   than `runs_on` still gets the probe and the test matrix, and `all gates
   passed` starts after them. Hosted runners keep one job per gate. The
-  required check keeps its name, `gate / all gates passed`. A cancelled run
+  required check keeps its name, `gate / all gates passed`. A canceled run
   on the self-hosted runner, pull request runs included, cancels the job,
-  which reports cancelled.
+  which reports canceled.
 
 ## v1.25.1 - 2026-10-21
 
@@ -392,6 +392,14 @@ committed: the commit log already holds that.
 
 ## v1.22.0 - 2026-10-18
 
+### Added
+
+- `runner-health.yml` runs every ten minutes in this repository, looks for
+  an online `linux-vm` runner, and moves `CI_RUNNER_PRIVATE` to
+  `ubuntu-latest` when none is online for a minute and back when one is.
+  It needs the `RUNNER_HEALTH_TOKEN` secret described in the README; until
+  it is set, the run warns and the variable is moved by hand.
+
 ### Changed
 
 - Every pipeline's `runs_on` defaults to the organization's runner policy
@@ -407,14 +415,6 @@ committed: the commit log already holds that.
 - `test_os` in `lateregate.yml`, `go-verify.yml` and `cli-release.yml`
   defaults to the runner `runs_on` resolves to, so a caller no longer
   passes `test_os: '["linux-vm"]'` beside `runs_on`.
-
-### Added
-
-- `runner-health.yml` runs every ten minutes in this repository, looks for
-  an online `linux-vm` runner, and moves `CI_RUNNER_PRIVATE` to
-  `ubuntu-latest` when none is online for a minute and back when one is.
-  It needs the `RUNNER_HEALTH_TOKEN` secret described in the README; until
-  it is set, the run warns and the variable is moved by hand.
 
 ### Fixed
 
@@ -438,7 +438,7 @@ committed: the commit log already holds that.
 
 ### Changed
 
-- `lateregate.yml`'s `all gates passed` job is skipped in a cancelled push
+- `lateregate.yml`'s `all gates passed` job is skipped in a canceled push
   run. Every run a newer push supersedes, and every duplicate run GitHub
   starts for one push, still queued it on the caller's runner, so on the
   two-slot self-hosted runner each cancellation held a slot for about half
@@ -448,19 +448,17 @@ committed: the commit log already holds that.
 
 ## v1.20.0 - 2026-09-27
 
+### Removed
+
+- `images-release.yml`. No repository calls it: `latere-ai/sandbox-images`
+  releases through its own workflow.
+
 ### Fixed
 
 - Every `setup-bun` step installs bun into the job's own temp directory.
   Runner slots on one machine share a home directory, and a job running bun
   while another slot extracted it failed with `spawn ETXTBSY`, which failed
   a release's image build at random.
-
-### Removed
-
-- `images-release.yml`. No repository calls it: `latere-ai/sandbox-images`
-  releases through its own workflow, and the hosted Cella plane pins its
-  images in platformd's catalog rather than reading the `catalog.json` this
-  pipeline published.
 
 ## v1.19.0 - 2026-09-26
 
@@ -571,13 +569,6 @@ committed: the commit log already holds that.
 
 ## v1.13.0 - 2026-09-18
 
-### Changed
-
-- Run artifacts expire after 7 days in every pipeline, the `*.dockerbuild`
-  build record `docker/build-push-action` uploads beside each image included.
-  GitHub's 90-day default filled one consumer's artifact store with 284
-  artifacts, and a full store fails the upload step of the next release.
-
 ### Added
 
 - `cli-release.yml`, `images-release.yml` and `notes-release.yml` accept
@@ -586,7 +577,23 @@ committed: the commit log already holds that.
   cache only on a hosted label; set `test_os` to the same label to move its
   test matrix too.
 
+### Changed
+
+- Run artifacts expire after 7 days in every pipeline, the `*.dockerbuild`
+  build record `docker/build-push-action` uploads beside each image included.
+  GitHub's 90-day default filled one consumer's artifact store with 284
+  artifacts, and a full store fails the upload step of the next release.
+
 ## v1.12.0 - 2026-09-13
+
+### Added
+
+- `go-verify.yml` accepts `runs_on` for private runners and restores Go
+  caches only on hosted runners. Set `test_os` to the same private label.
+- `lateregate.yml`: configured TypeScript enum checks set up Node 24 and
+  Bun 1.3.14, prepare dependencies from committed lockfiles, then run the
+  shared gate. Both enum gates follow the shared plan and its dated waivers;
+  Go gates do not install JavaScript tools or dependencies.
 
 ### Fixed
 
@@ -601,15 +608,6 @@ committed: the commit log already holds that.
 - CLI release race tests have ten minutes for their subprocess end-to-end suites.
 - Coverage checks still fail below their threshold, but an exhausted artifact
   quota no longer fails CI when uploading the report copy.
-
-### Added
-
-- `go-verify.yml` accepts `runs_on` for private runners and restores Go
-  caches only on hosted runners. Set `test_os` to the same private label.
-- `lateregate.yml`: configured TypeScript enum checks set up Node 24 and
-  Bun 1.3.14, prepare dependencies from committed lockfiles, then run the
-  shared gate. Both enum gates follow the shared plan and its dated waivers;
-  Go gates do not install JavaScript tools or dependencies.
 
 ## v1.11.0 - 2026-09-12
 
@@ -686,10 +684,7 @@ notes any more.
   body is the section rather than the commit list; a consumer's
   `changelog:` block in `.goreleaser.yaml` is unused.
 - `images-release.yml` gains a `go_version` input, used to run the reader.
-
-### Consumer action
-
-Add `CHANGELOG.md` with a `## Unreleased` heading (in a Go repository,
-`go tool lateregate init` writes it) and put a section under it before the
-next tag. The first tag after this pipeline moves to `v1` fails its release
-job without one.
+- **Breaking**: **Add `CHANGELOG.md` with a `## Unreleased` heading and put a
+  section under it before the next tag.** In a Go repository, `go tool
+  lateregate init` writes the file. The first tag after this pipeline moves to
+  `v1` fails its release job without one.
