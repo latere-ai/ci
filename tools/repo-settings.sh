@@ -77,6 +77,10 @@ apply_one() {
         bad FAIL "$slug :: cannot read repository"
         return 1
     fi
+    if ! printf '%s' "$actual" | jq -e 'type == "object"' > /dev/null 2>&1; then
+        bad FAIL "$slug :: the answer for the repository is not JSON"
+        return 1
+    fi
     if [ "$(printf '%s' "$actual" | jq -r '.archived')" = "true" ]; then
         warn SKIP "$slug (archived, settings are read-only)"
         return 0
@@ -100,11 +104,18 @@ check_one() {
         bad FAIL "$slug :: cannot read repository"
         return 1
     fi
+    if ! printf '%s' "$actual" | jq -e 'type == "object"' > /dev/null 2>&1; then
+        bad FAIL "$slug :: the answer for the repository is not JSON"
+        return 1
+    fi
     if [ "$(printf '%s' "$actual" | jq -r '.archived')" = "true" ]; then
         warn SKIP "$slug (archived, settings are read-only)"
         return 0
     fi
-    drift=$(diff_settings "$actual" "$POLICY_FILE")
+    if ! drift=$(diff_settings "$actual" "$POLICY_FILE"); then
+        bad FAIL "$slug :: cannot compare with the policy"
+        return 1
+    fi
     if [ -z "$drift" ]; then
         pass OK "$slug"
         return 0
@@ -125,6 +136,13 @@ main() {
     esac
     if [ ! -f "$POLICY_FILE" ]; then
         bad FAIL "policy file not found: $POLICY_FILE"
+        exit 1
+    fi
+
+    # Every comparison reads the policy; a file that is not a JSON object would
+    # otherwise make jq fail quietly and read as "no drift".
+    if ! jq -e 'type == "object"' "$POLICY_FILE" > /dev/null 2>&1; then
+        bad FAIL "policy file is not a JSON object: $POLICY_FILE"
         exit 1
     fi
 

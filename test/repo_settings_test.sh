@@ -214,4 +214,27 @@ REPO_SETTINGS_POLICY="$WORK/absent.json" "$SCRIPT" check compliant > "$WORK/out"
 rc=$?
 [ "$rc" = 1 ] && pass "a missing policy file fails loudly" || fail "a missing policy file fails loudly (got $rc)"
 
+printf '{"allow_squash_merge": true,\n' > "$WORK/bad.json"
+for cmd in check apply; do
+    REPO_SETTINGS_POLICY="$WORK/bad.json" "$SCRIPT" "$cmd" compliant > "$WORK/out" 2>&1
+    rc=$?
+    if [ "$rc" = 1 ] && ! grep -q 'OK' "$WORK/out" && grep -q 'not a JSON object' "$WORK/out"; then
+        pass "$cmd fails on a policy file that is not JSON"
+    else
+        fail "$cmd fails on a policy file that is not JSON (got $rc)"
+    fi
+done
+
+echo '<html>Bad gateway</html>' > "$FIXTURES/testorg__garbage.json"
+for cmd in check apply; do
+    reset_patches
+    rc=$(run "$cmd" garbage)
+    if [ "$rc" = 1 ] && grep -q 'FAIL.*not JSON' "$WORK/out" && ! grep -q 'OK' "$WORK/out" && [ ! -s "$FIXTURES/_patches.log" ]; then
+        pass "$cmd fails on a repository answer that is not JSON"
+    else
+        fail "$cmd fails on a repository answer that is not JSON (got $rc)"
+        sed 's/^/        /' "$WORK/out"
+    fi
+done
+
 [ "$FAILURES" -eq 0 ] || exit 1
