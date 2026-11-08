@@ -56,6 +56,9 @@ done
 case "$path" in
     /orgs/*/repos*)
         cat "$FIXTURES/_org.json"
+        # A flagged listing delivers its first page, then fails, as a 502 on
+        # a later page of --paginate does.
+        if [ -f "$FIXTURES/_org.fail" ]; then echo "gh: HTTP 502" >&2; exit 1; fi
         exit 0
         ;;
 esac
@@ -141,6 +144,18 @@ rc=$(run check --all)
 [ "$rc" = 1 ] && pass "check --all fails when any org repo drifted" || fail "check --all fails on drift (got $rc)"
 assert_out "check --all reports the drifted repo" 'DRIFT.*testorg/drifted'
 assert_out "check --all counts the audit" '1 of 2 repo\(s\) drifted'
+
+# The first page holds only a compliant repo, so a run that audits it alone
+# would come out green.
+cp "$FIXTURES/_org.json" "$FIXTURES/_org.full"
+jq -n '[{full_name: "testorg/compliant", archived: false}]' > "$FIXTURES/_org.json"
+touch "$FIXTURES/_org.fail"
+rc=$(run check --all)
+rm -f "$FIXTURES/_org.fail"
+mv "$FIXTURES/_org.full" "$FIXTURES/_org.json"
+[ "$rc" = 1 ] && pass "check --all fails when the org listing fails partway" || fail "check --all fails when the org listing fails partway (got $rc)"
+assert_out "a failed listing is reported" 'FAIL.*cannot list the repositories'
+if grep -q 'match the policy' "$WORK/out"; then fail "a failed listing printed a clean summary"; else pass "a failed listing prints no clean summary"; fi
 
 rc=$(run check missing)
 [ "$rc" = 1 ] && pass "check exits 1 on an unreadable repo" || fail "check exits 1 on an unreadable repo (got $rc)"

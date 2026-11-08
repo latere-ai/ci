@@ -129,7 +129,11 @@ main() {
     fi
 
     local targets failed=0 total=0 slug
-    targets=$(resolve_targets "$@")
+    # A failed page would leave the earlier pages audited and the run green.
+    if ! targets=$(resolve_targets "$@"); then
+        bad FAIL "cannot list the repositories"
+        exit 1
+    fi
     if [ -z "$targets" ]; then
         bad FAIL "no target repositories"
         exit 1
