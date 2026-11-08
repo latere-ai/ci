@@ -272,6 +272,21 @@ gate_checkout
 VERIFY="" run_case "no workflow running the gate refuses" 1 "no workflow in .github/workflows calls"
 rm -rf "$CHECKOUT"
 
+# A commented-out call is not a gate, and a list item's call is.
+new_case
+gate_checkout ci.yaml
+printf 'jobs:\n  verify:\n    # uses: latere-ai/ci/.github/workflows/lateregate.yml@v1\n' > "$CHECKOUT/.github/workflows/old.yml"
+stub_gh_fixture "$W" "repos/$REPO/actions/workflows/ci.yaml/runs?head_sha=$SHA&event=push&per_page=20" "$(runs main:success)"
+VERIFY="" run_case "a commented-out gate call is not a gate" 0 "ci.yaml concluded success"
+rm -rf "$CHECKOUT"
+
+new_case
+gate_checkout
+printf 'jobs:\n  - uses: latere-ai/ci/.github/workflows/lateregate.yml@v1\n' > "$CHECKOUT/.github/workflows/list.yml"
+stub_gh_fixture "$W" "repos/$REPO/actions/workflows/list.yml/runs?head_sha=$SHA&event=push&per_page=20" "$(runs main:success)"
+VERIFY="" run_case "a gate call written as a list item is a gate" 0 "list.yml concluded success"
+rm -rf "$CHECKOUT"
+
 new_case
 gate_checkout ci.yml verify.yml
 VERIFY="" run_case "two workflows running the gate refuse" 1 "more than one workflow"

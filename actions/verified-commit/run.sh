@@ -94,7 +94,7 @@ die() {
 # The per-push gate is whichever workflow calls lateregate.yml; a
 # repository names it ci.yaml or verify.yml as it pleases.
 if [ -z "$VERIFY_WORKFLOW" ]; then
-    gates=$(grep -El 'uses:[[:space:]]*latere-ai/ci/\.github/workflows/lateregate\.yml@' .github/workflows/*.yml .github/workflows/*.yaml 2> /dev/null || true)
+    gates=$(grep -El '^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]*latere-ai/ci/\.github/workflows/lateregate\.yml@' .github/workflows/*.yml .github/workflows/*.yaml 2> /dev/null || true)
     case "$(printf '%s' "$gates" | grep -c .)" in
         1) VERIFY_WORKFLOW=$(basename "$gates") ;;
         0) die "no workflow in .github/workflows calls latere-ai/ci's lateregate.yml; name the per-push workflow in verify_workflow" ;;
