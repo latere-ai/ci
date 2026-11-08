@@ -71,7 +71,8 @@ esac
 title="${TITLE:+$TITLE }$TAG"
 
 if gh release view "$TAG" --repo "$REPO" > /dev/null 2>&1; then
-    gh release edit "$TAG" --repo "$REPO" --notes-file "$work/body.md"
+    gh release edit "$TAG" --repo "$REPO" --title "$title" ${prerelease[@]+"${prerelease[@]}"} \
+        --notes-file "$work/body.md"
     if [ "${#files[@]}" -gt 0 ]; then
         gh release upload "$TAG" --repo "$REPO" --clobber "${files[@]}"
     fi

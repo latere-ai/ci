@@ -46,6 +46,8 @@ case "$cmd" in
         while [ $# -gt 0 ]; do
             case "$1" in
                 --draft=false) echo published > "$r/state" ;;
+                --prerelease) touch "$r/prerelease" ;;
+                --title) echo "$2" > "$r/title"; shift ;;
                 --notes-file) cp "$2" "$r/body"; shift ;;
                 --repo) shift ;;
             esac
@@ -146,6 +148,19 @@ elif printf '%s' "$out" | grep -qF "'dist/*.zip' names no file" && [ ! -d "$TMP/
     pass "a file pattern that matches nothing is refused before anything is created"
 else
     fail "a file pattern that matches nothing is refused ($out)"
+fi
+
+# A re-run that edits the release also restates the title and the flag.
+new_repo
+publish env GITHUB_REF_NAME=v1.3.0-rc1 TITLE=Lux FILES=dist/app.tar.gz > /dev/null
+rm -f "$TMP/release/title" "$TMP/release/prerelease"
+: > "$TMP/calls"
+if publish env GITHUB_REF_NAME=v1.3.0-rc1 TITLE=Lux FILES=dist/app.tar.gz > /dev/null \
+    && grep -q "release edit v1.3.0-rc1 --repo latere-ai/lux --title Lux v1.3.0-rc1 --prerelease" "$TMP/calls" \
+    && [ "$(cat "$TMP/release/title")" = "Lux v1.3.0-rc1" ] && [ -f "$TMP/release/prerelease" ]; then
+    pass "a re-run restates the title and the prerelease flag"
+else
+    fail "a re-run restates the title and the prerelease flag ($(cat "$TMP/calls"))"
 fi
 
 if [ "$FAILURES" -gt 0 ]; then
