@@ -62,6 +62,9 @@ committed: the commit log already holds that.
 - `signed-checksums` sums a file whose name starts with `-`.
 - `tools/repo-settings.sh --help` exits 0, and a repository it cannot read
   is reported with `gh`'s error instead of a list of drifted fields.
+- An image release passes `evidence` to `publish-release` only when a `.md`
+  file was downloaded, so an evidence pattern that matched no Markdown no
+  longer fails the publish.
 
 ## v1.37.0 - 2026-11-06
 

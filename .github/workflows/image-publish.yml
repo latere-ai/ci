@@ -116,6 +116,21 @@ jobs:
           pattern: ${{ inputs.evidence }}
           path: ${{ runner.temp }}/evidence
           merge-multiple: true
+      # The pattern may match no artifact, or artifacts with no Markdown in
+      # them. publish-release reads its evidence line as a file pattern, so
+      # it is passed only once a .md file is there to match.
+      - name: Find the Markdown evidence
+        id: evidence
+        if: ${{ inputs.evidence != '' }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          found=("$RUNNER_TEMP"/evidence/*.md)
+          if [ "${#found[@]}" -eq 0 ]; then
+            echo "::notice::no .md file in the artifacts matching the evidence pattern; the release body carries the CHANGELOG section alone"
+            exit 0
+          fi
+          echo "files=$RUNNER_TEMP/evidence/*.md" >> "$GITHUB_OUTPUT"
 
       - name: Isolate Docker credentials
         run: echo "DOCKER_CONFIG=$RUNNER_TEMP/docker-config" >> "$GITHUB_ENV"
@@ -137,6 +152,6 @@ jobs:
         with:
           title: ${{ inputs.title }}
           files: dist/*
-          evidence: ${{ inputs.evidence != '' && format('{0}/evidence/*.md', runner.temp) || '' }}
+          evidence: ${{ steps.evidence.outputs.files }}
           lateregate_version: ${{ inputs.lateregate_version }}
           gh_version: ${{ inputs.gh_version }}
