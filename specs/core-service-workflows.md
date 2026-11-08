@@ -18,7 +18,7 @@ affects:
   - ci/README.md
   - ci-gate/ (new gates tidy, actionlint, manifests, rules, image, frontend)
   - lux/SECURITY.md, cella/docs/install.md, arca/docs/operations.md, origo/docs/upgrades/README.md (the verify command)
-  - platform, auth, insula, lux, cella, topos, arca, origo, lectio, pons, sermo, examen, limen (callers)
+  - the three private services, lux, cella, topos, arca, origo, lectio, pons, sermo, examen, limen (callers)
 effort: large
 trigger: a dependency round on 2026-11-01 listed 23 action pins to move in origo alone; 288 of the 348 pinned actions outside ci sit in ten release files that each carry their own copy of the same steps
 created: 2026-11-01
@@ -52,9 +52,9 @@ The thirteen core services and how they release today:
 
 | Service | Visibility | Release | release.yml lines | Pinned actions |
 | --- | --- | --- | --- | --- |
-| platform, auth, insula | private | `service-release.yml` | 57 to 212 | 15, 13, 21 |
+| the three private services | private | `service-release.yml` | 57 to 212 | 15, 13, 21 |
 | topos, lectio, pons | public | own build, then `notes-release.yml` | 212 to 317 | 17, 22, 16 |
-| sermo | private | own build, then `notes-release.yml` | 243 to 343 | 16 |
+| sermo | public | own build, then `notes-release.yml` | 243 to 343 | 16 |
 | examen, limen | public | own build, then `notes-release.yml` | 243 to 343 | 17, 14 |
 | lux, cella, arca, origo | public | entirely their own | 586 to 885 | 43, 38, 37, 68 |
 
@@ -84,18 +84,18 @@ example):
 - **Create the release** (4 create it themselves: cella, lux, arca, origo; 6
   call `notes-release.yml` and attach files after it in a separate job).
 - **Verify the published release** from a clean runner (3: cella, lux, origo;
-  arca's spec 016 plans it).
+  arca plans one).
 
 On every push, beside `lateregate.yml`:
 
 | Check | Services |
 | --- | --- |
 | `go mod tidy -diff` | cella, lux, topos, arca, lectio, pons, sermo, examen, limen, origo |
-| build the image, report the version, size cap, no shell, start read-only | the same ten, and platform builds only |
-| actionlint | platform, insula, examen, limen |
+| build the image, report the version, size cap, no shell, start read-only | the same ten, and one private service builds only |
+| actionlint | two private services, examen, limen |
 | render the Kubernetes manifests | cella, lectio, origo, arca (on release) |
 | `promtool check rules` | lux, arca, origo |
-| frontend install, typecheck, test, build | auth, platform, insula |
+| frontend install, typecheck, test, build | the three private services |
 
 `ci-gate` runs none of these today.
 
@@ -169,7 +169,7 @@ One job, so a release on the self-hosted runner queues for it once. Steps:
    0 refuses at once while the run is going, for the self-hosted runner),
    `skip_paths` (default `specs/**` and `*.md`: a commit that changes only
    these carries its parent's code, so its parent is read where its own
-   run is missing, still going or cancelled).
+   run is missing, still going or canceled).
 2. **`release-preflight`**: namespace (override `vars.RELEASE_IMAGE_NAMESPACE`),
    CHANGELOG section, no build metadata, build identity.
 3. **Archives**, when `archives_command` is set: the service's own script
@@ -282,7 +282,7 @@ The same blocks take the repeated parts out of ci's own workflows:
   (`contract`) still reads the pin from the root `go.mod`, the hooks and
   Makefile targets in their root form, and the caller at `@v1`, so the
   move waits on the wiring check reading a nested gate module.
-- **The gate's setup.** `lateregate.yml` (two jobs) and `ci-gate-bump.yml`
+- **The gate's setup.** `lateregate.yml` (its `gate` and `passed` jobs) and `ci-gate-bump.yml`
   repeat the Node, Bun and TypeScript-enum preparation. It stays inline,
   for the same reason as the Go setup: a `setup-gate` action would put
   ci's checkout inside the tree the gates scan.
@@ -312,7 +312,7 @@ actionlint 1.7.12 does not know the two properties yet, so
   Their pins (`helm/kind-action`, `actions/upload-artifact`,
   `actions/download-artifact`) stay with the service.
 - Deploys: arca and origo deploy from their own release; the others are
-  deployed from `platform/deploy`. The deploy and smoke arca and origo carry
+  deployed from a private deploy repository. The deploy and smoke arca and origo carry
   are shared as `image-deploy.yml`, which a core calls when it deploys from
   its own release; whether it does, and its cluster side, stay with the core.
 - Tests that need running services: Postgres, MinIO, device and e2e jobs.
@@ -346,7 +346,7 @@ distroless, so none declares a shell.
 | lectio | `version`, `lectiod ` | 60 MiB | `LECTIO_DEV=true`, `/v1/openapi.yaml` |
 | sermo | `-version`, the stamped `v0.0.0-candidate` | 40 MiB | an issuer never asked, `/livez`, 30 seconds |
 | arca | `-version`, `arcad ` | none | addresses nothing answers, opened lazily, `/livez` |
-| platform | `version`, `platformd ` | none | no environment, `/healthz` |
+| a private service | `version`, its binary's name | none | no environment, `/healthz` |
 | examen | `version`, `examend ` | 40 MiB | `skip_start`: migrate needs Postgres; its `image` job keeps that start |
 | topos | `-version`, `toposd ` | none | `skip_start`: a writable data directory or Postgres, a model gateway and an identity key |
 | cella | `-version`, `cellad ` | none | `skip_start`: an issuer it can reach |
@@ -355,9 +355,9 @@ distroless, so none declares a shell.
 
 Three jobs stay on purpose. origo's `build` saves the images its end-to-end
 jobs load and checks the git version inside the image. lectio's `deploy` runs
-tests over the rendered tree, which hold more than the render. auth's
-`docker.yml` publishes branch images for continuous delivery. auth names its
-package in `frontend_browser_package`, since its tests drive Chromium.
+tests over the rendered tree, which hold more than the render. one private
+service's `docker.yml` publishes branch images for continuous delivery, and it
+names its package in `frontend_browser_package`, since its tests drive Chromium.
 
 ## Acceptance criteria
 
@@ -394,16 +394,16 @@ package in `frontend_browser_package`, since its tests drive Chromium.
 ## Outcome
 
 Shipped as ci v1.28.0 on 2026-11-01 (#20, 52e1a31), with ci-gate v0.62.0 and
-one adoption change in each of the thirteen services; implemented directly,
-not dispatched. pons v0.5.1 is the first public release through the stages
+one adoption change in each of the thirteen services; implemented directly.
+pons v0.5.1 is the first public release through the stages
 and passed `release-verify` with `gh attestation verify` included; limen
-v0.1.1 is the first private one. Drift: moderate. Five of the eight acceptance
+v0.1.1 is the first from a private repository. Drift: moderate. Five of the eight acceptance
 criteria hold as written, and the other three hold in the narrower form below.
 
 ### What shipped
 
 - `image-build.yml`, `image-publish.yml` and `release-verify.yml`, with the
-  composite actions under `actions/` and a test for each of their 11 scripts.
+  composite actions under `actions/` and a test for each of their scripts.
 - The ci-gate gates `tidy`, `actionlint`, `manifests`, `rules`, `image` and
   `frontend`, which replaced the services' hand-written jobs.
 - Every service's release and gate workflows on `@v1`, and the verify command
@@ -434,12 +434,12 @@ None.
 
 ### Unspecified work
 
-- Improvement: `frontend_browser_package` on `lateregate.yml`, since auth's
-  frontend tests drive Chromium.
+- Improvement: `frontend_browser_package` on `lateregate.yml`, since one private
+  service's frontend tests drive Chromium.
 - Improvement: the `image` gate starts under podman with
   `--read-only-tmpfs=false`, matching Docker, and prints a container's logs
   when it exits at start.
-- Improvement: `platformd version`, which the image gate's version check needs.
+- Improvement: a `version` command in one private service, which the image gate's version check needs.
 - Improvement: `sign-image` calls `actions/attest` directly, since
   `actions/attest-sbom` is deprecated, and neither attestation asks for a
   storage record.
@@ -455,10 +455,10 @@ None.
   progress as the binary's output.
 - managed-agents stays pinned by commit: `internal/gate/workflow_test.go`
   refuses a tag, so `v1` does not reach it and each ci release is a hand bump.
-- platform's gates run in one job on the self-hosted runner and take about 20
+- One private service's gates run in one job on the self-hosted runner and take about 20
   minutes or more, so a busy day cancels most runs on main. That is the shared
   shape: `lateregate contract` requires `cancel-in-progress: true`, and the
   release guard reads past a superseded run.
 
-All public services carry a verify command; the private ones have no reader
-for one. No follow-up is open.
+All public services carry a verify command; the private services have no
+reader for one. No follow-up is open.

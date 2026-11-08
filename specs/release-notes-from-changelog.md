@@ -2,19 +2,19 @@
 title: Every release pipeline publishes the changelog section, and fails without one
 status: complete
 depends_on:
-  - ../../ci-gate/specs/012-a-tag-is-a-release.md
+  - https://github.com/latere-ai/ci-gate/blob/main/specs/012-a-tag-is-a-release.md
 affects:
   - ci/.github/workflows/service-release.yml
   - ci/.github/workflows/cli-release.yml
-  - ci/.github/workflows/images-release.yml
+  - ci/.github/workflows/images-release.yml (removed in v1.20.0)
   - ci/.github/workflows/notes-release.yml (new)
   - ci/examples/notes-release.yml (new)
-  - ci/test/publish_release_test.sh
+  - ci/test/publish_release_test.sh (replaced by test/publish_release_action_test.sh)
   - ci/test/release_notes_test.sh (new)
   - ci/README.md
   - every repository that tags (adoption, listed under Rollout)
 effort: medium
-trigger: 29 of 30 tagged repositories publish a release whose body is one compare link; pkg's changelog rule moved into lateregate (ci-gate 012) and the pipelines are where it becomes universal
+trigger: 29 of 30 tagged repositories publish a release whose body is one compare link; pkg's changelog rule moved into lateregate and the pipelines are where it becomes universal
 created: 2026-09-06
 updated: 2026-09-06
 author: changkun
@@ -25,7 +25,7 @@ dispatched_task_id: null
 
 ## Context
 
-ci-gate spec 012 put the changelog rule into the binary: `lateregate
+ci-gate's "a tag is a release" spec put the changelog rule into the binary: `lateregate
 release-notes TAG` prints the `CHANGELOG.md` section for a tag or fails,
 the pre-push refuses a release tag without one, and `lateregate release`
 cuts the tag. What the binary cannot do is publish the GitHub release. The
@@ -53,7 +53,7 @@ fetched through the Go proxy and verified against the checksum database,
 which is the same trust every `go get` in the organization already places.
 
 **The body is the section, then the evidence.** `service-release.yml` and
-`images-release.yml` write `notes.md`, a blank line, the evidence marker
+`images-release.yml` (removed in v1.20.0) write `notes.md`, a blank line, the evidence marker
 and the smoke evidence, and create or edit the release with that. The
 "reuse the existing body as prefix" branch goes: the section is the same on
 a re-run, so the body is rebuilt from the changelog every time and a re-run
@@ -79,7 +79,7 @@ that is the intended order (a release announces what is live) and the fix
 is to add the section and re-run the job, not to re-tag. The pre-push hook
 exists so this branch is rarely taken.
 
-**Tests.** `publish_release_test.sh` keeps its verbatim copy of the publish
+**Tests.** `publish_release_test.sh` (since replaced by `publish_release_action_test.sh`) keeps its verbatim copy of the publish
 tail and gains the body assembly: the body is the section, a blank line,
 the marker, the evidence, and an edit re-run produces the same body.
 `release_notes_test.sh` greps every `*-release.yml` for the `release-notes`
@@ -91,7 +91,7 @@ back.
 1. Each of the four release workflows carries the `release-notes` step with
    the pinned version input, and none carries `generate-notes` or
    `--generate-notes`; `test/run.sh` asserts both.
-2. `service-release.yml` and `images-release.yml` build the body as
+2. `service-release.yml` and `images-release.yml` (removed in v1.20.0) build the body as
    section, blank line, marker, evidence; the publish-tail copy in the test
    matches the workflow; an edit path produces the same body as a create.
 3. `cli-release.yml` runs goreleaser with `--release-notes` pointing at
@@ -110,27 +110,25 @@ back.
 Every repository that tags adopts in one commit each. In order:
 
 1. This repository: land, tag `v1.8.0`, and `v1` moves.
-2. ci-gate: `.github/workflows/release.yml` calling `notes-release.yml@v1`;
-   its next tag publishes its own note.
-3. pkg: `release.yml` calls `notes-release.yml@v1`; `Makefile` `release`
-   and `release-notes` delegate; the two scripts and the hook's own lines
-   are deleted.
-4. The 13 `service-release.yml` consumers (ai-as-an-infrastructure, auth,
-   drive, eval, latere-ai, lectio, lux, platform, replichai, sandbox, and
-   the rest): bump the ci-gate pin, `lateregate init` seeds `CHANGELOG.md`,
-   commit. `v1` carries the workflow change.
-5. latere-cli: switch its own goreleaser workflow to `cli-release.yml@v1`
-   and drop the `changelog:` block.
-6. wallfacer, service-template, agents: vendored pipelines gain the step and
-   lose `generate-notes`.
-7. lux-python-sdk, lux-typescript-sdk: `publish.yml` gains setup-go and the
-   step, and `gh release create` takes `--notes-file` instead of
-   `--generate-notes`.
-8. images: confirm which pipeline its `release.yml` runs and adopt the step
-   there.
-9. latere-ui, topos: a `release.yml` calling `notes-release.yml@v1`.
-10. Repositories on lateregate that have never tagged (Fornax, Forma, origo,
-    managed-agents, pay, llm-gateway-bench): the pin bump seeds the
+2. [ci-gate](https://github.com/latere-ai/ci-gate): a `release.yml` calling
+   `notes-release.yml@v1`; its next tag publishes its own note.
+3. [pkg](https://github.com/latere-ai/pkg): `release.yml` calls
+   `notes-release.yml@v1`; `Makefile` `release` and `release-notes` delegate;
+   the two scripts and the hook's own lines are deleted.
+4. The 13 `service-release.yml` consumers: bump the ci-gate pin,
+   `lateregate init` seeds `CHANGELOG.md`, commit. `v1` carries the workflow
+   change.
+5. The command-line client: switch its own goreleaser workflow to
+   `cli-release.yml@v1` and drop the `changelog:` block.
+6. Repositories with vendored copies of the pipelines gain the step and lose
+   `generate-notes`.
+7. The two Lux client libraries: `publish.yml` gains setup-go and the step, and
+   `gh release create` takes `--notes-file` instead of `--generate-notes`.
+8. The image catalog: confirm which pipeline its `release.yml` runs and adopt
+   the step there.
+9. The remaining library repositories that tag: a `release.yml` calling
+   `notes-release.yml@v1`.
+10. Repositories on lateregate that have never tagged: the pin bump seeds the
     changelog; nothing else.
 
 Each seeded changelog starts empty under `## Unreleased`; the first tag
@@ -142,7 +140,7 @@ Shipped as v1.8.0 on 2026-09-06; `v1` moved with it. Acceptance 1 to 5
 hold: `test/run.sh` carries the two new suites, `actionlint` passes, and
 this repository publishes its own releases through `notes-release.yml`
 (v1.8.0 was the first, ci-gate v0.29.1 the second). Acceptance 6, the
-service canary, was run to the pre-push only: on a platform worktree the
+service canary, was run to the pre-push only: on a service worktree the
 hook refused `v9.9.9` at a commit with no section and accepted it once the
 section was there; the first real service tag after this date is the
 end-to-end proof, and its release job fails closed if the section is
@@ -151,14 +149,13 @@ missing.
 The rollout landed the same day in every repository the list names, with
 these departures from the plan:
 
-- images publishes no GitHub release at all (its tag pushes images and its
-  `release` event republishes them), so step 8 took nothing; adopting
-  `images-release.yml` there is its own change.
-- latere-cli calls `cli-release.yml@v1` with `run_lint: false`, because
-  lint is lateregate's on every push and the pipeline's lint job would run
-  golangci-lint without the rendered config.
-- wallfacer keeps its hand-written notes under `docs/releases` as history;
-  its pipeline reads `CHANGELOG.md` from here on.
-- agents' site workflow reads the section on every run through the
-  repository's own `tools/release` evidence assembler, so its marker logic
-  stayed.
+- The image catalog publishes no GitHub release at all (its tag pushes images
+  and its `release` event republishes them), so step 8 took nothing; adopting
+  `images-release.yml` there would have been its own change.
+- The command-line client calls `cli-release.yml@v1` with `run_lint: false`,
+  because lint is lateregate's on every push and the pipeline's lint job would
+  run golangci-lint without the rendered config.
+- One repository keeps its hand-written notes as history; its pipeline reads
+  `CHANGELOG.md` from here on.
+- One repository's site workflow reads the section on every run through its own
+  evidence assembler, so its marker logic stayed.

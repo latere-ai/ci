@@ -1,16 +1,12 @@
 ---
-title: Reusable Frontend Publish Pipeline — build, hash, sync to Spaces, invalidate HTML
+title: "Reusable Frontend Publish Pipeline: build, hash, sync to Spaces, invalidate HTML"
 status: planned
-depends_on:
-  - ../../terraform/specs/frontend-cdn-decoupling.md
-  - ../../terraform/specs/frontend-cdn-decoupling/cdn-hosting-infra.md
-  - ../../latere-ai/specs/frontend-cdn-pilot.md
 affects:
   - ci/ (new reusable workflow + example)
   - ci/README.md
-  - latere-ai/.github/workflows/ (consumer wiring)
+  - the first consumer's workflow (consumer wiring)
 effort: medium
-trigger: parent frontend-cdn-decoupling; extract the pilot's publish steps into a reusable pipeline once proven
+trigger: extract the publish steps of a hand-run pilot into a reusable pipeline once proven
 created: 2026-06-16
 updated: 2026-06-16
 author: changkun
@@ -20,30 +16,30 @@ dispatched_task_id: null
 # Reusable Frontend Publish Pipeline
 
 > **Status: planned, unbuilt.** This is a frontend CDN publish pipeline (build,
-> sync to a Spaces bucket, invalidate HTML). It is distinct from the shipped
-> `images-release.yml` (dependency-ordered container-image builds). Both of its
-> upstream deps ([[frontend-cdn-pilot]], [[frontend-cdn-decoupling]]) are still
-> `planned`, so no frontend is CDN-served yet: every service still go:embeds its
-> SPA. For the pipelines that ship today (`service-release.yml`,
-> `cli-release.yml`, `images-release.yml`), `ci/README.md` is authoritative.
+> sync to a Spaces bucket, invalidate HTML). This repository has no frontend
+> publish workflow yet. It is distinct from the dependency-ordered
+> container-image builds, which `image-build.yml` and `image-publish.yml` now
+> cover. For the pipelines that ship today (`service-release.yml`,
+> `cli-release.yml`, `notes-release.yml` and the image stages), `README.md` is
+> authoritative.
 
 ## Overview
 
-Third child of [[frontend-cdn-decoupling]]. Once [[frontend-cdn-pilot]] proves
-the publish steps by hand on `latere-ai`, extract them into a central reusable
-workflow in `ci/` so each service gets edge-served frontend delivery with ~10
-lines of caller wiring. Same philosophy as [[release-unification]]: one
-canonical pipeline in `latere-ai/ci`, thin per-service callers.
+The work needs a CDN bucket, publish credentials for it, and a hand-run pilot of
+the publish steps. Once the pilot proves the steps, extract them into a central
+reusable workflow in this repository so each service gets edge-served frontend
+delivery with ~10 lines of caller wiring. Same philosophy as the release
+pipelines: one canonical pipeline in `latere-ai/ci`, thin per-service callers.
 
-This spec is **deliberately sequenced after the pilot** — do not abstract before
+This spec is **deliberately sequenced after the pilot**. Do not abstract before
 there is one working concrete instance to abstract from.
 
 ## Current State
 
-- `ci/` ships three reusable, `@v1`-tagged pipelines consumed by thin per-repo
-  callers (`service-release.yml`, `cli-release.yml`, `images-release.yml`; see
-  `ci/README.md`). They are the established precedent for a central reusable
-  workflow, the same philosophy as [[release-unification]].
+- `ci/` ships reusable, `@v1`-tagged pipelines consumed by thin per-repo
+  callers (`service-release.yml`, `cli-release.yml`, `notes-release.yml`; see
+  `README.md`). They are the established precedent for a central reusable
+  workflow.
 - Each frontend service currently builds its SPA in CI (`bun run build`) and
   `go:embed`s it into the service binary (`service-release.yml` `split` /
   `dockerfile` build modes, `spa_embed_dir`), so the frontend ships inside the
@@ -55,21 +51,21 @@ there is one working concrete instance to abstract from.
 1. **Reusable workflow.** A `ci/` reusable GitHub Actions workflow with inputs
    for: service name / bucket key prefix, frontend dir, build command
    (default `bun install && bun run build`), and bucket/CDN identifiers. Secrets
-   for the frontend-bucket publish credentials from [[cdn-hosting-infra]].
-2. **Contract: build → sync → invalidate.**
+   for the frontend-bucket publish credentials.
+2. **Contract: build, sync, invalidate.**
    - Build the frontend (vite, plus a prerender where the site has one) to `dist/`.
    - Sync `dist/` to `<bucket>/<prefix>/` with correct per-object cache headers:
      hashed assets `immutable`, route HTML short-TTL (matching the `spa.go`
      policy the pilot preserved).
    - Invalidate only the HTML entry points at the CDN (hashed assets are
      immutable, so they need no invalidation).
-3. **Idempotent + safe.** Re-running publishes deterministically; a failed sync
+3. **Idempotent and safe.** Re-running publishes deterministically; a failed sync
    does not leave the site half-updated (publish assets before flipping HTML, or
-   use an atomic prefix swap — document the chosen strategy).
-4. **`latere-ai` consumes it.** The pilot's hand-rolled publish steps are
+   use an atomic prefix swap; document the chosen strategy).
+4. **The first consumer uses it.** The pilot's hand-rolled publish steps are
    replaced by a thin caller of this workflow, proving the abstraction on the
    first real consumer.
-5. **Documented.** `ci/README.md` gains a "frontend publish" section with the
+5. **Documented.** `README.md` gains a "frontend publish" section with the
    caller snippet, mirroring how the release pipeline is documented.
 6. **No silent caps.** If the workflow skips/limits anything (e.g. only
    invalidates a fixed HTML set), it logs what it did and did not touch.
