@@ -7,8 +7,8 @@
 #
 # Sourced, it sets the variables. Run, it also writes them to
 # $GITHUB_OUTPUT as cosign, syft, gh, lateregate, kubectl and kustomize, for
-# an action whose `with:` needs one. kubectl and gh are written without the
-# leading v, as their download paths spell them.
+# an action whose `with:` needs one. kubectl, gh and kustomize are written
+# without the leading v; the steps add it where a download path spells it.
 
 COSIGN_VERSION=${COSIGN_VERSION:-v3.1.4}
 SYFT_VERSION=${SYFT_VERSION:-v1.55.0}
