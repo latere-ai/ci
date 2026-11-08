@@ -156,7 +156,7 @@ new_case
 stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs main:cancelled)"
 stub_gh_fixture "$W" "repos/$REPO/commits/$SHA" "{\"parents\":[{\"sha\":\"$PARENT\"}]}"
 stub_gh_fixture "$W" "repos/$REPO/compare/$PARENT...$SHA" '{"files":[{"filename":"main.go"}]}'
-WAIT=60 run_case "a cancelled verify refuses: the commit was never verified" 1 "was cancelled on $SHA"
+WAIT=60 run_case "a canceled verify refuses: the commit was never verified" 1 "was cancelled on $SHA"
 
 new_case
 stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs main:cancelled main:success)"
@@ -323,7 +323,7 @@ WAIT=0 run_case "wait_minutes 0 refuses another workflow still running" 1 "gh ru
 new_case
 stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs main:success)"
 stub_gh_fixture "$W" "$(others_url $SHA)" "$(all_runs device.yml:main:cancelled)"
-WAIT=60 run_case "another workflow cancelled on the push refuses" 1 "was cancelled (device.yml=cancelled)"
+WAIT=60 run_case "another workflow canceled on the push refuses" 1 "was cancelled (device.yml=cancelled)"
 
 new_case
 stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs main:success)"
