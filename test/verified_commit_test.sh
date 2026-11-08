@@ -240,6 +240,14 @@ new_case
 stub_gh_fixture "$W" "$(runs_url $SHA)" FAIL
 WAIT=60 run_case "an API error refuses rather than reading as no run" 1 "cannot read the verify.yml runs of $SHA"
 
+# A leading zero is decimal: 08 minutes, not an octal error.
+new_case
+stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs main:null)" 1
+stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs main:success)"
+stub_gh_fixture "$W" "repos/$REPO/commits/$SHA" "{\"parents\":[{\"sha\":\"$PARENT\"}]}"
+stub_gh_fixture "$W" "repos/$REPO/compare/$PARENT...$SHA" '{"files":[{"filename":"main.go"}]}'
+WAIT=08 run_case "a wait with a leading zero is read as decimal" 0 "concluded success"
+
 new_case
 WAIT=soon run_case "a wait that is not a number of minutes refuses" 1 "takes a whole number of minutes"
 

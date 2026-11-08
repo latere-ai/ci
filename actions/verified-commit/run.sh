@@ -83,6 +83,8 @@ MAX_WALK=30
 case "$WAIT_MINUTES" in
     '' | *[!0-9]*) echo "::error::wait_minutes is '$WAIT_MINUTES'; it takes a whole number of minutes" >&2; exit 1 ;;
 esac
+# A leading zero is still decimal: 08 is eight minutes, not an octal error.
+WAIT_MINUTES=$((10#$WAIT_MINUTES))
 
 die() {
     echo "::error::$*" >&2
