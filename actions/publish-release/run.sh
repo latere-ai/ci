@@ -63,6 +63,14 @@ done
 files=()
 expand files "${FILES:-}"
 
+# gh reads name#label as an asset named name with the label label, so the
+# asset would not carry the name checksums.txt lists.
+for f in ${files[@]+"${files[@]}"}; do
+    case "$f" in
+        *'#'*) die "'$f' has a # in its name, which gh reads as an asset label separator; rename the file" ;;
+    esac
+done
+
 prerelease=()
 core=${TAG%%+*}
 case "$core" in

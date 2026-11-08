@@ -163,6 +163,17 @@ else
     fail "a re-run restates the title and the prerelease flag ($(cat "$TMP/calls"))"
 fi
 
+# gh reads name#label as an asset label.
+new_repo
+echo hashed > "$TMP/w/dist/app#linux.tar.gz"
+if out=$(publish env GITHUB_REF_NAME=v1.2.0 FILES=$'dist/app#linux.tar.gz'); then
+    fail "a file name with # is refused"
+elif printf '%s' "$out" | grep -qF "app#linux.tar.gz' has a # in its name" && [ ! -d "$TMP/release" ]; then
+    pass "a file name with # is refused before anything is created"
+else
+    fail "a file name with # is refused ($out)"
+fi
+
 if [ "$FAILURES" -gt 0 ]; then
     printf "\n%d failure(s)\n" "$FAILURES"
     exit 1
