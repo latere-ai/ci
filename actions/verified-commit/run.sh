@@ -3,14 +3,19 @@
 # The tagged commit passed the repository's verify workflow on its branch
 # push, so a release is cut from a green tree.
 #
-# The runs read are the verify runs GitHub recorded for the commit's branch
-# push; the run the tag's own push starts is not one of them. Across those
-# runs, in this order:
+# The runs read are the verify runs GitHub recorded for the commit's push
+# events, from any branch; the run the tag's own push starts is not one of
+# them. GitHub reports each run's latest attempt, so a run that failed and
+# was re-run to a pass reads as passed. Across those runs, in this order:
 #
+#   failure                 refused, even when another run succeeded: a
+#                           commit one of whose push runs failed is not a
+#                           green tree, whatever branch that run was on.
 #   success                 the commit is verified.
-#   failure and the like    refused: timed_out, startup_failure,
-#                           action_required, neutral, skipped and stale
-#                           count as failure, since none verified it.
+#   the like                refused when nothing succeeded: timed_out,
+#                           startup_failure, action_required, neutral,
+#                           skipped and stale count as failure, since none
+#                           verified it.
 #   running or queued       waited for up to WAIT_MINUTES; 0 refuses at
 #                           once. Empty waits 60 minutes on a GitHub-hosted
 #                           runner and refuses at once on the self-hosted
@@ -41,8 +46,8 @@
 # it. A run that concluded on the commit itself still decides.
 #
 # The release is usually a tag push or a published release. A run started
-# on a branch (a manual rebuild from main) reads that branch's own push run
-# of the commit, since there is no tag push to set apart.
+# on a branch (a manual rebuild from main) reads the push runs of the commit
+# as they are, since there is no tag push to set apart.
 #
 # Inputs, from the environment: GITHUB_REPOSITORY, GITHUB_SHA,
 # GITHUB_REF_NAME, GITHUB_REF_TYPE (tag, or branch; unset reads as tag),
@@ -108,8 +113,9 @@ read_verdict() {
         || die "cannot read the $VERIFY_WORKFLOW runs of $1, so nothing was released"
     case " $RUNS " in
         "  ") VERDICT=none ;;
+        *" failure "*) VERDICT=failure ;;
         *" success "*) VERDICT=success ;;
-        *" failure "* | *" timed_out "* | *" startup_failure "* | *" action_required "* | *" neutral "* | *" skipped "* | *" stale "*) VERDICT=failure ;;
+        *" timed_out "* | *" startup_failure "* | *" action_required "* | *" neutral "* | *" skipped "* | *" stale "*) VERDICT=failure ;;
         *" running "*) VERDICT=pending ;;
         *" cancelled "*) VERDICT=cancelled ;;
         *) VERDICT=failure ;;

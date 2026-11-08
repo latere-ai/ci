@@ -100,6 +100,21 @@ new_case
 stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs main:failure)"
 REF_NAME=main REF_TYPE=branch WAIT=0 run_case "a run on a branch whose push run failed refuses" 1 "concluded 'failure'"
 
+# A failed push run blocks the release from any branch, and a success on
+# another branch does not outweigh it.
+new_case
+stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs main:failure scratch:success)"
+WAIT=60 run_case "a success on another branch does not outweigh a failure" 1 "concluded 'failure success'"
+
+new_case
+stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs scratch:failure main:success)"
+WAIT=60 run_case "a failure on another branch blocks a success on the release branch" 1 "concluded 'failure success'"
+
+# A run still going or cancelled elsewhere does not block another that passed.
+new_case
+stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs main:success scratch:null other:cancelled)"
+WAIT=60 run_case "a running or cancelled run elsewhere does not block a success" 0 "concluded success on $SHA"
+
 new_case
 stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs main:failure)"
 WAIT=60 run_case "a failed verify refuses" 1 "concluded 'failure'"
