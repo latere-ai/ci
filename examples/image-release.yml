@@ -38,7 +38,7 @@ jobs:
       attestations: write
     with:
       # The per-push caller whose run on the tagged commit must have passed;
-      # the stage's default is verify.yml.
+      # left empty, the stage takes the one workflow that calls lateregate.yml.
       verify_workflow: ci.yml
       # One image per slot, up to three. version_args is what makes the
       # image print "<name> <tag> ..."; leave it out to skip the check.

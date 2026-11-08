@@ -47,6 +47,11 @@ committed: the commit log already holds that.
 - The runner policy in the README now reads hosted runners for every
   repository: private repositories run only scheduled and hand-started jobs
   there, and their push, release and deploy run from a workstation.
+- **Breaking**: `image-build.yml` takes an empty `verify_workflow` by
+  default, which reads as the one workflow in `.github/workflows` that
+  calls `lateregate.yml`, as the other pipelines do. It defaulted to
+  `verify.yml`, so a caller that passed nothing and has no `verify.yml` was
+  refused; a repository with several callers must now name the workflow.
 
 ### Fixed
 

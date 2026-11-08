@@ -741,9 +741,9 @@ runner once:
 1. The tagged commit's push runs of `verify_workflow` passed: one
    succeeded and none failed, on whichever branch the commit was pushed
    to, and a run that failed and was re-run to a pass counts as passed.
-   The workflow is `verify.yml` by default, so a repository whose
-   per-push caller is the `ci.yml` that `lateregate init` writes sets
-   `verify_workflow: ci.yml`. A run still going is waited for up to `wait_minutes`: by default 60
+   Left empty, `verify_workflow` takes the one workflow in
+   `.github/workflows` that calls `lateregate.yml`, such as the `ci.yml`
+   that `lateregate init` writes; a repository with several names it. A run still going is waited for up to `wait_minutes`: by default 60
    minutes on a GitHub-hosted runner, while on a self-hosted runner,
    where waiting would hold a slot the awaited run needs, the release refuses at once
    and prints the command that re-runs it once the run is green. A

@@ -64,10 +64,10 @@ on:
         type: string
         default: ""
       verify_workflow:
-        description: "File name of the per-push workflow whose run on the tagged commit must have succeeded."
+        description: "File name of the per-push workflow whose run on the tagged commit must have succeeded. Empty takes the one workflow in .github/workflows that calls lateregate.yml."
         required: false
         type: string
-        default: verify.yml
+        default: ""
       wait_minutes:
         description: "How long the release waits for that run while it is still going. 0 refuses at once. Empty waits 60 minutes on a GitHub-hosted runner and refuses at once on the self-hosted runner, so a release there does not hold a slot the run it waits for needs; the refusal prints the command that re-runs it."
         required: false

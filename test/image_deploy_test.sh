@@ -216,12 +216,12 @@ else
     fail "the stage asks for more than contents: read"
 fi
 
-# The example names the per-push caller lateregate init writes, since the
-# stage's default is verify.yml and a missing workflow refuses the release.
+# The example names the per-push caller lateregate init writes, as every
+# other pipeline's example does.
 if grep -qx '      verify_workflow: ci.yml' "$EXAMPLE"; then
     pass "the example verifies the tag against ci.yml, the caller init writes"
 else
-    fail "the example leaves verify_workflow at verify.yml, which init does not write"
+    fail "the example does not name ci.yml, the caller init writes"
 fi
 
 # The example wires it as the README says: gated by a variable, the secret
