@@ -109,21 +109,54 @@ rollout() {
     done <<< "${DEPLOYMENTS}"
 }
 
+# Runs "$@" for at most $1 seconds. GNU coreutils' timeout is on the
+# GitHub-hosted Ubuntu runners; gtimeout is its name where coreutils comes
+# from Homebrew. Without either the command runs unbounded, and the retry
+# loop still ends at the timeout between attempts. 0 is no limit.
+bounded() {
+    local secs=$1
+    shift
+    if command -v timeout > /dev/null 2>&1; then
+        timeout "$secs" "$@"
+    elif command -v gtimeout > /dev/null 2>&1; then
+        gtimeout "$secs" "$@"
+    else
+        "$@"
+    fi
+}
+
+# Each attempt gets the time the timeout has left. A timeout of 0 runs the
+# script once, with no limit on it. When the timeout ends, the last attempt's
+# OUTPUT_MD, if it wrote one, goes to the step summary before the step fails,
+# so a failed smoke keeps its evidence.
 smoke() {
     local script=${SMOKE_SCRIPT:?} timeout=${SMOKE_TIMEOUT:-120} interval=${SMOKE_INTERVAL:-5}
-    local start=$SECONDS attempt=0 summary=${GITHUB_STEP_SUMMARY:-/dev/null}
+    local start=$SECONDS attempt=0 summary=${GITHUB_STEP_SUMMARY:-/dev/null} left
     : "${OUTPUT_MD:?}"
     mkdir -p "$(dirname "$OUTPUT_MD")"
     while :; do
         attempt=$((attempt + 1))
-        if "$script"; then
+        left=$((timeout - (SECONDS - start)))
+        if [ "$timeout" -gt 0 ] && [ "$left" -lt 1 ]; then
+            left=1
+        elif [ "$timeout" -eq 0 ]; then
+            left=0
+        fi
+        # So the file read below is this attempt's, not an earlier one's.
+        rm -f "$OUTPUT_MD"
+        if bounded "$left" "$script"; then
             if [ "$attempt" -gt 1 ]; then
                 echo "The smoke passed on attempt $attempt, $((SECONDS - start)) seconds after the first." >> "$summary"
             fi
-            cat "$OUTPUT_MD" >> "$summary"
+            if [ -f "$OUTPUT_MD" ]; then
+                cat "$OUTPUT_MD" >> "$summary"
+            fi
             return 0
         fi
         if [ $((SECONDS - start + interval)) -ge "$timeout" ]; then
+            if [ -f "$OUTPUT_MD" ]; then
+                cat "$OUTPUT_MD" >> "$summary"
+            fi
             die "the smoke did not pass in $((SECONDS - start)) seconds over $attempt attempt(s)"
         fi
         echo "smoke attempt $attempt failed; trying again in ${interval}s"

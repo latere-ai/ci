@@ -1,5 +1,15 @@
 name: deploy-by-digest
-description: Pin a core's images by digest in its deploy overlay, apply it, wait for its Deployments to roll, or smoke the live service until it serves the tag.
+description: >-
+  Pin a core's images by digest in its deploy overlay, apply it, wait for its
+  Deployments to roll, or smoke the live service until it passes or
+  SMOKE_TIMEOUT ends, each attempt stopped when that time is up. The caller
+  sets the environment the step reads: DEPLOY_DIR (default deploy/prod),
+  IMAGES (one per line, <ref>@<digest> or <kustomize name>=<ref>@<digest>),
+  NAMESPACE (empty takes the namespace of the rendered objects),
+  DEPLOYMENTS (one per line), ROLLOUT_TIMEOUT (default 600s), SMOKE_SCRIPT,
+  SMOKE_TIMEOUT and SMOKE_INTERVAL (seconds), and what the smoke script reads:
+  BASE_URL, TAG, COMMIT, DEPLOY_URL and OUTPUT_MD. A failed smoke leaves its
+  last OUTPUT_MD in the step summary.
 inputs:
   step:
     description: "pin, apply, rollout or smoke."

@@ -265,6 +265,66 @@ else
     fail "smoke_timeout 0 ran the script $(cat "$TMP/attempts") times"
 fi
 
+# smoke: a script that passes without writing OUTPUT_MD passes the step.
+cat > "$TMP/quiet.sh" <<'E2'
+#!/usr/bin/env bash
+exit 0
+E2
+chmod +x "$TMP/quiet.sh"
+rm -f "$TMP/summary" "$TMP/out/smoke.md"
+out=$(step smoke SMOKE_SCRIPT="$TMP/quiet.sh" OUTPUT_MD="$TMP/out/smoke.md" GITHUB_STEP_SUMMARY="$TMP/summary" SMOKE_TIMEOUT=30 SMOKE_INTERVAL=0)
+if [ $? -eq 0 ]; then
+    pass "a smoke that passes without writing OUTPUT_MD passes"
+else
+    fail "a smoke that passes without writing OUTPUT_MD failed the step: $out"
+fi
+
+# smoke: one attempt is stopped when the timeout is up, not run to its end.
+# GNU timeout is on the CI runners; a stand-in with the same call stands in
+# where the machine has none.
+if ! command -v timeout > /dev/null 2>&1 && ! command -v gtimeout > /dev/null 2>&1; then
+    cat > "$TMP/bin/timeout" <<'E2'
+#!/usr/bin/env bash
+secs=$1
+shift
+exec perl -e 'alarm shift; exec @ARGV or exit 127' "$secs" "$@"
+E2
+    chmod +x "$TMP/bin/timeout"
+fi
+cat > "$TMP/hang.sh" <<'E2'
+#!/usr/bin/env bash
+exec sleep 15
+E2
+chmod +x "$TMP/hang.sh"
+t0=$SECONDS
+out=$(step smoke SMOKE_SCRIPT="$TMP/hang.sh" OUTPUT_MD="$TMP/out/smoke.md" GITHUB_STEP_SUMMARY="$TMP/summary" SMOKE_TIMEOUT=2 SMOKE_INTERVAL=1)
+rc=$?
+if [ $rc -ne 0 ] && [ $((SECONDS - t0)) -lt 8 ] && printf '%s' "$out" | grep -qF "did not pass"; then
+    pass "a smoke that outlives smoke_timeout is stopped"
+else
+    fail "a smoke that outlives smoke_timeout is stopped (exit $rc after $((SECONDS - t0)) s: $out)"
+fi
+
+# smoke: a smoke that never passes leaves its last evidence in the summary.
+cat > "$TMP/failing.sh" <<'E2'
+#!/usr/bin/env bash
+n=$(cat "$STUB_DIR/fattempts" 2>/dev/null || echo 0)
+n=$((n + 1))
+echo "$n" > "$STUB_DIR/fattempts"
+echo "evidence of attempt $n" > "$OUTPUT_MD"
+exit 1
+E2
+chmod +x "$TMP/failing.sh"
+rm -f "$TMP/summary" "$TMP/fattempts"
+out=$(step smoke SMOKE_SCRIPT="$TMP/failing.sh" OUTPUT_MD="$TMP/out/smoke.md" GITHUB_STEP_SUMMARY="$TMP/summary" SMOKE_TIMEOUT=2 SMOKE_INTERVAL=1)
+rc=$?
+last=$(cat "$TMP/fattempts")
+if [ $rc -ne 0 ] && printf '%s' "$out" | grep -qF "did not pass" && grep -qxF "evidence of attempt $last" "$TMP/summary"; then
+    pass "a failed smoke appends its last OUTPUT_MD to the step summary"
+else
+    fail "a failed smoke appends its last OUTPUT_MD to the step summary (exit $rc; summary: $(cat "$TMP/summary" 2>/dev/null); out: $out)"
+fi
+
 step bogus > /dev/null
 if [ $? -ne 0 ]; then
     pass "an unknown step fails"
