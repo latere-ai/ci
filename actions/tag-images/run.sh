@@ -8,13 +8,16 @@
 set -euo pipefail
 
 TAG=${GITHUB_REF_NAME:?}
+IMAGE_RE='^[^@:]+(:[0-9]+)?(/[^@:]+)+@sha256:[0-9a-f]{64}$'
 count=0
 while IFS= read -r image; do
     [ -n "$image" ] || continue
-    case "$image" in
-        *@sha256:*) ;;
-        *) echo "::error::'$image' is not <registry>/<owner>/<name>@sha256:<digest>" >&2; exit 1 ;;
-    esac
+    # No tag before the @, so the tag added below cannot land on one, and the
+    # whole 64-character digest, so a truncated one is refused here, not by docker.
+    if ! [[ $image =~ $IMAGE_RE ]]; then
+        echo "::error::'$image' is not <registry>/<owner>/<name>@sha256:<digest>" >&2
+        exit 1
+    fi
     ref=${image%@*}
     docker buildx imagetools create -t "${ref}:${TAG}" "$image"
     echo "published ${ref}:${TAG} at ${image#*@}"

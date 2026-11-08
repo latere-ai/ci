@@ -33,10 +33,12 @@ export STUB_DIR=$TMP PATH="$TMP/bin:$PATH"
 
 # tag-images
 : > "$TMP/calls"
-if IMAGES=$'ghcr.io/latere-ai/lux@sha256:aaa\nghcr.io/latere-ai/lux-stubs@sha256:bbb\n' GITHUB_REF_NAME=v1.2.0 \
+DA=$(printf 'a%.0s' $(seq 64))
+DB=$(printf 'b%.0s' $(seq 64))
+if IMAGES=$'ghcr.io/latere-ai/lux@sha256:'$DA$'\nghcr.io/latere-ai/lux-stubs@sha256:'$DB$'\n' GITHUB_REF_NAME=v1.2.0 \
     bash "$REPO_ROOT/actions/tag-images/run.sh" > /dev/null 2>&1 \
-    && grep -qxF "docker buildx imagetools create -t ghcr.io/latere-ai/lux:v1.2.0 ghcr.io/latere-ai/lux@sha256:aaa" "$TMP/calls" \
-    && grep -qxF "docker buildx imagetools create -t ghcr.io/latere-ai/lux-stubs:v1.2.0 ghcr.io/latere-ai/lux-stubs@sha256:bbb" "$TMP/calls"; then
+    && grep -qxF "docker buildx imagetools create -t ghcr.io/latere-ai/lux:v1.2.0 ghcr.io/latere-ai/lux@sha256:$DA" "$TMP/calls" \
+    && grep -qxF "docker buildx imagetools create -t ghcr.io/latere-ai/lux-stubs:v1.2.0 ghcr.io/latere-ai/lux-stubs@sha256:$DB" "$TMP/calls"; then
     pass "tag-images tags every digest with the release tag"
 else
     fail "tag-images tags every digest with the release tag ($(cat "$TMP/calls"))"
@@ -47,6 +49,23 @@ elif printf '%s' "$out" | grep -qF "is not <registry>/<owner>/<name>@sha256:<dig
     pass "tag-images refuses a reference that is not by digest"
 else
     fail "tag-images refuses a reference that is not by digest ($out)"
+fi
+for bad_ref in "ghcr.io/latere-ai/lux:old@sha256:$DA" "ghcr.io/latere-ai/lux@sha256:abc" "ghcr.io/latere-ai/lux@sha256:${DA}0" "ghcr.io/latere-ai/lux@sha256:${DA%a}A"; do
+    : > "$TMP/calls"
+    if out=$(IMAGES="$bad_ref" GITHUB_REF_NAME=v1.2.0 bash "$REPO_ROOT/actions/tag-images/run.sh" 2>&1); then
+        fail "tag-images refuses $bad_ref"
+    elif printf '%s' "$out" | grep -qF "is not <registry>/<owner>/<name>@sha256:<digest>" && [ ! -s "$TMP/calls" ]; then
+        pass "tag-images refuses $bad_ref"
+    else
+        fail "tag-images refuses $bad_ref ($out)"
+    fi
+done
+: > "$TMP/calls"
+if IMAGES="localhost:5000/lux@sha256:$DA" GITHUB_REF_NAME=v1.2.0 bash "$REPO_ROOT/actions/tag-images/run.sh" > /dev/null 2>&1 \
+    && grep -qxF "docker buildx imagetools create -t localhost:5000/lux:v1.2.0 localhost:5000/lux@sha256:$DA" "$TMP/calls"; then
+    pass "tag-images accepts a registry with a port"
+else
+    fail "tag-images accepts a registry with a port ($(cat "$TMP/calls"))"
 fi
 if IMAGES="" GITHUB_REF_NAME=v1.2.0 bash "$REPO_ROOT/actions/tag-images/run.sh" > /dev/null 2>&1; then
     fail "tag-images refuses an empty list"
