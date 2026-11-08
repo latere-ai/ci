@@ -5,15 +5,20 @@ repository is the [README](README.md). Every bug fix ships with a test
 that fails without it, and every change is one small commit with a
 message that says why.
 
-## Local checks
+## Getting set up
 
-Reusable workflows, `secrets: inherit` and environments only run on
-GitHub's runners, so a pipeline cannot be executed locally. The local
-loop is:
+You need bash, git, Go at the version `go.mod` names,
+[actionlint](https://github.com/rhysd/actionlint) and
+[shellcheck](https://www.shellcheck.net/), which actionlint runs over
+every `run:` block. Reusable workflows, `secrets: inherit` and
+environments only run on GitHub's runners, so a pipeline cannot be
+executed locally. The local loop is:
 
 ```bash
-bash test/run.sh   # the regression suite; CI runs it on every push and pull request
-actionlint         # static workflow lint; CI runs it on every push and pull request
+git config core.hooksPath .githooks   # once: the pre-commit and pre-push hooks
+bash test/run.sh                      # the regression suite; CI runs it on every push and pull request
+actionlint                            # static workflow lint; CI runs it on every push and pull request
+go tool lateregate                    # the shared bar, as the per-push gate runs it here
 ```
 
 The suite is two kinds of check: unit tests over copies of the shell a
@@ -29,6 +34,21 @@ stage runs from ci at its own commit, and gets a test in `test/` that runs
 that script itself; `test/stub_gh.sh` stubs the GitHub CLI for it. Inline
 shell that stays in a workflow gets a copy and a test, as before.
 `test/run.sh` picks up any `*_test.sh`.
+
+## Sending a change
+
+1. Keep each change to one small commit whose message reads
+   `scope: lowercase description`, the scope being the workflow, action
+   or file it changes, with the reason in the body when the subject
+   does not carry it.
+2. A bug fix carries a test in `test/` that fails without it; a new
+   decision in a script gets a test that runs the script.
+3. Run `bash test/run.sh`, `actionlint` and `go tool lateregate`.
+4. Write the change under `## Unreleased` in `CHANGELOG.md` for whoever
+   calls the pipelines. Mark it **Breaking** when a caller must change
+   something, or when a run that passed before can now fail.
+5. Open a pull request against `main`; the `test`, `actionlint` and `ci`
+   workflows check it.
 
 ## How a change reaches callers
 
@@ -85,3 +105,8 @@ The canonical statement and the review checklist are
 [`docs/writing/registers.md`](https://github.com/latere-ai/pkg/blob/main/docs/writing/registers.md)
 in `latere-ai/pkg`. The design records behind the larger pipelines are in
 [`specs/`](specs/).
+
+## Reporting a vulnerability
+
+Not in an issue: [`SECURITY.md`](SECURITY.md) says how to report one
+privately and what the pipelines protect.
