@@ -3,16 +3,63 @@
 Every tag has a section here, and the section is the body of the GitHub
 release. A tag without one fails the release workflow. Write under
 `Unreleased` as work lands; cutting a tag moves it into the tag's section.
-Pushing a `v1.MAJOR.MINOR` tag also moves the `v1` tag every consumer pins.
+Pushing a `v1.MINOR.PATCH` tag also moves the `v1` tag every consumer pins.
 
 A section says what changed for whoever calls these pipelines, not what was
 committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- **Breaking**: a release now stops when any push run of the verify
+  workflow on the tagged commit failed, on any branch, even if another run
+  succeeded. A failed run that was re-run to a pass counts as passed.
+- **Breaking**: a commit that renames a file out of a code path is no
+  longer read as documentation only, so its parent's run no longer stands
+  in for its own.
+- **Breaking**: `image-build.yml` accepts an image only when the version it
+  prints is the tag exactly, followed by whitespace or nothing, so
+  `v1.2.30` or `v1.2.3-dirty` no longer passes for `v1.2.3`.
+- **Breaking**: the release tag is applied only to a reference written
+  `<registry>/<path>@sha256:<64 hex digits>`, with no tag.
+- **Breaking**: a `files` or `evidence` line of `publish-release` is one
+  path or pattern, so a path may hold a space; a line that held several
+  patterns separated by spaces now names one that matches nothing. A file
+  name with `#` is refused, since `gh` reads it as a label.
+- **Breaking**: `tools/repo-settings.sh` fails when the repository listing
+  fails partway, when the policy file or a repository answer is not JSON,
+  and when a write is refused for any reason other than open classic
+  projects. A repository left with projects enabled is still `PARTIAL`,
+  counted apart in the summary, and leaves the exit status 0.
+- A re-run of a publish over an existing release restates its title and
+  prerelease flag along with the notes.
+- Each attempt of an image deploy's smoke is stopped when `smoke_timeout`
+  is up, and a failed smoke's last `OUTPUT_MD` is appended to the step
+  summary.
+- An image namespace with `--` or `__`, which a reference allows, is
+  accepted; one holding a newline is refused.
+- The starter callers name `ci.yml` as the workflow an image release
+  verifies, take the `workflow_dispatch` the pin move sends, pass smoke
+  evidence only when the deploy ran, and name an example service.
 - The runner policy in the README now reads hosted runners for every
   repository: private repositories run only scheduled and hand-started jobs
   there, and their push, release and deploy run from a workstation.
+
+### Fixed
+
+- A smoke script that passes without writing `OUTPUT_MD` no longer fails
+  the deploy.
+- The digest check of an image deploy no longer reports that the overlay
+  names no image when the rendered overlay is large.
+- A `wait_minutes` such as `08` is read as eight minutes instead of failing.
+- A commented-out call to `lateregate.yml` no longer counts as a second
+  per-push workflow.
+- `ensure-kustomize` no longer takes an installed `v5.8.30` for the pinned
+  `5.8.3`.
+- `signed-checksums` sums a file whose name starts with `-`.
+- `tools/repo-settings.sh --help` exits 0, and a repository it cannot read
+  is reported with `gh`'s error instead of a list of drifted fields.
 
 ## v1.37.0 - 2026-11-06
 
