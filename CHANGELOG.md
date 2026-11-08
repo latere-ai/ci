@@ -335,6 +335,13 @@ committed: the commit log already holds that.
   on the self-hosted runner, pull request runs included, cancels the job,
   which reports canceled.
 
+## v1.26.0-rc1 - 2026-10-30
+
+The prerelease of v1.26.0. It carried the keyless image signing and the
+source and image SBOMs that v1.26.0 describes, and `lateregate.yml` running
+the plan, every gate and the wiring check in one job on the self-hosted
+runner.
+
 ## v1.25.1 - 2026-10-21
 
 ### Fixed
@@ -688,3 +695,125 @@ notes any more.
   section under it before the next tag.** In a Go repository, `go tool
   lateregate init` writes the file. The first tag after this pipeline moves to
   `v1` fails its release job without one.
+
+## v1.7.0 - 2026-09-01
+
+### Added
+
+- `lateregate.yml`: a reusable per-push workflow that asks `lateregate list
+  -json` which gates apply and builds its job matrix from the answer.
+  `examples/lateregate.yml` is the caller.
+
+### Fixed
+
+- `go-verify.yml`'s probe checked for files rather than make targets, and so
+  reported the wrong set of gates.
+
+## v1.6.0 - 2026-08-30
+
+### Added
+
+- `go-verify.yml` runs the license gate when the repository has one.
+
+### Removed
+
+- The nightly repository-settings audit workflow. `tools/repo-settings.sh
+  apply` stays.
+
+## v1.5.0 - 2026-08-30
+
+### Fixed
+
+- `go-verify.yml` generates the lint configuration before the linter reads it.
+
+## v1.4.0 - 2026-08-30
+
+### Added
+
+- `go-verify.yml` runs the check of the generated lint configuration.
+
+## v1.3.0 - 2026-08-29
+
+### Added
+
+- `go-verify.yml`, a reusable per-push pipeline for Go repositories, with
+  `examples/go-verify.yml`.
+- `tools/repo-settings.sh` and `tools/repo-settings.json`: the organization's
+  repository settings, with `apply`, `check` and a nightly drift check.
+
+## v1.2.0 - 2026-08-22
+
+### Added
+
+- `major-tag.yml` moves `v1` to each new release tag automatically.
+
+### Changed
+
+- The default Go toolchain is 1.27 and the default golangci-lint is v2.13.1;
+  the workflows' action pins move to newer versions.
+
+## v1.1.0 - 2026-08-03
+
+### Added
+
+- The regression suite (`test/run.sh`) runs in CI.
+- `service-release.yml` accepts a pre-minted smoke bearer token, the
+  `SMOKE_BEARER` secret.
+
+### Changed
+
+- Every action is pinned to a commit SHA and no tool is fetched at `latest`.
+- A prerelease is recognized by the SemVer core, not the whole tag, and a tag
+  with build metadata (`+`) is refused.
+
+### Fixed
+
+- The publish step stays green when `build_cli` is false.
+
+## v1.0.4 - 2026-07-13
+
+### Changed
+
+- `images-release.yml` builds images in three stages by `FROM` depth.
+
+## v1.0.3 - 2026-07-12
+
+### Added
+
+- `images-release.yml`, a reusable pipeline that builds container images in
+  dependency order. It was removed in v1.20.0.
+
+## v1.0.2 - 2026-07-11
+
+### Changed
+
+- `service-release.yml` applies manifests with kustomize when `deploy/prod`
+  has a `kustomization.yaml`; other repositories apply the files as before.
+
+## v1.0.1 - 2026-06-16
+
+### Added
+
+- `service-release.yml` accepts `build_mode: dockerfile` for a repository
+  whose one Dockerfile builds everything, deployment and container name
+  inputs, and `build_cli` for a repository that ships both a service and a
+  CLI. The `VERSION` build argument reaches the image build.
+
+### Fixed
+
+- The deploy job waits for the image build and no longer skips in Dockerfile
+  mode.
+
+## v1.0.0 - 2026-06-16
+
+### Added
+
+- `service-release.yml`, a reusable release pipeline for a service, and
+  `cli-release.yml`, one for a command-line tool, with caller examples.
+- A `smoke_scope` input for the smoke token mint, and standard smoke secret
+  names.
+
+### Fixed
+
+- A caller must declare a `permissions` block, which avoids a startup failure
+  of the reusable workflow.
