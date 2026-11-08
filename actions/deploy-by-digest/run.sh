@@ -64,7 +64,10 @@ pin() {
     done <<< "$parsed"
     rendered=$(render)
     while read -r name ref digest; do
-        printf '%s\n' "$rendered" | grep -qF "${ref}@${digest}" \
+        # A here-string, not a pipe: grep -q exits at the first match, and
+        # under pipefail the printf of a large render then dies of SIGPIPE
+        # and fails the check.
+        grep -qF "${ref}@${digest}" <<< "$rendered" \
             || die "the rendered $dir does not run ${ref}@${digest}; the overlay names no image '${name}'"
         echo "pinned ${ref}@${digest} as ${name}"
     done <<< "$parsed"

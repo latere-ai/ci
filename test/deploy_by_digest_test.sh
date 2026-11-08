@@ -117,6 +117,19 @@ if [ $? -ne 0 ] && printf '%s' "$out" | grep -qF "does not run ghcr.io/latere-ai
 else
     fail "pin passed an overlay that does not run the digest: $out"
 fi
+# pin: a render larger than the pipe buffer, with the pinned line first, still
+# passes; repeated, since a pipe to grep -q fails by timing.
+{ cat "$TMP/render"; i=0; while [ $i -lt 4000 ]; do echo "# padding padding padding padding padding padding $i"; i=$((i + 1)); done; } > "$TMP/render.big"
+big_ok=1
+for _ in 1 2 3; do
+    step pin STUB_RENDER="$TMP/render.big" IMAGES="ghcr.io/latere-ai/arcad@$D1" > /dev/null || big_ok=0
+done
+if [ $big_ok -eq 1 ]; then
+    pass "pin passes when the render is larger than the pipe buffer"
+else
+    fail "pin passes when the render is larger than the pipe buffer (refused a correct overlay)"
+fi
+
 out=$(step pin STUB_RENDER="$TMP/render" DEPLOY_DIR=nope IMAGES="ghcr.io/latere-ai/arcad@$D1")
 if [ $? -ne 0 ]; then
     pass "pin fails when the overlay has no kustomization.yaml"
