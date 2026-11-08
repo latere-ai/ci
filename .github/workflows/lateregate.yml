@@ -233,7 +233,10 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
   test:
-    name: test on ${{ matrix.os }}
+    # A skipped job never expands its matrix, so a name that reads it would
+    # show the raw expression. A static name is shown as written, and GitHub
+    # appends the matrix value to a running leg: "test (ubuntu-latest)".
+    name: test
     needs: probe
     if: ${{ needs.probe.outputs.tests != '[]' }}
     runs-on: ${{ matrix.os }}

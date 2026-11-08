@@ -79,6 +79,10 @@ committed: the commit log already holds that.
   start, so a release on a pin commit is no longer blocked. A failed push
   run of the commit, on any branch, still blocks the release, and so does a
   dispatched run on another branch or one that did not succeed.
+- **Breaking**: the `test` job of `lateregate.yml` is named `test (<os>)`,
+  not `test on <os>`, so it shows no raw `${{ matrix.os }}` when it is
+  skipped. A branch protection rule that requires a check by the old name
+  needs the new one.
 
 ### Fixed
 

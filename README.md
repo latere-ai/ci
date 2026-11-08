@@ -273,7 +273,7 @@ On a hosted runner each gate gets a job:
 | Job | Runs |
 | --- | --- |
 | `which gates apply` | `lateregate list -json`; its outputs are the job sets |
-| `test on <os>` | `lateregate test` on each runner in `test_os`, except `runs_on` once the plan has `suite` |
+| `test (<os>)` | `lateregate test` on each runner in `test_os`, except `runs_on` once the plan has `suite` |
 | `<gate>` | `lateregate <gate>`, one job per running gate; `cover` or `suite` uploads `coverage.out` |
 | `wiring is in shape` | `lateregate contract` |
 | `all gates passed` | after every other job, whatever they did, except in a canceled push run: passes when each one succeeded or was skipped, and fails on a failure or a cancellation |
@@ -283,7 +283,7 @@ On a self-hosted runner one job does all of it:
 | Job | Runs |
 | --- | --- |
 | `all gates passed` | `lateregate list -json`, then every running gate one after another in plan order, `test` included when the plan has no `suite`, then `lateregate contract`; uploads `coverage.out` when `cover` or `suite` ran; fails when a gate failed or a job it waits for did, and is canceled with its run |
-| `which gates apply`, `test on <os>` | only when `test_os` names a runner other than `runs_on`: `lateregate test` on those runners, and `all gates passed` waits for them |
+| `which gates apply`, `test (<os>)` | only when `test_os` names a runner other than `runs_on`: `lateregate test` on those runners, and `all gates passed` waits for them |
 
 Branch protection requires one check: `all gates passed`. The gate jobs
 are named for the gates the plan picks, so the set changes when a pin adds
