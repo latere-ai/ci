@@ -726,6 +726,14 @@ for want in 'contents: write' 'issues: write' 'actions: write' 'workflow_dispatc
     fi
 done
 
+# The bump dispatches the per-push caller on the pin commit, so the starter
+# caller a repository copies beside it must accept the dispatch.
+if grep -qx '  workflow_dispatch:' "$REPO_ROOT/examples/lateregate.yml"; then
+    pass "the starter per-push caller takes the dispatch the bump sends"
+else
+    fail "examples/lateregate.yml has no workflow_dispatch, so the bump's dispatch fails after the push"
+fi
+
 # Each step runs only on the path it belongs to.
 step_if() {
     awk -v name="$1" '

@@ -216,6 +216,14 @@ else
     fail "the stage asks for more than contents: read"
 fi
 
+# The example names the per-push caller lateregate init writes, since the
+# stage's default is verify.yml and a missing workflow refuses the release.
+if grep -qx '      verify_workflow: ci.yml' "$EXAMPLE"; then
+    pass "the example verifies the tag against ci.yml, the caller init writes"
+else
+    fail "the example leaves verify_workflow at verify.yml, which init does not write"
+fi
+
 # The example wires it as the README says: gated by a variable, the secret
 # mapped, publish not blocked by a skipped deploy and blocked by a failed one.
 if grep -qF 'uses: latere-ai/ci/.github/workflows/image-deploy.yml@v1' "$EXAMPLE" \
@@ -227,9 +235,9 @@ else
     fail "the example's deploy job is not gated, mapped or granted as documented"
 fi
 if grep -qF "needs.deploy.result != 'failure' && needs.deploy.result != 'cancelled'" "$EXAMPLE" \
-    && grep -qF "evidence: '*-evidence'" "$EXAMPLE" \
+    && grep -qF "evidence: \${{ needs.deploy.result == 'success' && '*-evidence' || '' }}" "$EXAMPLE" \
     && grep -qF "needs.publish.result == 'success'" "$EXAMPLE"; then
-    pass "the example publishes unless the deploy failed, with its evidence, and verifies after"
+    pass "the example publishes unless the deploy failed, with its evidence only when the deploy ran, and verifies after"
 else
     fail "the example's publish or verify condition does not account for a skipped deploy"
 fi

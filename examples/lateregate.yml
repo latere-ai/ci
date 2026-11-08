@@ -7,7 +7,7 @@
 #
 # Nothing else is needed. The pipeline asks lateregate which gates apply to
 # your repository and runs them: a job per gate on a hosted runner, one job
-# for all of them on the self-hosted one. `go tool lateregate` on your laptop
+# for all of them on a self-hosted one. `go tool lateregate` on your laptop
 # runs the same set.
 #
 # Branch protection requires one check: `gate / all gates passed`. It is the
@@ -19,10 +19,13 @@
 
 name: ci
 
+# workflow_dispatch lets ci-gate-bump.yml start a run on the commit that
+# moves the pin, which its own push does not.
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 # actions: read lets the plan start from the last green commit; without it
 # the run checks the whole tree.

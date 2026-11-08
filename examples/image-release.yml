@@ -1,6 +1,6 @@
 # Copy to a service that publishes signed images as .github/workflows/release.yml.
-# Pushing a vX.Y.Z tag whose commit passed verify.yml builds the images and
-# pushes them by digest under no tag, signs them, writes their bills of
+# Pushing a vX.Y.Z tag whose commit passed the per-push gate builds the
+# images and pushes them by digest under no tag, signs them, writes their bills of
 # materials and, in a public repository, attests them. Anything that must pass
 # before the release is published runs between the build and the publish
 # jobs, reading the digests the build outputs. The publish job tags the
@@ -37,6 +37,9 @@ jobs:
       id-token: write
       attestations: write
     with:
+      # The per-push caller whose run on the tagged commit must have passed;
+      # the stage's default is verify.yml.
+      verify_workflow: ci.yml
       # One image per slot, up to three. version_args is what makes the
       # image print "<name> <tag> ..."; leave it out to skip the check.
       image_1: '{"name": "exampled", "version_args": "version"}'
@@ -44,8 +47,8 @@ jobs:
       # image_2: '{"name": "example-stubs", "dockerfile": "Dockerfile.stubs", "platforms": "linux/amd64"}'
       # Files the release attaches beside the bills of materials:
       # archives_command: tools/release/build.sh "$TAG" dist
-      # A private repository on the self-hosted runner refuses at once
-      # while verify is still running rather than hold a slot:
+      # On a self-hosted runner, refuse at once while the per-push run is
+      # still going rather than hold a slot it may need:
       # wait_minutes: "0"
 
   # Whatever must pass before the release is published, against the digests.
@@ -91,8 +94,10 @@ jobs:
       id-token: write
     with:
       images: ${{ needs.build.outputs.images }}
-      # The smoke evidence of the deploy job, appended to the release body:
-      evidence: '*-evidence'
+      # The smoke evidence of the deploy job, appended to the release body.
+      # A pattern that matches nothing fails the publish, so it is passed
+      # only when the deploy ran:
+      evidence: ${{ needs.deploy.result == 'success' && '*-evidence' || '' }}
       # title: Example
 
   verify:
