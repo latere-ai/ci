@@ -1104,8 +1104,10 @@ only in the SemVer version core.
 
 Callers pin `@v1`, a tag that moves. Pushing a `v1.MINOR.PATCH` tag to
 this repository moves `v1` to it (`major-tag.yml`), so a change reaches
-callers as part of cutting a version. Landing on main does not move `v1`,
-and neither does a prerelease tag such as `v1.2.3-rc1`, which is how a
+callers as part of cutting a version, once the tagged commit passed this
+repository's own checks. `v1` only moves forward: a backport tag cut after
+a newer minor leaves it on the newer release. Landing on main does not move
+`v1`, and neither does a prerelease tag such as `v1.2.3-rc1`, which is how a
 change is tried on one repository before every repository runs it. A
 repository that needs to hold still pins a full version, `@v1.17.0`.
 

@@ -78,6 +78,9 @@ committed: the commit log already holds that.
 - An image release passes `evidence` to `publish-release` only when a `.md`
   file was downloaded, so an evidence pattern that matched no Markdown no
   longer fails the publish.
+- A backport tag such as `v1.5.1`, pushed after `v1.6.0`, no longer moves
+  `v1` backwards: `v1` moves only to the highest `v1.MINOR.PATCH` release
+  tag.
 
 ## v1.37.0 - 2026-11-06
 

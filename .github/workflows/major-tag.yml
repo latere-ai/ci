@@ -51,14 +51,10 @@ jobs:
         with:
           verify_workflow: test.yml
 
+      # Forward only: a backport tag pushed after a newer minor must not pull
+      # v1 back, so v1 moves only to the highest release tag.
       - name: Move v1 to ${{ github.ref_name }}
         if: ${{ steps.shape.outputs.release == 'true' }}
         env:
           TAG: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -f v1 "$TAG"^{}
-          git push -f origin refs/tags/v1
-          echo "v1 -> $TAG ($(git rev-parse v1^{}))"
+        run: bash tools/major-tag.sh
