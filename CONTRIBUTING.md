@@ -50,6 +50,10 @@ shell that stays in a workflow gets a copy and a test, as before.
 5. Open a pull request against `main`; the `test`, `actionlint` and `ci`
    workflows check it.
 
+Contributions are accepted under the repository's [MIT license](LICENSE),
+as the license itself provides. There is no contributor agreement and no
+sign-off line.
+
 ## How a change reaches callers
 
 Callers pin `@v1`. Landing on main changes nothing for them: these

@@ -1179,3 +1179,7 @@ run on your own `gh` credentials, so no token is stored anywhere.
 workflows are tested, and how a version is cut and reaches callers.
 Report a vulnerability as [`SECURITY.md`](SECURITY.md) says, never in a
 public issue.
+
+## License
+
+MIT. See [`LICENSE`](LICENSE).
