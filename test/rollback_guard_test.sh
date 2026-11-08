@@ -60,6 +60,29 @@ for step in 'name: Isolate Docker credentials' 'name: Build and push' 'name: Wri
 done
 [ "$order_ok" -eq 1 ] && pass "the rollback guard runs before the image is pushed and the cluster is touched"
 
+# A release that finishes late must not roll production back, so the guard
+# runs a second time right before the kubeconfig is written, the last step
+# before the rollout. Each workflow's last guard before that step is the one
+# directly ahead of it, with only comments between.
+for name in service-release.yml image-deploy.yml; do
+    wf="$REPO_ROOT/.github/workflows/$name"
+    kube=$(grep -nF 'name: Write the kubeconfig' "$wf" | head -1 | cut -d: -f1)
+    last=$(grep -nF 'uses: ./.latere-ci/actions/rollback-guard' "$wf" | cut -d: -f1 | awk -v k="$kube" '$1 < k { l = $1 } END { print l }')
+    between=$(sed -n "$((last + 1)),$((kube - 1))p" "$wf" | grep -vE '^\s*(#.*)?$')
+    guards=$(grep -cF 'uses: ./.latere-ci/actions/rollback-guard' "$wf")
+    if [ -n "$kube" ] && [ -n "$last" ] && [ "$guards" -ge 2 ] && [ "$between" = "" ]; then
+        pass "$name runs the rollback guard again right before the kubeconfig is written"
+    else
+        fail "$name: no second rollback guard directly before the kubeconfig (guards=$guards last=$last kubeconfig=$kube)"
+    fi
+done
+# service-release stays one job: the second guard is a step, not a job.
+if [ "$(sed -n '/^jobs:$/,$p' "$WORKFLOW" | grep -cE '^  [a-z0-9_-]+:$')" -eq 1 ]; then
+    pass "service-release.yml is still a single job"
+else
+    fail "service-release.yml is no longer a single job"
+fi
+
 # The whole script against a real origin: a newer tag refuses, none passes.
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT

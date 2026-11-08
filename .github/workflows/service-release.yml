@@ -456,6 +456,12 @@ jobs:
         with:
           version: ${{ inputs.kubectl_version }}
 
+      # The build above can outlast a newer release that started and finished
+      # in the meantime. Read the tags again at the last moment before the
+      # rollout, so this older one cannot roll production back.
+      - name: No newer release was tagged meanwhile
+        uses: ./.latere-ci/actions/rollback-guard
+
       # The kubeconfig lives in this job's temp directory, which the runner
       # empties when the job ends: on a self-hosted runner a file under $HOME
       # would outlive the job and be shared with the other slot.

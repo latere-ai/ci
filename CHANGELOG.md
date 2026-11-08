@@ -52,6 +52,11 @@ committed: the commit log already holds that.
   calls `lateregate.yml`, as the other pipelines do. It defaulted to
   `verify.yml`, so a caller that passed nothing and has no `verify.yml` was
   refused; a repository with several callers must now name the workflow.
+- **Breaking**: `service-release.yml` and `image-deploy.yml` run the
+  rollback guard a second time right before the kubeconfig is written. An
+  older release that finishes late, after a newer `vX.Y.Z` was tagged, now
+  stops there instead of rolling production back; the build it paid for is
+  lost.
 
 ### Fixed
 
