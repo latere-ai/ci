@@ -90,11 +90,25 @@ if grep -qF 'golangci/golangci-lint-action@' "$WORKFLOW"; then
 else
     pass "cli-release leaves lint to lateregate"
 fi
-perms=$(sed -n '/^permissions:/,/^jobs:/p' "$WORKFLOW")
-if printf '%s\n' "$perms" | grep -qx '  actions: read' && printf '%s\n' "$perms" | grep -qx '  contents: write'; then
-    pass "the workflow may read the per-push runs and publish"
+# Each job holds only what it needs of the caller's grant: verified reads the
+# per-push runs, test reads the source, goreleaser alone publishes.
+job_perms() { sed -n "/^  $1:\$/,/^  [a-z_-]*:\$/p" "$WORKFLOW" | sed -n '/^    permissions:$/,/^    [a-z-]*:/p' | grep -E '^      [a-z-]+: ' | sed 's/^ *//' | sort | tr '\n' ' '; }
+check_perms() {
+    local got
+    got=$(job_perms "$1")
+    if [ "$got" = "$2" ]; then
+        pass "the $1 job holds only: $2"
+    else
+        fail "the $1 job holds '$got', want '$2'"
+    fi
+}
+check_perms verified 'actions: read contents: read '
+check_perms test 'contents: read '
+check_perms goreleaser 'contents: write '
+if sed -n '/^permissions:/,/^jobs:/p' "$WORKFLOW" | grep -qE ': write'; then
+    fail "the workflow-level permissions grant a write to every job"
 else
-    fail "actions: read or contents: write is missing from the workflow permissions"
+    pass "the workflow-level permissions grant no write"
 fi
 if grep -qx '  actions: read' "$REPO_ROOT/examples/cli-release.yml"; then
     pass "the example grants actions: read"

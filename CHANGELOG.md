@@ -60,6 +60,12 @@ committed: the commit log already holds that.
 - Pushing a `v1.MINOR.PATCH` tag moves `v1` only after the tagged commit
   passed this repository's own `test.yml` on its push, so a tag cut on a
   red or unverified commit no longer reaches the callers that pin `@v1`.
+- **Breaking**: in `cli-release.yml` the `verified` job holds `contents:
+  read` and `actions: read`, the `test` job `contents: read`, and only the
+  `goreleaser` job `contents: write`. The consumer's tests no longer run
+  with a token that can write to the repository. A caller's
+  `.goreleaser.yaml` hook that read workflow runs from the release job
+  needs its own grant.
 
 ### Fixed
 
