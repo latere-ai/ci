@@ -1,13 +1,15 @@
 # ci
 
-Reusable GitHub Actions pipelines for Latere repositories: the per-push
-quality gate, the daily move of the gate's version pin, and the
-tag-triggered releases for a Kubernetes service, a command-line tool, and
-a library. A repository keeps a short caller workflow; the logic lives here
-and reaches every caller through the moving `@v1` tag.
+**ci is the set of reusable GitHub Actions workflows Latere's repositories
+call: the per-push quality gate, the daily move of the gate's version pin,
+and the tag-triggered releases of a Kubernetes service, signed images, a
+command-line tool and a library.** A repository keeps a short caller
+workflow; the logic lives here and reaches every caller through the moving
+`@v1` tag.
 
 [![test](https://github.com/latere-ai/ci/actions/workflows/test.yml/badge.svg)](https://github.com/latere-ai/ci/actions/workflows/test.yml)
 [![actionlint](https://github.com/latere-ai/ci/actions/workflows/actionlint.yml/badge.svg)](https://github.com/latere-ai/ci/actions/workflows/actionlint.yml)
+[![Release](https://img.shields.io/github/v/release/latere-ai/ci)](https://github.com/latere-ai/ci/releases)
 
 This repository owns orchestration and ordering: which jobs run, on which
 runner, in what order, with which credentials. What each quality gate
@@ -16,11 +18,22 @@ the `lateregate` binary a repository pins in its own `go.mod`. What to
 build, what to apply, and what "live" means stay in the consuming
 repository, by convention rather than through a long list of inputs.
 
-## The pipelines
+## Status
+
+The pipelines are on version 1 and run the pushes and releases of most of
+Latere's public repositories. A private repository starts no workflow on a
+push or a tag; it runs the same steps from a workstation (see
+[Runners](#runners)).
+The [releases](https://github.com/latere-ai/ci/releases) list every
+version. Callers pin `@v1`, which moves when a version is cut, so a change
+reaches every caller at once; an input or a job can still change between
+versions, and the [changelog](CHANGELOG.md) says what a caller must change.
+A repository that needs to hold still pins a full version (see
+[Versioning](#versioning)). ci has had no external security audit.
 
 | Workflow | Runs on | For | Jobs |
 | --- | --- | --- | --- |
-| [`lateregate.yml`](.github/workflows/lateregate.yml) | every push and pull request | a Go repository | the plan, the gates (a job each on a hosted runner, one job on the self-hosted one), the test matrix, the wiring check |
+| [`lateregate.yml`](.github/workflows/lateregate.yml) | every push and pull request | a Go repository | the plan, the gates (a job each on a hosted runner, one job on a self-hosted one), the test matrix, the wiring check |
 | [`ci-gate-bump.yml`](.github/workflows/ci-gate-bump.yml) | once a day | a public Go repository that pins `latere.ai/x/ci-gate` | move the pin to the latest release when the bar passes on it, or open an issue |
 | [`service-release.yml`](.github/workflows/service-release.yml) | a `v*` tag | a Kubernetes service | build the image, deploy, smoke the live surface, publish the release |
 | [`image-build.yml`](.github/workflows/image-build.yml), [`image-publish.yml`](.github/workflows/image-publish.yml), [`release-verify.yml`](.github/workflows/release-verify.yml) | a `v*` tag | a service that publishes signed images and lets others install them | build and sign the images by digest; then, after the repository's own jobs, tag them and publish the release; then verify what was published |
@@ -35,6 +48,97 @@ section of `CHANGELOG.md` as its body; a tag without a section fails. See
 [`examples/`](examples/) holds a starter caller for each.
 [`tools/repo-settings.sh`](tools/repo-settings.sh) applies the
 organization's repository settings to a new repository.
+
+## Quickstart
+
+You need Go 1.27 or newer, git, and the [GitHub CLI](https://cli.github.com/)
+signed in to an account that can create a public repository.
+
+First make a Go module whose bar passes on your machine: follow
+[ci-gate's Quickstart](https://github.com/latere-ai/ci-gate#quickstart) to
+its last command, `go tool lateregate`. Its `go tool lateregate init` step
+wrote `.github/workflows/ci.yml`, which calls this repository's per-push
+gate:
+
+```yaml
+jobs:
+  gate:
+    uses: latere-ai/ci/.github/workflows/lateregate.yml@v1
+```
+
+Then, from the same directory, push it to a new public repository and
+watch the run:
+
+```sh
+gh repo create hello --public --source . --push
+sleep 10
+gh run watch --exit-status "$(gh run list --workflow ci.yml --limit 1 --json databaseId -q '.[0].databaseId')"
+```
+
+The run ends with the check `gate / all gates passed`, the one check to
+require in branch protection. [Adopting it](#adopting-it) adds the daily
+pin move, a release caller and the repository settings.
+
+## How it fits
+
+```mermaid
+flowchart LR
+    subgraph repo["Your repository"]
+        caller["caller workflows"]
+        pin["go.mod: the lateregate pin"]
+        conf[".lateregate.yaml, CHANGELOG.md, deploy/prod"]
+    end
+    subgraph ci["latere-ai/ci at @v1"]
+        wf["reusable workflows"]
+        act["actions/ scripts"]
+    end
+    gate["lateregate (latere-ai/ci-gate)"]
+    ghcr["GitHub Container Registry"]
+    k8s["Kubernetes cluster"]
+    rel["GitHub release"]
+
+    caller -->|uses| wf
+    wf --> act
+    wf -->|go tool lateregate| gate
+    gate -->|reads| pin
+    gate -->|reads| conf
+    act -->|"images by digest, signed, with SBOMs"| ghcr
+    act -->|"apply deploy/prod by digest, smoke"| k8s
+    act -->|"the tag's changelog section, last"| rel
+```
+
+- **Your repository** holds a caller per pipeline, the `lateregate` pin,
+  its gate configuration, its changelog and, for a service, the manifests
+  it deploys. Starter callers are in [`examples/`](examples/).
+- **The reusable workflows** decide the jobs, their order, their runner and
+  their credentials. Each runs the scripts under [`actions/`](actions/) at
+  ci's own commit, so a caller cannot change what a step does.
+- **lateregate**, from [ci-gate](https://github.com/latere-ai/ci-gate), is
+  the bar: which gates apply, what each asserts, the changelog reader and
+  the release cut. The workflows run the version the repository pins.
+- **The registry, the cluster and the release** are where a release lands:
+  images by digest with their signatures and SBOMs, the rollout of the
+  pinned digests, and the release page, published last with the tag's
+  section of the changelog.
+
+## Documentation
+
+| | |
+| --- | --- |
+| [Adopting it](#adopting-it) | the files a new repository adds, in order |
+| [The per-push gate](#the-per-push-gate-lateregateyml) | `lateregate.yml`: its inputs, the plan, the jobs and the one required check |
+| [Moving the gate pin](#moving-the-gate-pin-ci-gate-bumpyml) | `ci-gate-bump.yml`: the daily bump, its issues and its dispatch |
+| [A tag is a release](#a-tag-is-a-release-and-a-release-has-notes) | the changelog rule every release pipeline holds |
+| [Releasing a service](#releasing-a-service-service-releaseyml) | `service-release.yml`: what the repository provides, inputs, build modes, signatures and the deploy credential |
+| [Releasing signed images](#releasing-signed-images-image-buildyml-image-publishyml-release-verifyyml) | `image-build.yml`, `image-publish.yml`, `release-verify.yml`, `image-deploy.yml`, and how to verify a release |
+| [Releasing a command-line tool](#releasing-a-command-line-tool-cli-releaseyml) | `cli-release.yml` and GoReleaser |
+| [Releasing a module or library](#releasing-a-module-or-library-notes-releaseyml) | `notes-release.yml` |
+| [Runners](#runners), [Run artifacts](#run-artifacts), [Tag rules](#tag-rules), [Versioning](#versioning), [Supply chain](#supply-chain) | the rules every pipeline shares |
+| [Repository settings](#repository-settings) | `tools/repo-settings.sh` and the organization's policy |
+| [`examples/`](examples/) | a starter caller for each pipeline |
+| [`specs/`](specs/README.md) | the design records behind the larger pipelines |
+| [`CHANGELOG.md`](CHANGELOG.md) | what each version changed for a caller |
+| [ci-gate](https://github.com/latere-ai/ci-gate#readme) | what each gate asserts and how `lateregate` is configured |
 
 ## Adopting it
 
@@ -64,8 +168,8 @@ For a new Go repository:
 2. **The daily pin move**, in a public repository. Copy
    [`examples/ci-gate-bump.yml`](examples/ci-gate-bump.yml) to
    `.github/workflows/ci-gate-bump.yml`, give its cron a minute no other
-   repository on the same runner uses, and add `workflow_dispatch:` to the
-   triggers of the per-push caller; see
+   repository on the same runner uses, and keep `workflow_dispatch:` among
+   the triggers of the per-push caller, which `init` writes; see
    [Moving the gate pin](#moving-the-gate-pin-ci-gate-bumpyml).
 
 3. **A release caller**, chosen by what the repository ships: copy the
@@ -87,6 +191,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
@@ -123,21 +228,22 @@ it. A repository that cannot lint waives `lint` with a reason and a date
 rather than turning the job off.
 
 **The plan is measured from the last green commit.** The job that reads the
-plan (`which gates apply` on a hosted runner, `all gates passed` on the
+plan (`which gates apply` on a hosted runner, `all gates passed` on a
 self-hosted one) first runs `lateregate base -since green`, which prints the
 newest commit on the default branch with a successful push run of the
 calling workflow that is an ancestor of the pushed commit. It then runs
 `lateregate list -json -since <that commit>`, so a gate whose inputs did not
 change since then is skipped with its reason in the log. The commit is in
-the log and the step summary. Gates run by name, one per job, take no
-`-since`: the plan already chose them.
+the log and the step summary. Each gate then runs by name, one per job,
+with the same `-since`, so a gate that holds parts of its own, such as
+e2e's suites, skips the parts the change cannot reach.
 
 When the base cannot be had, the whole tree is checked and the log says why.
 That happens when the pinned `lateregate` has no `base` command, no run was
 green, the API answered an error, or the caller grants no `actions: read`
 (the workflow runs with the caller's token and asks for nothing more, since a
 reusable workflow that asks for a permission its caller lacks fails at
-startup; without the grant the API answers 403). A cancelled run is never a
+startup; without the grant the API answers 403). A canceled run is never a
 base.
 
 **The plan says what to install.** Each running entry in the plan may carry
@@ -145,7 +251,7 @@ base.
 `bun install --frozen-lockfile` and `bunx playwright install --with-deps
 chromium` in `<dir>`. A failed browser install does not fail its step's job:
 the gate fails on the test that needs the browser. A hosted gate job installs
-what its own gate needs; on the self-hosted runner `all gates passed`
+what its own gate needs; on a self-hosted runner `all gates passed`
 installs what any running gate needs. With a pinned `lateregate` that has no
 `needs`, `enum-typescript` and `frontend` get Node and Bun, and `frontend`
 gets the browser from `frontend_browser_package`. The `test` entry's `os`
@@ -170,23 +276,23 @@ On a hosted runner each gate gets a job:
 | `test on <os>` | `lateregate test` on each runner in `test_os`, except `runs_on` once the plan has `suite` |
 | `<gate>` | `lateregate <gate>`, one job per running gate; `cover` or `suite` uploads `coverage.out` |
 | `wiring is in shape` | `lateregate contract` |
-| `all gates passed` | after every other job, whatever they did, except in a cancelled push run: passes when each one succeeded or was skipped, and fails on a failure or a cancellation |
+| `all gates passed` | after every other job, whatever they did, except in a canceled push run: passes when each one succeeded or was skipped, and fails on a failure or a cancellation |
 
 On a self-hosted runner one job does all of it:
 
 | Job | Runs |
 | --- | --- |
-| `all gates passed` | `lateregate list -json`, then every running gate one after another in plan order, `test` included when the plan has no `suite`, then `lateregate contract`; uploads `coverage.out` when `cover` or `suite` ran; fails when a gate failed or a job it waits for did, and is cancelled with its run |
+| `all gates passed` | `lateregate list -json`, then every running gate one after another in plan order, `test` included when the plan has no `suite`, then `lateregate contract`; uploads `coverage.out` when `cover` or `suite` ran; fails when a gate failed or a job it waits for did, and is canceled with its run |
 | `which gates apply`, `test on <os>` | only when `test_os` names a runner other than `runs_on`: `lateregate test` on those runners, and `all gates passed` waits for them |
 
 Branch protection requires one check: `all gates passed`. The gate jobs
 are named for the gates the plan picks, so the set changes when a pin adds
 or drops a gate, and a job that did not apply reports as skipped. This
 job is always present under the same name, runs whatever the other jobs
-did, and fails unless each of them succeeded or was skipped. A cancelled
-run cancels it, and it reports cancelled: a push run is cancelled when a
+did, and fails unless each of them succeeded or was skipped. A canceled
+run cancels it, and it reports canceled: a push run is canceled when a
 newer push supersedes it or GitHub delivers the same push twice, and on
-the self-hosted runner, where the job is the gates, a cancelled run of any
+a self-hosted runner, where the job is the gates, a canceled run of any
 event stops them. A pull request run on a hosted runner is the exception:
 there the job runs after a cancellation and fails. GitHub names a reusable
 workflow's check after the caller's job id, so a caller whose job is
@@ -282,7 +388,9 @@ Actions token starts no workflow, so the job then dispatches the per-push
 caller, the one workflow that calls `lateregate.yml`, on the new commit.
 That is why the per-push caller needs `workflow_dispatch:` among its
 triggers: without a run on the commit, `lateregate release` has no CI to
-read.
+read. A repository that ships from a workstation (`ship:` in
+`.lateregate.yaml`) and has no workflow calling `lateregate.yml` gets no
+dispatch, since the bump has already run the whole bar on the new pin.
 
 When the bar fails, nothing is pushed. The job opens one issue per version,
 titled `ci-gate vX.Y.Z does not pass the gate`, with each failing gate's
@@ -301,6 +409,7 @@ which Go a repository builds with is decided by hand.
 | --- | --- | --- |
 | `go_version` | `1.27` | the Go toolchain; keep it the one the per-push gate runs, since `vuln` judges the standard library of the toolchain that runs it |
 | `runs_on` | the [runner policy](#runners) | the runner label for both jobs |
+| `gate_module` | empty: found by its `tool` line | the directory of the module whose `go.mod` pins ci-gate, as above |
 
 The bar runs as the per-push gate's jobs do: no service containers, a test
 that needs Docker reaches the runner's daemon, `lint` gets the runner
@@ -334,7 +443,7 @@ the tag before it leaves the laptop, and `go tool lateregate release
 vX.Y.Z` moves the notes under `Unreleased` into the tag's section,
 commits, tags and pushes. A repository with no Go keeps a root `go.mod`
 that holds only the tool pin and runs the same command, as this one does.
-`major-tag.yml` still moves `v1` when a `v1.MAJOR.MINOR` tag lands.
+`major-tag.yml` still moves `v1` when a `v1.MINOR.PATCH` tag lands.
 
 `service-release.yml` checks the section before it builds anything, so a
 tag without one deploys nothing. Publishing is still the last step: a
@@ -358,12 +467,12 @@ jobs:
   release:
     uses: latere-ai/ci/.github/workflows/service-release.yml@v1
     with:
-      service: platformd
-      image: ghcr.io/latere-ai/platformd
-      namespace: latere
-      url: https://platform.latere.ai
-      title: Latere Platform
-      main_package: ./cmd/platformd
+      service: exampled
+      image: ghcr.io/latere-ai/exampled
+      namespace: example
+      url: https://example.latere.ai
+      title: Example
+      main_package: ./cmd/exampled
       spa_embed_dir: internal/web/spa/dist
     secrets: inherit
 ```
@@ -379,10 +488,10 @@ caller that grants neither fails at startup the same way.
 The run is one job, so on a busy self-hosted runner a release waits for
 a slot once rather than before every stage. Its steps run in order, and a
 failed step skips the rest. The first is the shared `verified-commit`
-step: the tagged commit's per-push gate run on its branch push must have
-succeeded, read and waited for exactly as in
+step: the tagged commit's push runs of the per-push gate must have
+passed, read and waited for exactly as in
 [`image-build.yml`](#releasing-signed-images-image-buildyml-image-publishyml-release-verifyyml),
-so a tag on a commit whose CI failed, was cancelled or never ran builds
+so a tag on a commit whose CI failed, was canceled or never ran builds
 and deploys nothing. The build pushes the image; in `split` mode it
 first builds the frontend (with a typecheck) and the Go binary (after
 `go vet`) on the runner. The pushed image is then signed and its SBOM
@@ -449,7 +558,7 @@ pipeline can `kubectl set image` without reading the manifests.
 | `smoke_scope` | empty | an OAuth scope requested with the smoke token |
 | `build_cli`, `cli_build_cmd` | `false`, empty | also build command-line binaries (the command writes them under `dist/`) and attach them to the release |
 | `verify_workflow` | empty: the workflow that calls `lateregate.yml` | the per-push workflow whose run on the tagged commit must have succeeded |
-| `wait_minutes` | empty: `60` on a GitHub-hosted runner, `0` on the self-hosted one | how long the release waits for that run while it is still going; `"0"` refuses at once and prints the command that re-runs the release |
+| `wait_minutes` | empty: `60` on a GitHub-hosted runner, `0` on a self-hosted one | how long the release waits for that run while it is still going; `"0"` refuses at once and prints the command that re-runs the release |
 | `skip_paths` | `specs/*`, `*.md` | paths that change no code; a commit that changes only these is read through to its parent. A repository whose gate ignores more paths lists them here too |
 | `go_version`, `bun_version` | `1.27`, `1.4.4` | toolchains |
 | `kubectl_version` | `1.35.1` | fetched, checksum-verified, when the runner has none |
@@ -504,17 +613,17 @@ its release tags become public there; its code and its dependency list do
 not. To check an image:
 
 ```sh
-cosign verify ghcr.io/latere-ai/platformd@sha256:<digest> \
+cosign verify ghcr.io/latere-ai/exampled@sha256:<digest> \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   --certificate-identity-regexp '^https://github\.com/latere-ai/ci/\.github/workflows/service-release\.yml@' \
-  --certificate-github-workflow-repository latere-ai/platform
+  --certificate-github-workflow-repository latere-ai/example
 ```
 
 Every release carries two CycloneDX 1.6 SBOMs as assets.
 `sbom-source.cdx.json` lists what the lockfiles in the checkout pin,
 development packages included, since they run in the job that holds the
-deploy credential. `sbom-<image>.cdx.json` (`sbom-platformd.cdx.json` for
-`ghcr.io/latere-ai/platformd`) lists what the image holds: the Go modules
+deploy credential. `sbom-<image>.cdx.json` (`sbom-exampled.cdx.json` for
+`ghcr.io/latere-ai/exampled`) lists what the image holds: the Go modules
 compiled into the binary and the base image's packages. The signing, the
 image SBOM and the attestations are the shared `sign-image` step, the same
 one `image-build.yml` runs.
@@ -559,16 +668,16 @@ not kept anywhere else:
 
 ```bash
 kubectl apply -f deploy/bootstrap/rollout-identity.yaml
-NS=latere SA=<service>-rollout
+NS=<namespace> SA=<service>-rollout
 kubeconfig=$(mktemp) && chmod 600 "$kubeconfig"
-KUBECONFIG="$kubeconfig" kubectl config set-cluster latere-k8s \
+KUBECONFIG="$kubeconfig" kubectl config set-cluster production \
   --server="$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')"
-KUBECONFIG="$kubeconfig" kubectl config set clusters.latere-k8s.certificate-authority-data \
+KUBECONFIG="$kubeconfig" kubectl config set clusters.production.certificate-authority-data \
   "$(kubectl -n "$NS" get secret "$SA-token" -o jsonpath='{.data.ca\.crt}')"
 KUBECONFIG="$kubeconfig" kubectl config set-credentials "$SA" \
   --token="$(kubectl -n "$NS" get secret "$SA-token" -o jsonpath='{.data.token}' | base64 -d)"
 KUBECONFIG="$kubeconfig" kubectl config set-context "$SA" \
-  --cluster=latere-k8s --user="$SA" --namespace="$NS"
+  --cluster=production --user="$SA" --namespace="$NS"
 KUBECONFIG="$kubeconfig" kubectl config use-context "$SA"
 KUBECONFIG="$kubeconfig" kubectl apply -k deploy/prod --dry-run=server  # or -f
 gh secret set DEPLOY_KUBECONFIG --repo <owner>/<repo> < "$kubeconfig"
@@ -597,6 +706,7 @@ jobs:
     uses: latere-ai/ci/.github/workflows/image-build.yml@v1
     permissions: { contents: read, actions: read, packages: write, id-token: write, attestations: write }
     with:
+      verify_workflow: ci.yml   # the per-push caller `lateregate init` writes
       image_1: '{"name": "exampled", "version_args": "version"}'
   conformance:            # the repository's own, against the digests
     needs: build
@@ -615,7 +725,7 @@ jobs:
     permissions: { contents: write, packages: write, id-token: write }
     with:
       images: ${{ needs.build.outputs.images }}
-      evidence: '*-evidence'
+      evidence: ${{ needs.deploy.result == 'success' && '*-evidence' || '' }}
   verify:
     needs: publish
     if: ${{ always() && needs.publish.result == 'success' }}
@@ -625,24 +735,28 @@ jobs:
       images: exampled
 ```
 
-**`image-build.yml`**, one job, so a release queues on the self-hosted
+**`image-build.yml`**, one job, so a release queues on a self-hosted
 runner once:
 
-1. The tagged commit's `verify.yml` run on its branch push succeeded. A
-   run still going is waited for up to `wait_minutes`: by default 60
-   minutes on a GitHub-hosted runner, while on the self-hosted runner,
-   whose two slots the run it waits for needs, the release refuses at once
+1. The tagged commit's push runs of `verify_workflow` passed: one
+   succeeded and none failed, on whichever branch the commit was pushed
+   to, and a run that failed and was re-run to a pass counts as passed.
+   The workflow is `verify.yml` by default, so a repository whose
+   per-push caller is the `ci.yml` that `lateregate init` writes sets
+   `verify_workflow: ci.yml`. A run still going is waited for up to `wait_minutes`: by default 60
+   minutes on a GitHub-hosted runner, while on a self-hosted runner,
+   where waiting would hold a slot the awaited run needs, the release refuses at once
    and prints the command that re-runs it once the run is green. A
-   cancelled run refuses, since the commit was never verified. A commit
-   that changes only `skip_paths` (`specs/*` and `*.md`) carries its
-   parent's code, so where its own run is missing, still going or
-   cancelled, its parent is read instead. That covers the commit
+   canceled run refuses, since the commit was never verified. A commit
+   that changes only `skip_paths` (`specs/*` and `*.md`; a file renamed
+   out of a code path is a code change) carries its parent's code, so where its own run is missing, still going or
+   canceled, its parent is read instead. That covers the commit
    `lateregate release` cuts, which changes `CHANGELOG.md` alone and is
    pushed with its tag, so its own run has only just started. A run that
    concluded on the commit itself still decides. Every other workflow the
    same branch push ran must have passed too, such as one holding a check
    the shared gate cannot host yet: one still running is waited for the
-   same way, and a failed or cancelled one refuses. A workflow whose run
+   same way, and a failed or canceled one refuses. A workflow whose run
    skipped every job, or that did not run on the commit, has no say.
 2. The tag carries no build metadata, is on the default branch, and has a
    `CHANGELOG.md` section. The namespace is `namespace`, else the
@@ -761,11 +875,13 @@ Output: `evidence`, the smoke's Markdown.
 
 **The secret.** The stage's secret is `DEPLOY_KUBECONFIG`, the name
 `service-release.yml` uses, built as in [Deploy credential](#deploy-credential).
-A reusable workflow reads only the secrets it declares, so a caller whose
-secret has another name maps it, as above:
+A called workflow sees the secrets its caller passes: one mapped to a name
+it declares, or under `secrets: inherit` every secret the caller has. A
+caller whose secret has another name maps it, as above:
 `DEPLOY_KUBECONFIG: ${{ secrets.ARCA_KUBECONFIG }}` for arca,
 `${{ secrets.ORIGO_KUBECONFIG }}` for origo, with no secret renamed. A caller
-whose secret is already named `DEPLOY_KUBECONFIG` can write `secrets: inherit`.
+whose secret is already named `DEPLOY_KUBECONFIG` still maps it, since
+`secrets: inherit` would hand the stage every other secret too.
 The secret is required: a call that maps nothing fails when it starts,
 naming it.
 
@@ -775,8 +891,9 @@ tagged commit), `DEPLOY_URL` (this run) and `OUTPUT_MD` set, and writes its
 Markdown evidence to `OUTPUT_MD`. It exits non-zero until the service serves
 `TAG`, and it is safe to run again, because the stage runs it again every
 `smoke_interval` seconds until it passes or `smoke_timeout` seconds have
-passed; `0` runs it once. The last run's `OUTPUT_MD` is the evidence, and
-it is appended to the step summary.
+passed; `0` runs it once. An attempt still running when `smoke_timeout`
+is up is stopped. The last run's `OUTPUT_MD` is the evidence, and it is
+appended to the step summary, after a failed smoke too.
 
 **Recreate.** A core on the `Recreate` strategy (limen) stops its only Pod
 before the new one is ready, so the rollout can return before the ingress
@@ -787,7 +904,10 @@ longer than two minutes to start.
 **The evidence reaches the release** through the artifact: the caller's
 `image-publish.yml` takes `evidence: '*-evidence'` and appends every `.md`
 file in the matching artifacts to the release body, so the smoke follows a
-conformance artifact that matches the same pattern. A failure to store the
+conformance artifact that matches the same pattern. A pattern that matches
+no file fails the publish, so a caller whose deploy can be skipped and
+whose other jobs upload no evidence passes the pattern only when the deploy
+ran: `evidence: ${{ needs.deploy.result == 'success' && '*-evidence' || '' }}`. A failure to store the
 artifact fails the job, since nothing else carries the evidence.
 
 **What the rollout identity needs.** The kubeconfig's ServiceAccount holds
@@ -834,8 +954,9 @@ A repository whose release the stages do not fit calls the actions
 directly, as `latere-ai/ci/actions/<name>@v1`, inside jobs of its own; its
 signatures then name its own workflow. Tool versions (cosign, syft, gh,
 the note reader, kubectl, kustomize) are defined once, in
-[`actions/lib/versions.sh`](actions/lib/versions.sh), and every stage takes
-an input to override each.
+[`actions/lib/versions.sh`](actions/lib/versions.sh). A stage takes an
+input to override each tool it fetches, except gh in `image-build.yml` and
+`cli-release.yml`, which always runs the pinned version.
 
 ## Releasing a command-line tool: `cli-release.yml`
 
@@ -846,8 +967,7 @@ jobs:
     secrets: inherit
 ```
 
-`verified` checks that the tagged commit passed its per-push gate on the
-branch push, with the shared `verified-commit` step, then `test` runs on
+`verified` checks that the tagged commit passed its per-push gate, with the shared `verified-commit` step, then `test` runs on
 each extra runner in `test_os` (macOS, for a darwin binary), then
 `goreleaser` builds the binaries from the repository's own
 `.goreleaser.yaml` and publishes the release with the changelog section as
@@ -857,10 +977,10 @@ that run rather than repeating it. The per-push gate is the workflow that
 calls `lateregate.yml`, found in `.github/workflows`, or the file named in
 `verify_workflow`.
 
-Inputs: `go_version`, `goreleaser_version` (default `v2.17.1`),
+Inputs: `go_version`, `goreleaser_version` (default `v2.19.0`),
 `lateregate_version`, `run_tests`, `test_os` (empty: no extra runners),
 `verify_workflow`, `wait_minutes` (default: `60` on a GitHub-hosted
-runner, `0` on the self-hosted one) and `runs_on`.
+runner, `0` on a self-hosted one) and `runs_on`.
 `run_lint` and `golangci_version` are accepted and ignored. The caller
 grants `contents: write` and `actions: read`.
 
@@ -1006,8 +1126,8 @@ run new code with that access in every caller at once. A SHA cannot be
 repointed. For the same reason no step fetches a tool at `latest`: Bun,
 GoReleaser, kubectl, gh, cosign, syft and the changelog reader are
 explicit inputs with pinned defaults, and the TypeScript enum gate pins Bun in
-`lateregate.yml`. The one exception is the release `ci-gate-bump.yml`
-exists to try, the repository's own gate: it is resolved to an exact
+`lateregate.yml`. The one exception is the ci-gate release
+`ci-gate-bump.yml` exists to try, the repository's own gate: it is resolved to an exact
 version, verified against the Go checksum database, run with no token in
 its environment or in the checkout, and lands only as an exact pin in a
 commit.
@@ -1036,7 +1156,7 @@ to know:
 
 ```bash
 tools/repo-settings.sh apply my-new-repo             # one repository, or a list
-tools/repo-settings.sh apply lux auth latere-ai/topos
+tools/repo-settings.sh apply lux arca latere-ai/topos
 tools/repo-settings.sh check --all                   # exits 1 and names each drifted field
 tools/repo-settings.sh apply --all
 ```
@@ -1047,10 +1167,15 @@ organization and `REPO_SETTINGS_POLICY` the policy file. Archived
 repositories are read-only on the GitHub API, so they are reported and
 skipped. GitHub refuses to disable projects on a repository that still
 owns classic projects: that repository is retried without `has_projects`,
-reported as `PARTIAL`, and every other setting still lands. Both commands
+reported as `PARTIAL`, and every other setting still lands; the summary
+counts partial repositories apart, and they leave the exit status 0. Any
+other refused write, a repository listing that fails partway, or a policy
+file or API answer that is not JSON fails the command. Both commands
 run on your own `gh` credentials, so no token is stored anywhere.
 
 ## Contributing
 
 [`CONTRIBUTING.md`](CONTRIBUTING.md) covers the local checks, how the
 workflows are tested, and how a version is cut and reaches callers.
+Report a vulnerability as [`SECURITY.md`](SECURITY.md) says, never in a
+public issue.
