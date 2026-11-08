@@ -34,7 +34,7 @@ on:
         type: string
         default: "1.27"
       runs_on:
-        description: "Runner for both jobs. By default the organization's runner policy picks the label (README, Runners): ubuntu-latest for every repository, and never a self-hosted label for a pull request. A label passed here overrides the policy."
+        description: "Runner for both jobs. Every job runs on a GitHub-hosted runner unless a label is passed here (README, Runners)."
         required: false
         type: string
         default: ${{ (github.event.repository.private || contains(fromJSON('["push","schedule","workflow_dispatch","release"]'), github.event_name)) && (vars.CI_RUNNER_PRIVATE || vars.CI_RUNNER_PUBLIC) || 'ubuntu-latest' }}

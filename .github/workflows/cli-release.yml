@@ -26,7 +26,7 @@ on:
   workflow_call:
     inputs:
       runs_on:
-        description: "Runner label for the non-matrix jobs; the test matrix follows test_os. By default the organization's runner policy picks the label (README, Runners): ubuntu-latest for every repository, and never a self-hosted label for a pull request. A label passed here overrides the policy."
+        description: "Runner label for the non-matrix jobs; the test matrix follows test_os. Every job runs on a GitHub-hosted runner unless a label is passed here (README, Runners)."
         required: false
         type: string
         default: ${{ (github.event.repository.private || contains(fromJSON('["push","schedule","workflow_dispatch","release"]'), github.event_name)) && (vars.CI_RUNNER_PRIVATE || vars.CI_RUNNER_PUBLIC) || 'ubuntu-latest' }}
