@@ -82,6 +82,16 @@ if DIR="$TMP/dist" bash "$REPO_ROOT/actions/signed-checksums/run.sh" > /dev/null
 else
     fail "signed-checksums runs"
 fi
+mkdir -p "$TMP/dash"
+echo a > "$TMP/dash/app.tar.gz"
+echo n > "$TMP/dash/-notes.txt"
+if out=$(DIR="$TMP/dash" bash "$REPO_ROOT/actions/signed-checksums/run.sh" 2>&1) \
+    && [ "$(awk '{print $2}' "$TMP/dash/checksums.txt" | tr '\n' ' ')" = "-notes.txt app.tar.gz " ] \
+    && (cd "$TMP/dash" && sha256sum -c -- checksums.txt > /dev/null 2>&1); then
+    pass "signed-checksums sums a file whose name starts with a dash"
+else
+    fail "signed-checksums sums a file whose name starts with a dash ($out)"
+fi
 mkdir -p "$TMP/dist/unpacked"
 if out=$(DIR="$TMP/dist" bash "$REPO_ROOT/actions/signed-checksums/run.sh" 2>&1); then
     fail "signed-checksums refuses a directory among the files"

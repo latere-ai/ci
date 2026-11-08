@@ -22,7 +22,8 @@ if [ "${#files[@]}" -eq 0 ]; then
     echo "::error::$DIR holds no file to sum" >&2
     exit 1
 fi
-sha256sum "${files[@]}" > checksums.txt
+# The names were stripped of "./", so one starting with "-" needs the --.
+sha256sum -- "${files[@]}" > checksums.txt
 cat checksums.txt
 rm -f checksums.txt.sigstore.json
 cosign sign-blob --yes --bundle checksums.txt.sigstore.json checksums.txt
