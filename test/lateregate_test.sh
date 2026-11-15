@@ -5,7 +5,7 @@
 #
 # The probe's plan step turns `lateregate list -json` into two outputs: the
 # gates that get jobs of their own on a hosted runner, and the systems the
-# plain test matrix runs on. On the self-hosted runner the all gates passed
+# plain test matrix runs on. On a self-hosted runner the all gates passed
 # job lists the running gates itself and runs them one after another. A step
 # that dropped a gate would skip it silently, which is the vacuous pass the
 # whole design refuses, so both directions are tested against canned plans,
@@ -412,12 +412,12 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# One job on the self-hosted runner. Each job a run adds there is one more
+# One job on a self-hosted runner. Each job a run adds there is one more
 # wait for one of a few runner slots, so on a self-hosted label with the
 # default test_os the run is the passed job alone: the probe, the gate jobs
 # and the hosted wiring check are skipped, and the test matrix, which needs
 # the probe, with them. A new job, or a condition that lets one of these run
-# on the self-hosted runner, is a queue wait added to every private push.
+# on a self-hosted runner, is a queue wait added to every private push.
 # ---------------------------------------------------------------------------
 echo "one job on the self-hosted runner"
 
@@ -563,7 +563,7 @@ else
 fi
 
 # Every job except the test matrix runs where runs_on says, so a repository
-# that adopts the self-hosted runner moves the whole pipeline with one input.
+# that adopts a self-hosted runner moves the whole pipeline with one input.
 # A bare ubuntu-latest on a job would pin that job to hosted runners.
 fixed=$(grep -cE '^\s+runs-on: ubuntu-latest$' "$WORKFLOW")
 routed=$(grep -cF 'runs-on: ${{ inputs.runs_on }}' "$WORKFLOW")

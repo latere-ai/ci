@@ -2,7 +2,7 @@
 #
 # Grep assertions over service-release.yml for the runner contract: every
 # job routes through inputs.runs_on, every setup-go caches only on a hosted
-# runner, and the tools a hosted runner ships but the self-hosted VM does
+# runner, and the tools a hosted runner ships but a self-hosted runner does
 # not (Node, kubectl, gh) are set up or fetched at a pinned version rather
 # than assumed. A job left on a bare ubuntu-latest would keep one leg of a
 # release on hosted minutes after a consumer moved to its own runner.
@@ -231,7 +231,7 @@ fi
 
 # The deploy authenticates as the consumer's rollout identity, a
 # namespace-bound ServiceAccount, through DEPLOY_KUBECONFIG. The file goes
-# under RUNNER_TEMP at mode 600: on the self-hosted runner a kubeconfig under
+# under RUNNER_TEMP at mode 600: on a self-hosted runner a kubeconfig under
 # $HOME would outlive the job and be readable from the other slot. Once the
 # deploy steps are done it is removed, even when one of them failed, so the
 # smoke script, the CLI build and the note reader never hold it.

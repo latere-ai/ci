@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Puts the GitHub CLI on PATH for the steps after this one. Hosted runners
-# ship gh; the self-hosted runner ships docker, git, jq and curl and nothing
+# ship gh; a self-hosted runner ships docker, git, jq and curl and nothing
 # else, so there the pinned release is fetched and verified against its
 # checksums file, into a directory that exists for this job alone.
 set -euo pipefail

@@ -322,7 +322,7 @@ jobs:
       # under real Node, the runtime they are built and tested for. Without
       # it bun stands in a node shim, which is not Node: a type checker
       # under it has checked no files and reported nothing. Hosted runners
-      # ship Node, the self-hosted VM does not.
+      # ship Node, a self-hosted runner does not.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: ${{ (inputs.build_mode == 'split' && inputs.has_frontend) || inputs.build_cli }}
         with:
@@ -461,7 +461,7 @@ jobs:
           cosign_version: ${{ steps.versions.outputs.cosign }}
           syft_version: ${{ steps.versions.outputs.syft }}
 
-      # Hosted runners ship kubectl; the self-hosted VM does not. The shared
+      # Hosted runners ship kubectl; a self-hosted runner does not. The shared
       # step fetches the pinned release for the runner's architecture with
       # its published sha256, into a directory that exists for this job alone.
       - name: Ensure kubectl

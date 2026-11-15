@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# The self-hosted runner ships docker, git, jq and curl, and no GitHub CLI.
+# A self-hosted runner ships docker, git, jq and curl, and no GitHub CLI.
 # A job in a reusable workflow that calls gh therefore fetches the pinned
 # release first, in the same job; without it the job passes on a hosted
 # runner and fails on the self-hosted one, which is where the runner policy
@@ -46,7 +46,7 @@ for f in $(grep -l '^  workflow_call:$' "$WORKFLOWS"/*.yml); do
 done
 
 # A shared step whose script calls gh runs ensure-gh first, in its own
-# action, so a stage on the self-hosted runner gets gh wherever it is used.
+# action, so a stage on a self-hosted runner gets gh wherever it is used.
 for dir in "$REPO_ROOT"/actions/*/; do
     action=$(basename "$dir")
     [ "$action" = ensure-gh ] || [ "$action" = lib ] && continue

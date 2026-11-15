@@ -16,7 +16,7 @@ name: image-build
 #       with:
 #         images: ${{ needs.build.outputs.ref_1 }}@${{ needs.build.outputs.digest_1 }}
 #
-# Flow (one job, so a release queues on the self-hosted runner once): the
+# Flow (one job, so a release queues on a self-hosted runner once): the
 # tagged commit passed verify -> the tag, its CHANGELOG section and the
 # namespace check out -> the repository's archives, when it builds any ->
 # each image built and pushed by digest under no tag, its version checked,
@@ -227,7 +227,7 @@ jobs:
 
       # Three fixed slots: an attestation step takes one image, and a job
       # cannot loop over steps. A matrix job per image would queue once per
-      # image on the self-hosted runner and could not output a digest per
+      # image on a self-hosted runner and could not output a digest per
       # image.
       - id: image_1
         uses: ./.latere-ci/actions/image-by-digest

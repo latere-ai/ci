@@ -2,7 +2,7 @@
 #
 # The runner contract, across every reusable workflow rather than one at a
 # time. The organization's policy decides where a job runs: a private
-# repository on the self-hosted runner, falling back to a hosted one while
+# repository on a self-hosted runner, falling back to a hosted one while
 # that runner is offline; a public repository on a hosted runner, falling
 # back to the self-hosted one only for events the repository itself starts.
 # Each reusable workflow carries that policy as its runs_on default, and
@@ -125,7 +125,7 @@ else
     fail "README's runner policy differs from the workflows'"
 fi
 
-# The events on which a public repository may reach the self-hosted runner.
+# The events on which a public repository may reach a self-hosted runner.
 # Each is one only the repository itself can start: a pull request, and any
 # event a fork's pull request can set off, would run outside code there.
 events=$(printf '%s' "$POLICY" | sed -n "s/.*fromJSON('\(\[[^]]*\]\)').*/\1/p" | tr -d '[]"' | tr ',' ' ')

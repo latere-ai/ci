@@ -141,7 +141,7 @@ stub_gh_fixture "$W" "repos/$REPO/commits/$SHA" "{\"parents\":[{\"sha\":\"$PAREN
 stub_gh_fixture "$W" "repos/$REPO/compare/$PARENT...$SHA" '{"files":[{"filename":"main.go"}]}'
 WAIT=0 run_case "wait_minutes 0 refuses a running verify with the re-run command" 1 "gh run rerun 42 --failed --repo $REPO"
 
-# An empty wait is the runner's: the self-hosted runner refuses at once, a
+# An empty wait is the runner's: a self-hosted runner refuses at once, a
 # hosted one waits.
 new_case
 stub_gh_fixture "$W" "$(runs_url $SHA)" "$(runs main:null)"

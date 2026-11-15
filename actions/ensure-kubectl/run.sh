@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Puts kubectl on PATH for the steps after this one. Hosted runners ship
-# kubectl; the self-hosted runner does not, so there the pinned release is
+# kubectl; a self-hosted runner does not, so there the pinned release is
 # fetched with its published sha256, into a directory that exists for this
 # job alone.
 set -euo pipefail

@@ -13,7 +13,7 @@ name: lateregate
 # binary which gates apply (`lateregate list -json`) and runs exactly those,
 # so a repository adopts a gate by pinning a version that has it, not by
 # editing YAML here or a Makefile there. A hosted runner gives each gate a
-# job of its own; the self-hosted runner runs all of them in one job. A
+# job of its own; a self-hosted runner runs all of them in one job. A
 # waived or inapplicable gate does not run, and its reason is in the plan's
 # log rather than a green step over nothing.
 #
@@ -195,7 +195,7 @@ jobs:
               else . end)
             end')
           # A hosted runner gives every gate a job of its own, side by side. On
-          # the self-hosted runner a job is a turn on one of a few runner slots,
+          # a self-hosted runner a job is a turn on one of a few runner slots,
           # so the all gates passed job runs every gate itself and none gets a
           # job here.
           if [ "$HOSTED" = true ]; then
@@ -213,7 +213,7 @@ jobs:
           fi
           # test has its own OS matrix. When suite runs, it carries the test run on
           # runs_on, so the matrix keeps only the other systems, and they run plain
-          # test rather than the instrumented suite. On the self-hosted runner the
+          # test rather than the instrumented suite. On a self-hosted runner the
           # all gates passed job also runs plain test on runs_on when the plan has
           # it, so there too the matrix keeps only the other systems.
           suite=$(printf '%s\n' "$plan" | jq -r '[.[] | select(.status == "run" and .name == "suite")] | length > 0')
@@ -309,7 +309,7 @@ jobs:
 
   # One job per gate on a hosted runner, named for it, so a failure names
   # itself in the checks list and the slow gates run beside each other. The
-  # probe gives this job no gate on the self-hosted runner.
+  # probe gives this job no gate on a self-hosted runner.
   gate:
     name: ${{ matrix.gate }}
     needs: probe
@@ -450,7 +450,7 @@ jobs:
 
   # The wiring check: caller, hook, gitignore, pin, no hand-rolled gate
   # target. It runs whether or not a gate fails, because the two call for
-  # different work. On the self-hosted runner it runs last in the all gates
+  # different work. On a self-hosted runner it runs last in the all gates
   # passed job.
   contract:
     name: wiring is in shape
@@ -520,7 +520,7 @@ jobs:
   # under one name. It runs whatever happened above and passes only when
   # every job it needs succeeded or was skipped because it did not apply.
   #
-  # On the self-hosted runner it is also the whole bar. A job there is a turn
+  # On a self-hosted runner it is also the whole bar. A job there is a turn
   # on one of a few runner slots, and with every slot busy each job a run
   # adds is one more wait in the queue: a probe, then gate jobs, then this
   # check made three waits per push. So here this job reads the plan itself
@@ -534,7 +534,7 @@ jobs:
   # runner, which branch protection reads: there the job runs and fails. A
   # push run is cancelled when a newer push to the ref supersedes it through
   # the caller's concurrency group, or when GitHub delivers one push twice,
-  # and its conclusion already says so. On the self-hosted runner the job is
+  # and its conclusion already says so. On a self-hosted runner the job is
   # the gates, and a cancelled one stops them and reports cancelled.
   passed:
     name: all gates passed
