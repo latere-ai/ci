@@ -102,6 +102,10 @@ VERSION_ARGS=version STUB_VERSION=$'ponsd v1.2.0\nbuilt 2026-11-01' run_case "a 
 
 VERSION_ARGS=-version VERSION_EXPECT="luxd {tag}" STUB_VERSION="luxd v1.2.0" run_case "version_expect names a binary other than the image" 0 "it reports: luxd v1.2.0"
 
+# An expected text that ends with a delimiter of its own ends the tag there.
+VERSION_ARGS=-version VERSION_EXPECT="limend {tag} (" STUB_VERSION="limend v1.2.0 (0c15f88, 2026-11-15T12:57:05Z)" run_case "a version_expect ending in its own delimiter passes" 0 "it reports: limend v1.2.0 (0c15f88"
+VERSION_ARGS=-version VERSION_EXPECT="limend {tag} (" STUB_VERSION="limend v1.2.00 (0c15f88, 2026-11-15T12:57:05Z)" run_case "a delimited version_expect still refuses v1.2.00 for v1.2.0" 1 "and the tag pins 'limend v1.2.0 ('"
+
 VERSION_ARGS="" run_case "an empty version_args skips the check" 0 "the candidate is ghcr.io/latere-ai/ponsd@sha256:abc123"
 if grep -q "^run " "$TMP/docker.calls"; then
     fail "an empty version_args runs nothing"

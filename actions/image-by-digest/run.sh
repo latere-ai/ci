@@ -59,15 +59,22 @@ if [ -n "${VERSION_ARGS:-}" ]; then
     # shellcheck disable=SC2086
     got=$(docker run --rm "${ref}@${digest}" $VERSION_ARGS 2>&1) \
         || die "${ref}@${digest} exited non-zero when asked for its version: $got"
-    # The output starts with the expected text and the tag ends there, at the
-    # end of the output or at whitespace: v1.2.30 and v1.2.3-dirty are not
-    # v1.2.3.
+    # The output starts with the expected text. Where that text ends with the
+    # tag, the tag ends there too, at the end of the output or at whitespace:
+    # v1.2.30 and v1.2.3-dirty are not v1.2.3. Where it ends with a delimiter
+    # of its own, such as the "(" of "limend {tag} (", the delimiter is the
+    # boundary.
     ok=""
     case "$got" in
         "$expect"*)
             rest=${got#"$expect"}
-            case "$rest" in
-                '' | [[:space:]]*) ok=1 ;;
+            case "$expect" in
+                *[[:alnum:]._+-])
+                    case "$rest" in
+                        '' | [[:space:]]*) ok=1 ;;
+                    esac
+                    ;;
+                *) ok=1 ;;
             esac
             ;;
     esac
