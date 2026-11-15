@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v1.39.0 - 2026-11-15
+
 - Built with Go 1.27.4, which fixes GO-2026-6859.
 - **A release whose `version_expect` ends in its own delimiter passes again.**
   Since v1.38.0 the version check refused `limend v0.10.0 (0c15f88, ...)` for
