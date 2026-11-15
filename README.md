@@ -251,12 +251,12 @@ base.
 `bun install --frozen-lockfile` and `bunx playwright install --with-deps
 chromium` in `<dir>`. A failed browser install does not fail its step's job:
 the gate fails on the test that needs the browser. A hosted gate job installs
-what its own gate needs; on a self-hosted runner `all gates passed`
+what its own gate needs; on a self-hosted label `all gates passed`
 installs what any running gate needs. With a pinned `lateregate` that has no
 `needs`, `enum-typescript` and `frontend` get Node and Bun, and `frontend`
 gets the browser from `frontend_browser_package`. The `test` entry's `os`
-lists the systems `test` runs on; without it, `test_os` does. On the
-self-hosted runner the test matrix needs the probe, which runs only when
+lists the systems `test` runs on; without it, `test_os` does. On a self-hosted
+label the test matrix needs the probe, which runs only when
 `test_os` names another system, so a plan whose `os` names one the probe did
 not run for fails `all gates passed` instead of dropping that system.
 
@@ -278,7 +278,7 @@ On a hosted runner each gate gets a job:
 | `wiring is in shape` | `lateregate contract` |
 | `all gates passed` | after every other job, whatever they did, except in a canceled push run: passes when each one succeeded or was skipped, and fails on a failure or a cancellation |
 
-On a self-hosted runner one job does all of it:
+On a self-hosted label one job does all of it:
 
 | Job | Runs |
 | --- | --- |
@@ -306,10 +306,9 @@ separate `test`, `race`, `cover`, `tempdir` and `hermetic` gates; with a
 `suite` adds the race detector and coverage and a macOS minute bills at
 ten times a Linux one.
 
-On a self-hosted runner a job is a turn on one of a few runner slots, and
-while every slot is busy each job a run adds is one more wait in the
-queue. A probe, then the gate jobs, then the result check made three waits
-a push, so there `all gates passed` reads the plan itself and runs every
+A self-hosted runner has a few job slots, and while every slot is busy each
+job a run adds waits in the queue. A probe, then the gate jobs, then the
+result check would be three waits a push, so there `all gates passed` reads the plan itself and runs every
 gate in turn: each in a log group of its own, each run whether another
 failed, each a row in the step summary with its result and time, and each
 named in an annotation when it fails. A failed TypeScript setup fails
@@ -485,8 +484,8 @@ pipeline sign the image with the run's OIDC identity, and
 `attestations: write` lets it attest the image in a public repository; a
 caller that grants neither fails at startup the same way.
 
-The run is one job, so on a busy self-hosted runner a release waits for
-a slot once rather than before every stage. Its steps run in order, and a
+The run is one job, so on a self-hosted runner a release waits for a slot
+once rather than before every stage. Its steps run in order, and a
 failed step skips the rest. The first is the shared `verified-commit`
 step: the tagged commit's push runs of the per-push gate must have
 passed, read and waited for exactly as in
